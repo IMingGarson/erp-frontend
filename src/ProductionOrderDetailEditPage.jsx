@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, Save, Loader2 } from "lucide-react";
 import { fetchWithAuth } from "./utils/fetchWithAuth";
-import CustomDialog from "./components/CustomDialog";
+import CustomDialog from "./components/customDialog";
 
 const formatNum = (num, type) => {
   if (num === null || num === undefined || isNaN(num) || num === "") return "0";

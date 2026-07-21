@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
-import CustomDialog from "./components/CustomDialog";
+import CustomDialog from "./components/customDialog";
 import { ChevronDown, ChevronRight, Printer } from "lucide-react";
 import { fetchWithAuth } from "./utils/fetchWithAuth";
 import { useNavigate } from "react-router-dom";

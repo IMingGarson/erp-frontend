@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import CustomDialog from "./components/CustomDialog";
+import CustomDialog from "./components/customDialog";
 import { fetchWithAuth } from "./utils/fetchWithAuth";
 import { CompanyLogo } from "./components/companyLogo";
 

@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { fetchWithAuth } from "./utils/fetchWithAuth";
-import CustomDialog from "./components/CustomDialog";
+import CustomDialog from "./components/customDialog";
 
 const TYPE_CONFIG = {
   RAW: {

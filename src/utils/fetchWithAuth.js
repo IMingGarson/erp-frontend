@@ -1,6 +1,7 @@
 import { useAuthStore } from "../store/authStore";
 
-const DEBUG = false;
+const apiUrl = import.meta.env.VITE_API_BASE_URL;
+const DEBUG = import.meta.env.VITE_DEBUG === "true";
 
 export const fetchWithAuth = async (url, options = {}) => {
   let accessToken = localStorage.getItem("access_token");
@@ -20,7 +21,7 @@ export const fetchWithAuth = async (url, options = {}) => {
   };
 
   let response = await fetch(
-    DEBUG ? `http://localhost:8000${url}` : url,
+    DEBUG ? `http://localhost:8000${url}` : `${apiUrl}${url}`,
     config,
   );
 

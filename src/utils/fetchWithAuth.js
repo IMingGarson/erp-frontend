@@ -1,7 +1,8 @@
 import { useAuthStore } from "../store/authStore";
 
+const DEBUG = false;
+
 export const fetchWithAuth = async (url, options = {}) => {
-  const DEBUG = true;
   let accessToken = localStorage.getItem("access_token");
 
   const headers = {

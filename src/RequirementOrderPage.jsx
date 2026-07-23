@@ -324,7 +324,6 @@ const RequirementOrderPage = () => {
 
       return currentDraftId;
     };
-
     buildDrafts(selectedProduct, targetQty, motherId);
     setMotherOrderNumber(motherId);
     generatedItems.reverse();
@@ -557,7 +556,6 @@ const RequirementOrderPage = () => {
     const rootItems = orderItems.filter(
       (item) => !String(item.id).includes("-"),
     );
-    console.log(rootItems);
     const previewData = rootItems.map((item) => ({
       _tempId: item.id,
       order_date: getTodayString(true),
@@ -686,7 +684,6 @@ const RequirementOrderPage = () => {
 
   const handlePrintOrder = (order, e) => {
     if (e) e.stopPropagation();
-    console.log("d", order);
     setPrintData(order);
     setTimeout(() => {
       const originalTitle = document.title;
@@ -1024,7 +1021,6 @@ const RequirementOrderPage = () => {
       </div>
     );
   };
-  console.log("mrpPlans", mrpPlans);
   if (loading && materials.length === 0)
     return (
       <div className="flex justify-center items-center h-screen bg-slate-50">

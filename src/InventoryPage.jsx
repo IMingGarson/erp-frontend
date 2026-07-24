@@ -535,7 +535,7 @@ const InventoryPage = () => {
           </li>
         </ul>
       </div>
-      <div className="flex space-x-1 bg-slate-200/50 p-1 rounded-lg mb-6 w-fit">
+      <div className="flex space-x-1 bg-slate-200/50 p-1 rounded-lg w-fit">
         <button
           onClick={() => setActiveTab("list")}
           className={`px-6 py-2 rounded-md text-sm font-medium transition-all ${
@@ -560,7 +560,7 @@ const InventoryPage = () => {
 
       {activeTab === "list" && (
         <>
-          <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+          {/* <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4 border-b border-slate-100 pb-4">
               <h3 className="text-lg font-bold text-slate-800 truncate pr-4">
                 {selectedStatItem ? `${selectedStatItem} 庫存分析` : "庫存分析"}
@@ -646,7 +646,7 @@ const InventoryPage = () => {
                 )}
               </div>
             </div>
-          </div>
+          </div> */}
 
           <div className="flex flex-col md:flex-row justify-between items-center gap-4 p-4">
             <input

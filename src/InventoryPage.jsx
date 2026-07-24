@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { fetchWithAuth } from "./utils/fetchWithAuth";
 import CustomDialog from "./components/customDialog";
+import { useAuthStore } from "./store/authStore";
 
 const TYPE_CONFIG = {
   RAW: {
@@ -169,6 +170,8 @@ const InventoryPage = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const itemsPerPage = 20;
+  const isAdmin = useAuthStore((state) => state.isAdmin());
+
   const [dialog, setDialog] = useState({
     isOpen: false,
     type: "alert",
@@ -656,12 +659,14 @@ const InventoryPage = () => {
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full md:w-96 px-4 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
             />
-            <button
-              onClick={() => setIsAddModalOpen(true)}
-              className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-md shadow-sm transition-colors text-sm font-medium whitespace-nowrap w-full md:w-auto"
-            >
-              + 新增批號
-            </button>
+            {isAdmin && (
+              <button
+                onClick={() => setIsAddModalOpen(true)}
+                className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-md shadow-sm transition-colors text-sm font-medium whitespace-nowrap w-full md:w-auto"
+              >
+                + 新增批號
+              </button>
+            )}
           </div>
 
           <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden mb-4 min-h-[400px]">

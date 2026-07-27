@@ -10,7 +10,6 @@ import {
   Trash2,
 } from "lucide-react";
 
-// --- 工具函數 ---
 const getTodayString = (formatted = false) => {
   const d = new Date();
   const yyyy = d.getFullYear();
@@ -65,15 +64,11 @@ const RequirementOrderPage = () => {
   const [mrpPlans, setMrpPlans] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [dailySequence, setDailySequence] = useState(1);
+  const [coDailySequence, setCoDailySequence] = useState(1);
 
   const [activeMainTab, setActiveMainTab] = useState("create");
-  const logisticsOptions = [
-    "回頭車",
-    "新竹物流",
-    "黑貓宅急便",
-    "嘉里物流",
-    "自取",
-  ];
+  const logisticsOptions = ["新竹物流", "黑貓宅急便", "嘉里物流"];
 
   const [vendorData, setVendorData] = useState({
     id: "",
@@ -90,9 +85,8 @@ const RequirementOrderPage = () => {
   const [vendorSearch, setVendorSearch] = useState("");
   const [isVendorDropdownOpen, setIsVendorDropdownOpen] = useState(false);
 
-  // --- 表單項目 State (支援多列) ---
-  const createEmptyRow = () => ({
-    id: `row_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+  const createEmptyRow = (seq = 1) => ({
+    id: `P${getTodayString()}${String(seq).padStart(3, "0")}`,
     product_id: "",
     product_code: "",
     product_name: "",
@@ -129,7 +123,7 @@ const RequirementOrderPage = () => {
   const [productDropdownStyle, setProductDropdownStyle] = useState({});
 
   const [orderItems, setOrderItems] = useState([]);
-  const [activeTabIds, setActiveTabIds] = useState({}); // 記錄每一列當前啟動的 Tab ID
+  const [activeTabIds, setActiveTabIds] = useState({});
 
   const [allocations, setAllocations] = useState({});
   const [expandedMaterials, setExpandedMaterials] = useState([]);
@@ -191,15 +185,26 @@ const RequirementOrderPage = () => {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [matRes, bomRes, batchRes, venRes, mrpRes] = await Promise.all([
-        fetchWithAuth("/api/materials"),
-        fetchWithAuth("/api/boms"),
-        fetchWithAuth("/api/batches"),
-        fetchWithAuth("/api/vendors"),
-        fetchWithAuth("/api/mrp"),
-      ]);
+      const [matRes, bomRes, batchRes, venRes, mrpRes, seqRes, coSeqRes] =
+        await Promise.all([
+          fetchWithAuth("/api/materials"),
+          fetchWithAuth("/api/boms"),
+          fetchWithAuth("/api/batches"),
+          fetchWithAuth("/api/vendors"),
+          fetchWithAuth("/api/mrp"),
+          fetchWithAuth("/api/mrp/daily_sequence"),
+          fetchWithAuth("/api/customer_orders/daily_sequence"),
+        ]);
 
-      if (!matRes.ok || !bomRes.ok || !batchRes.ok || !venRes.ok || !mrpRes.ok)
+      if (
+        !matRes.ok ||
+        !bomRes.ok ||
+        !batchRes.ok ||
+        !venRes.ok ||
+        !mrpRes.ok ||
+        !seqRes.ok ||
+        !coSeqRes.ok
+      )
         throw new Error("資料載入失敗，請確認 API 狀態");
 
       const matJson = await matRes.json();
@@ -207,14 +212,31 @@ const RequirementOrderPage = () => {
       const batchJson = await batchRes.json();
       const venJson = await venRes.json();
       const mrpJson = await mrpRes.json();
+      const seqJson = await seqRes.json();
+      const coSeqJson = await coSeqRes.json();
 
-      setMaterials(matJson.data || []);
+      const loadedMaterials = matJson.data || [];
+      setMaterials(loadedMaterials);
       setBoms(bomJson.data || []);
       setBatches(batchJson.data || []);
       setVendors(venJson.data || []);
 
       const remoteMrp = mrpJson.data || [];
       setMrpPlans(remoteMrp);
+
+      if (seqJson.data && seqJson.data.sequence) {
+        setDailySequence(seqJson.data.sequence);
+        setFormItems((prev) => {
+          if (prev.length === 1 && !prev[0].product_id) {
+            return [createEmptyRow(seqJson.data.sequence)];
+          }
+          return prev;
+        });
+      }
+
+      if (coSeqJson.data && coSeqJson.data.sequence) {
+        setCoDailySequence(coSeqJson.data.sequence);
+      }
 
       let loadedAllocations = {};
       remoteMrp.forEach((plan) => {
@@ -224,18 +246,52 @@ const RequirementOrderPage = () => {
               typeof plan.batch_inventory_info === "string"
                 ? JSON.parse(plan.batch_inventory_info)
                 : plan.batch_inventory_info;
-            const isAllocData = (obj) =>
-              obj &&
-              typeof obj === "object" &&
-              Object.values(obj).some((v) => v && v.batches);
 
-            if (isAllocData(parsedInfo)) {
-              loadedAllocations[plan.id] = parsedInfo;
+            let validAllocObj = {};
+
+            if (Array.isArray(parsedInfo)) {
+              validAllocObj = {
+                _base_qty: parseFloat(plan.required_qty),
+                _productId: plan.product_id,
+              };
+              parsedInfo.forEach((item) => {
+                const mat = loadedMaterials.find(
+                  (m) => m.code === item.code || m.name === item.materialName,
+                );
+                if (mat) {
+                  validAllocObj[mat.id] = item;
+                }
+              });
             } else {
-              const firstKey = Object.keys(parsedInfo)[0];
-              if (firstKey && isAllocData(parsedInfo[firstKey])) {
-                loadedAllocations[plan.id] = parsedInfo[firstKey];
+              const isAllocData = (obj) =>
+                obj &&
+                typeof obj === "object" &&
+                Object.values(obj).some((v) => v && v.batches);
+
+              if (isAllocData(parsedInfo)) {
+                validAllocObj = parsedInfo;
+              } else {
+                const firstKey = Object.keys(parsedInfo)[0];
+                if (firstKey && isAllocData(parsedInfo[firstKey])) {
+                  validAllocObj = parsedInfo[firstKey];
+                }
               }
+
+              // 補回快取識別欄位，防止重整後自動重新計算覆蓋手動修改的結果
+              if (validAllocObj && !validAllocObj._base_qty) {
+                validAllocObj._base_qty = parseFloat(plan.required_qty);
+                validAllocObj._productId = plan.product_id;
+              }
+            }
+
+            const displayId = plan.frontend_temp_id || plan.id;
+            // 只要有除了 _base_qty 和 _productId 以外的真實物料配置就載入
+            if (
+              Object.keys(validAllocObj).filter(
+                (k) => k !== "_base_qty" && k !== "_productId",
+              ).length > 0
+            ) {
+              loadedAllocations[displayId] = validAllocObj;
             }
           } catch (e) {
             console.error("解析 batch_inventory_info 失敗", e);
@@ -335,7 +391,9 @@ const RequirementOrderPage = () => {
 
   // --- 表單列操作 ---
   const handleAddRow = () => {
-    setFormItems((prev) => [...prev, createEmptyRow()]);
+    const nextSeq = dailySequence + 1;
+    setDailySequence(nextSeq);
+    setFormItems((prev) => [...prev, createEmptyRow(nextSeq)]);
   };
 
   const handleRemoveRow = (id) => {
@@ -352,11 +410,25 @@ const RequirementOrderPage = () => {
   const handleToggleProductDropdown = (e, rowId) => {
     if (activeDropdownRow !== rowId) {
       const rect = e.currentTarget.getBoundingClientRect();
-      setProductDropdownStyle({
-        top: `${rect.bottom + 4}px`,
+      const viewportHeight = window.innerHeight;
+
+      const dropdownEstimatedHeight = 260;
+
+      const spaceBelow = viewportHeight - rect.bottom;
+      const spaceAbove = rect.top;
+
+      let dynamicStyle = {
         left: `${rect.left}px`,
         width: `${rect.width}px`,
-      });
+      };
+
+      if (spaceBelow < dropdownEstimatedHeight && spaceAbove > spaceBelow) {
+        dynamicStyle.bottom = `${viewportHeight - rect.top + 4}px`;
+      } else {
+        dynamicStyle.top = `${rect.bottom + 4}px`;
+      }
+
+      setProductDropdownStyle(dynamicStyle);
       setActiveDropdownRow(rowId);
       setProductSearchTerm("");
     } else {
@@ -466,10 +538,11 @@ const RequirementOrderPage = () => {
 
     const applyAllocation = (item, isNewOrder) => {
       const uniqueId = item.id;
-      const productId = isNewOrder ? item.productId : item.product;
-      const qtyValue = isNewOrder ? item.qty : item.required_qty;
+      // 確保從後端計畫或前端新品皆能準確抓到 productId 和所需數量
+      const productId = isNewOrder ? item.productId : item.product_id;
+      const qtyValue = isNewOrder ? item.qty : parseFloat(item.required_qty);
 
-      // 如果有舊的配置，偵測產品或數量是否改變，若有則重新計算以解決更新快取 Bug
+      // 如果有舊的配置，偵測產品或數量是否改變，若有則砍掉重新計算以解決更新快取 Bug
       if (newAllocations[uniqueId]) {
         const currentAlloc = { ...newAllocations[uniqueId] };
 
@@ -719,7 +792,6 @@ const RequirementOrderPage = () => {
       const itemMap = {};
       orderItems.forEach((item) => {
         const cleanBatchInfo = { ...(allocations[item.id] || {}) };
-
         delete cleanBatchInfo._base_qty;
         delete cleanBatchInfo._productId;
 
@@ -746,6 +818,7 @@ const RequirementOrderPage = () => {
         vendor_data: vendorData,
         parent_mrp_payload: rootItems,
       };
+
       let createdParents = [];
       if (rootItems.length > 0) {
         const mrpRes = await fetchWithAuth("/api/mrp/bulk_create_drafts", {
@@ -759,23 +832,22 @@ const RequirementOrderPage = () => {
         createdParents = data?.data?.filter((d) => !d.parent_id) || [];
       }
 
-      const order_number = `CO${getTodayString()}${Math.floor(
-        Math.random() * 1000,
-      )
+      const order_number = `CO${getTodayString()}${coDailySequence
         .toString()
         .padStart(3, "0")}`;
-      let availableParents = [...createdParents];
 
-      for (const item of formItems.filter((i) => i.product_id)) {
-        const pIdx = availableParents.findIndex(
-          (p) => String(p.product) === String(item.product_id),
+      let startingCOSeq = coDailySequence;
+      for (const item of formItems) {
+        const matchedMrp = createdParents.find(
+          (p) => String(p.product_id) === String(item.product_id),
         );
-        let matchedMrpId = null;
-        if (pIdx !== -1) {
-          matchedMrpId = availableParents[pIdx].id;
-          availableParents.splice(pIdx, 1);
+        if (!matchedMrp) {
+          showAlert("錯誤", "無效的客戶訂購單", "warning");
+          break;
         }
-
+        const order_number = `CO${getTodayString()}${startingCOSeq
+          .toString()
+          .padStart(3, "0")}`;
         const coPayload = {
           order_number: order_number,
           order_date: getTodayString(true),
@@ -790,7 +862,8 @@ const RequirementOrderPage = () => {
             contact: vendorData.contact,
           },
           product_id: item.product_id,
-          mrp_id: matchedMrpId,
+          mrp_id: matchedMrp.id,
+          document_note: documentNote,
           spec: item.spec,
           quantity: item.quantity,
           unit: item.unit,
@@ -815,11 +888,14 @@ const RequirementOrderPage = () => {
         if (!coRes.ok) {
           throw new Error("客戶訂貨單建立失敗，請確認 API");
         }
+        startingCOSeq++;
       }
 
       showAlert("成功", "單據已成功建立", "success");
       setOrderItems([]);
-      setFormItems([createEmptyRow()]);
+      const nextSeq = dailySequence + 1;
+      setDailySequence(nextSeq);
+      setFormItems([createEmptyRow(nextSeq)]);
       setDocumentNote("");
       setVendorData({
         id: "",
@@ -833,6 +909,7 @@ const RequirementOrderPage = () => {
         notes: "",
       });
       setActiveTabIds({});
+      setVendorSearch("");
       fetchData();
     } catch (err) {
       showAlert("暫存失敗", err.message, "error");
@@ -908,7 +985,6 @@ const RequirementOrderPage = () => {
     });
   }, [mrpPlans, filterVendor, filterProduct]);
 
-  // --- 客戶訂貨單 預覽與列印樣板 (完全貼齊截圖) ---
   const CustomerOrderTemplate = ({ order }) => {
     if (!order) return null;
 
@@ -936,7 +1012,6 @@ const RequirementOrderPage = () => {
         used_batch_number: item.used_batch_number,
       }));
     } else {
-      // 來自查看分頁，可能為單筆或多筆，這裡統一處理
       const cmoArray =
         order.customer_orders && Array.isArray(order.customer_orders)
           ? order.customer_orders
@@ -1122,10 +1197,18 @@ const RequirementOrderPage = () => {
                   {item ? item.unit : ""}
                 </td>
                 <td className="border border-black px-1 py-1 text-right">
-                  {item ? item.unit_price : ""}
+                  {item
+                    ? Number(item.unit_price).toLocaleString(undefined, {
+                        minimumFractionDigits: 2,
+                      })
+                    : ""}
                 </td>
                 <td className="border border-black px-1 py-1 text-right">
-                  {item ? item.subtotal : ""}
+                  {item
+                    ? Number(item.subtotal).toLocaleString(undefined, {
+                        minimumFractionDigits: 2,
+                      })
+                    : ""}
                 </td>
                 <td
                   className={`border border-black px-1 py-1 ${item ? "text-left" : ""}`}
@@ -1228,7 +1311,7 @@ const RequirementOrderPage = () => {
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
           <div>
             <h2 className="text-3xl font-extrabold text-slate-800 tracking-tight">
-              建立物料需求單
+              建立客戶訂購單
             </h2>
           </div>
         </div>
@@ -1239,7 +1322,7 @@ const RequirementOrderPage = () => {
           </p>
           <ul className="list-disc list-inside space-y-1 ml-6 text-slate-700">
             <li>
-              系統會依據您輸入的數量<strong>「自動即時計算」</strong>底層 MRP
+              系統會依據您輸入的數量<strong>「自動即時計算」</strong>需求單
               的物料需求及庫存分配。支援點擊下方按鈕加入多筆明細。
             </li>
             <li>
@@ -1258,20 +1341,20 @@ const RequirementOrderPage = () => {
             onClick={() => setActiveMainTab("create")}
             className={`px-6 py-2 rounded-md text-sm font-medium transition-all ${activeMainTab === "create" ? "bg-white text-blue-700 shadow-sm" : "text-slate-600 hover:bg-slate-200"}`}
           >
-            新增物料需求單
+            新增訂購單
           </button>
           <button
             onClick={() => setActiveMainTab("view")}
             className={`px-6 py-2 rounded-md text-sm font-medium transition-all ${activeMainTab === "view" ? "bg-white text-blue-700 shadow-sm" : "text-slate-600 hover:bg-slate-200"}`}
           >
-            查看物料需求單 ({mrpPlans.length})
+            查看線上單據 (
+            {mrpPlans.filter((mrp) => mrp.parent_id === null).length})
           </button>
         </div>
 
         {activeMainTab === "create" ? (
           <div>
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 mb-8 overflow-hidden">
-              {/* --- 表單 Header: 填寫客戶與出貨資訊 --- */}
               <div className="p-6 bg-slate-50/50 border-b border-slate-200">
                 <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
                   <FileText className="text-blue-600" size={20} />
@@ -1316,7 +1399,7 @@ const RequirementOrderPage = () => {
                   </div>
                   <div className="lg:col-span-1">
                     <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">
-                      客戶統編 (自動帶入)
+                      客戶統編
                     </label>
                     <input
                       type="text"
@@ -1347,7 +1430,7 @@ const RequirementOrderPage = () => {
 
                   <div className="lg:col-span-2">
                     <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">
-                      出貨地址 (自動帶入)
+                      出貨地址
                     </label>
                     <input
                       type="text"
@@ -1385,6 +1468,22 @@ const RequirementOrderPage = () => {
                       ))}
                     </select>
                   </div>
+                  <div className="lg:col-span-1">
+                    <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">
+                      備註
+                    </label>
+                    <input
+                      type="text"
+                      value={vendorData.notes}
+                      onChange={(e) =>
+                        setVendorData({
+                          ...vendorData,
+                          notes: e.target.value,
+                        })
+                      }
+                      className="w-full px-3 py-2 border border-slate-300 rounded focus:ring-2 focus:ring-blue-500 focus:outline-none shadow-sm"
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -1398,11 +1497,11 @@ const RequirementOrderPage = () => {
                   <table className="w-full text-sm text-left bg-white">
                     <thead className="bg-slate-100 border-b border-slate-300 text-slate-700">
                       <tr>
-                        <th className="p-3 font-bold w-1/4">
+                        <th className="p-3 font-bold w-[25%]">
                           貨品編號 / 搜尋產品
                         </th>
                         <th className="p-3 font-bold w-[15%]">規格</th>
-                        <th className="p-3 font-bold w-20">數量 (自動展開)</th>
+                        <th className="p-3 font-bold w-20">數量</th>
                         <th className="p-3 font-bold w-16">單位</th>
                         <th className="p-3 font-bold w-24">未稅單價</th>
                         <th className="p-3 font-bold w-[12%]">附註</th>
@@ -1506,8 +1605,7 @@ const RequirementOrderPage = () => {
                           </td>
                           <td className="p-3">
                             <input
-                              type="number"
-                              step="0.0001"
+                              type="text"
                               value={item.quantity}
                               onChange={(e) =>
                                 handleItemChange(
@@ -1538,7 +1636,7 @@ const RequirementOrderPage = () => {
                           </td>
                           <td className="p-3">
                             <input
-                              type="number"
+                              type="text"
                               value={item.unit_price}
                               onChange={(e) =>
                                 handleItemChange(

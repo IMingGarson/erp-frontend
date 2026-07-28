@@ -665,7 +665,6 @@ const ProductionOrderPage = () => {
                   <th className="p-4">生產單號</th>
                   <th className="p-4">產品名稱</th>
                   <th className="p-4 text-right">預計產量</th>
-                  <th className="p-4 text-center">狀態</th>
                   <th className="p-4 text-center">建立者</th>
                   <th className="p-4 text-center w-24">操作</th>
                 </tr>
@@ -698,9 +697,6 @@ const ProductionOrderPage = () => {
                             <span className="text-xs text-slate-500 font-sans font-normal">
                               {po.product_unit}
                             </span>
-                          </td>
-                          <td className="p-4 text-center">
-                            <StatusTag status={po.status} />
                           </td>
                           <td className="p-4 text-center text-slate-600">
                             {po.creator_name}

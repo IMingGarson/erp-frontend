@@ -59,7 +59,7 @@ const TracePage = () => {
       }
       if (res.ok) {
         const json = await res.json();
-        const dataList = json.data.data || [];
+        const dataList = json.data || [];
         setTraceResults(dataList);
       }
     } catch (err) {
@@ -75,37 +75,6 @@ const TracePage = () => {
     setError(null);
   };
 
-  // 動態計算上方看板的總數量
-  const calculateTotals = () => {
-    if (traceResults.length === 0)
-      return { currentInput: 0, currentPo: 0, currentMrp: 0, displayUnit: "" };
-
-    let currentInput = 0;
-    let currentPo = 0;
-    let currentMrp = 0;
-    let displayUnit = "";
-
-    traceResults.forEach((batch) => {
-      currentInput += parseFloat(batch.remaining_qty || 0);
-
-      batch.trace_details?.orders?.forEach((po) => {
-        currentPo += parseFloat(po.used_qty || 0);
-        if (po.unit && !displayUnit) displayUnit = po.unit;
-      });
-
-      batch.trace_details?.mrps?.forEach((mrp) => {
-        currentMrp += parseFloat(mrp.used_qty || 0);
-        if (mrp.unit && !displayUnit) displayUnit = mrp.unit;
-      });
-    });
-
-    return { currentInput, currentPo, currentMrp, displayUnit };
-  };
-
-  const { currentInput, currentPo, currentMrp, displayUnit } =
-    calculateTotals();
-
-  // 取得今天日期作為「製表日期」
   const getTodayDateString = () => {
     const today = new Date();
     const yyyy = today.getFullYear();
@@ -120,7 +89,20 @@ const TracePage = () => {
 
   return (
     <div className="p-6 md:p-8 max-w-full mx-auto bg-blue-50/20 min-h-screen font-sans relative text-slate-900 print:bg-white print:p-0">
-      {/* 標題區 (列印時隱藏) */}
+      <style>
+        {`
+          @media print {
+            @page {
+              margin: 0;
+            }
+            body {
+              padding: 1.5cm;
+            }
+          }
+        `}
+      </style>
+
+      {/* 標題區 */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4 print:hidden">
         <div>
           <h2 className="text-3xl font-black text-black tracking-tight">
@@ -132,12 +114,12 @@ const TracePage = () => {
             onClick={handlePrint}
             className="bg-slate-800 hover:bg-slate-900 text-white px-5 py-2 rounded-md shadow flex items-center gap-2 text-sm font-bold transition-colors"
           >
-            <span>🖨️</span> 列印報表 (PDF)
+            <span>🖨️</span> 列印
           </button>
         )}
       </div>
 
-      {/* 系統功能說明區塊 (列印時隱藏) */}
+      {/* 系統功能說明區塊 */}
       <div className="bg-blue-50 text-blue-800 text-sm p-4 rounded-lg mb-6 border border-blue-100 print:hidden">
         <p className="flex items-center gap-2 font-medium mb-1">
           <span className="text-lg">💡</span> 系統功能說明
@@ -153,7 +135,7 @@ const TracePage = () => {
         </ul>
       </div>
 
-      {/* 搜尋操作區 (列印時隱藏) */}
+      {/* 搜尋操作區 */}
       <form
         onSubmit={handleSearch}
         className="flex flex-col sm:flex-row gap-3 w-full items-center p-4 bg-white rounded-xl shadow-md border border-blue-100 mb-6 print:hidden"
@@ -191,7 +173,7 @@ const TracePage = () => {
         </div>
       )}
 
-      {/* 主追溯清單表格 (列印時顯示的重點區域) */}
+      {/* 預覽報表區 (白底黑字) */}
       <div className="space-y-8 print:space-y-4">
         {loading ? (
           <div className="p-12 text-center text-blue-600 font-bold text-lg animate-pulse print:hidden">
@@ -204,155 +186,239 @@ const TracePage = () => {
             return (
               <div
                 key={batch.batch_id}
-                className="bg-white rounded-xl shadow-md border border-blue-100 overflow-hidden print:shadow-none print:border-none print:rounded-none"
+                className="bg-white shadow-xl ring-1 ring-black/5 p-4 md:p-8 max-w-full overflow-x-auto print:shadow-none print:ring-0 print:p-0 rounded-sm"
               >
-                {/* 報表標頭 (100% 貼合 PDF 格式) */}
-                <div className="p-4 print:p-2 mb-2">
-                  <h3 className="text-xl font-bold text-black mb-2 text-center print:text-2xl print:mb-4">
-                    {batch.material_code} {batch.material_name}(批號:
-                    {batch.batch_number})領用記錄
-                  </h3>
-                  <div className="flex justify-start text-sm text-black font-medium">
-                    <p>製表日期：{getTodayDateString()}</p>
+                <div className="min-w-[800px]">
+                  {/* 報表標頭 */}
+                  <div className="mb-4">
+                    <h3 className="text-xl font-bold text-black mb-2 text-center print:text-2xl">
+                      {batch.material_code} {batch.material_name}(批號:{" "}
+                      {batch.batch_number})領用記錄
+                    </h3>
+                    <div className="flex justify-start text-sm text-black font-medium">
+                      <p>製表日期：{getTodayDateString()}</p>
+                    </div>
                   </div>
-                </div>
 
-                {/* 追溯表格主體 */}
-                <div className="overflow-x-auto">
-                  <table className="w-full text-center border-collapse border-y border-black text-sm print:text-[11px]">
-                    <thead className="print:text-black">
+                  <table className="w-full text-center border-collapse text-sm print:text-[11px] border-2 border-black">
+                    <thead className="bg-white text-black">
                       <tr>
-                        <th className="border border-black p-1">
+                        <th className="p-1.5 font-semibold whitespace-nowrap border border-black">
                           客戶
-                          <br />
+                          <br className="print:hidden" />
                           編號
                         </th>
-                        <th className="border border-black p-1">客戶名稱</th>
-                        <th className="border border-black p-1">
+                        <th className="p-1.5 font-semibold whitespace-nowrap border border-black">
+                          客戶名稱
+                        </th>
+                        <th className="p-1.5 font-semibold whitespace-nowrap border border-black">
                           貨品編號/
-                          <br />
+                          <br className="print:hidden" />
                           產品編號
                         </th>
-                        <th className="border border-black p-1">
+                        <th className="p-1.5 font-semibold whitespace-nowrap border border-black">
                           品名/
-                          <br />
+                          <br className="print:hidden" />
                           產品名稱
                         </th>
-                        <th className="border border-black p-1">規格</th>
-                        <th className="border border-black p-1">批號編號</th>
-                        <th className="border border-black p-1">銷貨單編號</th>
-                        <th className="border border-black p-1">
+                        <th className="p-1.5 font-semibold whitespace-nowrap border border-black">
+                          規格
+                        </th>
+                        <th className="p-1.5 font-semibold whitespace-nowrap border border-black">
+                          批號編號
+                        </th>
+                        <th className="p-1.5 font-semibold whitespace-nowrap border border-black">
+                          銷貨單編號
+                        </th>
+                        <th className="p-1.5 font-semibold whitespace-nowrap border border-black">
                           數量
-                          <br />
+                          <br className="print:hidden" />
                           (包)
                         </th>
-                        <th className="border border-black p-1">KG</th>
-                        <th className="border border-black p-1">製令單號</th>
-                        <th className="border border-black p-1">產品數量</th>
-                        <th className="border border-black p-1">原料數量</th>
+                        <th className="p-1.5 font-semibold whitespace-nowrap border border-black">
+                          KG
+                        </th>
+                        <th className="p-1.5 font-semibold whitespace-nowrap border border-black">
+                          製令單號
+                        </th>
+                        <th className="p-1.5 font-semibold whitespace-nowrap border border-black">
+                          產品數量
+                        </th>
+                        <th className="p-1.5 font-semibold whitespace-nowrap border border-black">
+                          原料數量
+                        </th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-gray-200">
+                    <tbody>
                       {ordersList.length > 0 ? (
                         ordersList.flatMap((po, poIdx) => {
                           const hasDeliveryNotes =
                             po.delivery_notes && po.delivery_notes.length > 0;
 
+                          const totalDeliveryQty = hasDeliveryNotes
+                            ? po.delivery_notes.reduce(
+                                (sum, dn) => sum + (Number(dn.quantity) || 0),
+                                0,
+                              )
+                            : 0;
+
+                          let accumulatedRawQty = 0;
+                          let accumulatedProductQty = 0;
+
                           if (hasDeliveryNotes) {
                             return po.delivery_notes.map((dn, dnIdx) => {
                               const isKG =
                                 dn.unit && dn.unit.toUpperCase().includes("KG");
-                              const qtyBag = isKG ? "" : dn.quantity;
-                              const qtyKG = isKG ? dn.quantity : "";
+                              const baseQty =
+                                dn.required_quantity !== undefined
+                                  ? dn.required_quantity
+                                  : dn.quantity;
+                              const qtyBag = isKG ? "" : baseQty;
+                              const qtyKG = isKG ? baseQty : "";
+
+                              const isLastNote =
+                                dnIdx === po.delivery_notes.length - 1;
+
+                              let allocatedRawQty = 0;
+                              let allocatedProductQty = 0;
+
+                              if (totalDeliveryQty > 0) {
+                                if (isLastNote) {
+                                  // 🌟 尾差調整：直接拿總量去扣掉前面「已經四捨五入並印出」的數字
+                                  allocatedRawQty = Number(
+                                    (
+                                      Number(po.used_qty) - accumulatedRawQty
+                                    ).toFixed(4),
+                                  );
+                                  allocatedProductQty = Number(
+                                    (
+                                      Number(po.actual_qty || 0) -
+                                      accumulatedProductQty
+                                    ).toFixed(4),
+                                  );
+                                } else {
+                                  // 先進行四捨五入
+                                  const ratio =
+                                    Number(dn.quantity) / totalDeliveryQty;
+                                  allocatedRawQty = Number(
+                                    (Number(po.used_qty) * ratio).toFixed(4),
+                                  );
+                                  allocatedProductQty = Number(
+                                    (
+                                      Number(po.actual_qty || 0) * ratio
+                                    ).toFixed(4),
+                                  );
+
+                                  // 將「四捨五入後」的結果累加，避免誤差累積
+                                  accumulatedRawQty += allocatedRawQty;
+                                  accumulatedProductQty += allocatedProductQty;
+                                }
+                              } else if (dnIdx === 0) {
+                                allocatedRawQty = Number(
+                                  Number(po.used_qty).toFixed(4),
+                                );
+                                allocatedProductQty = Number(
+                                  Number(po.actual_qty || 0).toFixed(4),
+                                );
+                              }
 
                               return (
                                 <tr
                                   key={`${po.order_number}-${dn.note_number}`}
-                                  className="hover:bg-slate-50 print:hover:bg-white print:text-black align-top"
+                                  className="text-black align-top hover:bg-gray-50 print:hover:bg-white transition-colors"
                                 >
-                                  <td className="border border-black p-1">
+                                  <td className="p-1.5 border border-black">
                                     {dn.customer_code ||
                                       po.po_vendor_info?.code ||
                                       ""}
                                   </td>
-                                  <td className="border border-black p-1 text-left">
+                                  <td className="p-1.5 text-left border border-black">
                                     {dn.customer_name ||
                                       po.po_vendor_info?.name ||
                                       ""}
                                   </td>
-                                  <td className="border border-black p-1 text-left">
+                                  <td className="p-1.5 text-left font-mono text-xs print:text-[11px] border border-black">
                                     {po.product_code}
                                   </td>
-                                  <td className="border border-black p-1 text-left">
+                                  <td className="p-1.5 text-left border border-black">
                                     {po.product_name}
                                   </td>
-                                  <td className="border border-black p-1 text-left">
-                                    {dn.spec || po.product_spec || ""}
+                                  <td className="p-1.5 text-left border border-black">
+                                    {dn.spec || ""}
                                   </td>
-                                  <td className="border border-black p-1">
-                                    {po?.used_batch_numbers?.map((bn, idx) => {
-                                      return <span key={idx}>{bn}</span>;
-                                    }) || ""}
+                                  <td className="p-1.5 font-mono text-xs print:text-[11px] border border-black">
+                                    {po?.used_batch_numbers?.map((bn, idx) => (
+                                      <div key={idx}>{bn}</div>
+                                    )) || ""}
                                   </td>
-                                  <td className="border border-black p-1">
+                                  <td className="p-1.5 font-mono text-xs print:text-[11px] border border-black">
                                     {dn.note_number}
                                   </td>
-                                  <td className="border border-black p-1">
+                                  <td className="p-1.5 border border-black">
                                     {qtyBag}
                                   </td>
-                                  <td className="border border-black p-1">
+                                  <td className="p-1.5 border border-black">
                                     {qtyKG}
                                   </td>
-                                  <td className="border border-black p-1">
+                                  <td className="p-1.5 font-mono text-xs print:text-[11px] border border-black">
                                     {po.order_number}
                                   </td>
 
-                                  {/* 避免重複加總生產量與原料量，僅在該生產單的第一筆銷貨記錄顯示 */}
-                                  <td className="border border-black p-1">
-                                    {dnIdx === 0 ? po.actual_qty : ""}
+                                  <td className="p-1.5 border border-black">
+                                    {allocatedProductQty > 0
+                                      ? allocatedProductQty.toFixed(4)
+                                      : 0}
                                   </td>
-                                  <td className="border border-black p-1 print:text-black">
-                                    {dnIdx === 0
-                                      ? Number(po.used_qty).toFixed(4)
+                                  <td className="p-1.5 border border-black">
+                                    {allocatedRawQty > 0
+                                      ? allocatedRawQty.toFixed(4)
                                       : ""}
                                   </td>
                                 </tr>
                               );
                             });
-                          }
-                          // 情況 B：生產單已建立，但尚未建立任何銷貨單
-                          else {
+                          } else {
+                            // 情況 B：生產單已建立，但尚未建立任何銷貨單
                             return (
                               <tr
                                 key={`po-${po.order_number}`}
-                                className="hover:bg-slate-50 print:hover:bg-white text-gray-500 print:text-black align-top"
+                                className="text-black align-top hover:bg-gray-50 print:hover:bg-white transition-colors"
                               >
-                                <td className="border border-black p-1">
+                                <td className="p-1.5 border border-black">
                                   {po.po_vendor_info?.code || ""}
                                 </td>
-                                <td className="border border-black p-1 text-left">
+                                <td className="p-1.5 text-left border border-black">
                                   {po.po_vendor_info?.name || ""}
                                 </td>
-                                <td className="border border-black p-1 text-left">
+                                <td className="p-1.5 text-left font-mono text-xs print:text-[11px] border border-black">
                                   {po.product_code}
                                 </td>
-                                <td className="border border-black p-1 text-left">
+                                <td className="p-1.5 text-left border border-black">
                                   {po.product_name}
                                 </td>
-                                <td className="border border-black p-1 text-left">
-                                  {po.product_spec || ""}
+                                <td className="p-1.5 text-left border border-black">
+                                  {po.spec || ""}
                                 </td>
-                                <td className="border border-black p-1"></td>
-                                <td className="border border-black p-1"></td>
-                                <td className="border border-black p-1"></td>
-                                <td className="border border-black p-1"></td>
-                                <td className="border border-black p-1">
+                                <td className="p-1.5 font-mono text-xs print:text-[11px] border border-black">
+                                  {po?.used_batch_numbers?.map((bn, idx) => (
+                                    <div key={idx}>{bn}</div>
+                                  )) || ""}
+                                </td>
+                                <td className="p-1.5 border border-black"></td>
+                                {/* TODO: 數量（包） */}
+                                <td className="p-1.5 border border-black">
+                                  {po?.target_pkg_qty || ""}
+                                </td>
+                                <td className="p-1.5 border border-black">
+                                  {po.target_qty || "KG"}
+                                </td>
+                                <td className="p-1.5 font-mono text-xs print:text-[11px] border border-black">
                                   {po.order_number}
                                 </td>
-                                <td className="border border-black p-1">
+                                <td className="p-1.5 border border-black">
                                   {po.actual_qty || 0}
                                 </td>
-                                <td className="border border-black p-1 print:text-black">
+                                <td className="p-1.5 border border-black">
                                   {Number(po.used_qty).toFixed(4)}
                                 </td>
                               </tr>
@@ -363,7 +429,7 @@ const TracePage = () => {
                         <tr>
                           <td
                             colSpan="12"
-                            className="border border-black p-4 text-center text-gray-400 print:text-black"
+                            className="p-8 text-center text-gray-500 border border-black"
                           >
                             此批號目前尚未被任何生產單使用
                           </td>
@@ -372,14 +438,14 @@ const TracePage = () => {
 
                       {/* 總計列 */}
                       {ordersList.length > 0 && (
-                        <tr className="print:bg-white font-bold print:text-black text-right">
+                        <tr className="bg-white font-bold text-black text-right">
                           <td
                             colSpan="11"
-                            className="p-2 border-r border-black"
+                            className="p-1.5 border border-black"
                           >
                             合計
                           </td>
-                          <td className="border border-black p-2 text-center">
+                          <td className="p-1.5 text-center border border-black">
                             {ordersList
                               .reduce(
                                 (sum, po) => sum + (Number(po.used_qty) || 0),

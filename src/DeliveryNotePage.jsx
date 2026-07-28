@@ -226,14 +226,8 @@ const DeliveryNotePrintTemplate = ({ data }) => {
       <style>
         {`
           @media print {
-            @page {
-              size: A4 landscape;
-              margin: 15mm;
-            }
-            body {
-              -webkit-print-color-adjust: exact;
-              print-color-adjust: exact;
-            }
+            @page { size: A4 landscape; margin: 15mm; }
+            body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
           }
         `}
       </style>

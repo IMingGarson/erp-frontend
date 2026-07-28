@@ -1908,7 +1908,6 @@ const RequirementOrderPage = () => {
                     <th className="p-4">客戶資訊</th>
                     <th className="p-4">產品名稱</th>
                     <th className="p-4 text-right">需求量</th>
-                    <th className="p-4 text-center">狀態</th>
                     <th className="p-4 text-right">建立日期</th>
                     <th className="p-4 text-center">操作</th>
                   </tr>
@@ -1956,11 +1955,6 @@ const RequirementOrderPage = () => {
                             </td>
                             <td className="p-4 text-right text-slate-800 font-bold">
                               {formatNum(d.required_qty, "PRODUCT")} {d.unit}
-                            </td>
-                            <td className="p-4 text-center">
-                              <span className="px-2 py-0.5 bg-amber-100 text-amber-700 text-[10px] font-bold rounded uppercase tracking-wider">
-                                Pending
-                              </span>
                             </td>
                             <td className="p-4 text-slate-400 text-right">
                               {new Date(d.created_at).toLocaleDateString()}

@@ -72,9 +72,10 @@ const ProductionOrderEditPage = () => {
           usedBatches.forEach((b) => {
             const key = `${order.id}_${mat.code}_${b.id}`;
             initialForm[key] = {
+              used: b.used || "",
               input_bags: b.input_bags || "",
               empty_bags: b.empty_bags || "",
-              actual_used: b.actual_used || b.used || "",
+              actual_used: b.actual_used || "",
               loss_qty: b.loss_qty || "0",
               adjustment_type: b.adjustment_type || "NONE",
               adjustment_qty: b.adjustment_qty || "0",
@@ -129,7 +130,7 @@ const ProductionOrderEditPage = () => {
               ...b,
               input_bags: formData.input_bags,
               empty_bags: formData.empty_bags,
-              used: formData.actual_used,
+              used: formData.used,
               actual_used: formData.actual_used,
               loss_qty: formData.loss_qty,
               adjustment_type: formData.adjustment_type,
@@ -270,6 +271,9 @@ const ProductionOrderEditPage = () => {
                   配方用量({unitLabel})
                 </th>
                 <th className="p-3 text-right w-[10%]">耗損量({unitLabel})</th>
+                <th className="p-3 text-right w-[10%]">
+                  實際用量({unitLabel})
+                </th>
                 <th className="p-3 text-center w-[9%]">盤盈/盤虧</th>
                 <th className="p-3 text-right w-[11%]">
                   盈虧數量({unitLabel})
@@ -305,7 +309,6 @@ const ProductionOrderEditPage = () => {
                 return usedBatches.map((b, idx) => {
                   const key = `${order.id}_${mat.code}_${b.id}`;
                   const rowData = editForm[key] || {};
-
                   return (
                     <tr
                       key={`${mat.code}_${b.id}`}
@@ -369,25 +372,6 @@ const ProductionOrderEditPage = () => {
                         {formatNum(b.used, "RAW")}
                       </td>
 
-                      {/* <td className="p-2 align-middle">
-                        <input
-                          type="number"
-                          step="0.0001"
-                          value={rowData.actual_used || ""}
-                          onChange={(e) =>
-                            handleInputChange(
-                              order.id,
-                              mat.code,
-                              b.id,
-                              "actual_used",
-                              e.target.value,
-                            )
-                          }
-                          className="w-full px-2 py-1 border border-blue-300 bg-blue-50/20 rounded text-right font-mono font-bold text-blue-800 focus:ring-1 focus:ring-blue-500 focus:outline-none"
-                          placeholder="0.00"
-                        />
-                      </td> */}
-
                       <td className="p-2 align-middle">
                         <input
                           type="number"
@@ -404,6 +388,25 @@ const ProductionOrderEditPage = () => {
                           }
                           className="w-full px-2 py-1 border border-slate-300 rounded text-right font-mono text-amber-700 focus:ring-1 focus:ring-amber-500 focus:outline-none"
                           placeholder="0.0"
+                        />
+                      </td>
+
+                      <td className="p-2 align-middle">
+                        <input
+                          type="number"
+                          step="0.0001"
+                          value={rowData.actual_used}
+                          onChange={(e) =>
+                            handleInputChange(
+                              order.id,
+                              mat.code,
+                              b.id,
+                              "actual_used",
+                              e.target.value,
+                            )
+                          }
+                          className="w-full px-2 py-1 border border-blue-300 bg-blue-50/20 rounded text-right font-mono font-bold text-blue-800 focus:ring-1 focus:ring-blue-500 focus:outline-none"
+                          placeholder="0.00"
                         />
                       </td>
 
@@ -482,7 +485,7 @@ const ProductionOrderEditPage = () => {
 
   return (
     <div className="p-6 md:p-8 max-w-7xl mx-auto bg-slate-50 min-h-screen font-sans text-slate-800 w-full">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-3 gap-4">
         <div>
           <h2 className="text-2xl font-black text-slate-800 tracking-tight flex items-center gap-3">
             生產單編輯
@@ -511,17 +514,7 @@ const ProductionOrderEditPage = () => {
           儲存
         </button>
       </div>
-
-      <div className="bg-amber-50 text-amber-900 text-xs p-3.5 rounded-lg mb-6 border border-amber-200 shadow-sm leading-relaxed">
-        <strong>💡 操作提示：</strong>
-        真實製作產品可能會與標準配方有誤差（如原物料廠商正負 5% 誤差）。
-        您可以直接修改<strong>「實際用量」</strong>與<strong>「耗損量」</strong>
-        ，或利用<strong>「盤盈/盤虧吸收」</strong>
-        選單指派該批號直接吸收盤點誤差值，系統在儲存後會同步更新至後端審核系統。
-      </div>
-
       {mainOrder && renderEditableTable(mainOrder, "【主母單】", true)}
-
       {childrenOrders.length > 0 && (
         <div className="mt-8 border-t-2 border-dashed border-slate-300 pt-6 w-full">
           <div className="text-center mb-4">

@@ -626,7 +626,6 @@ const RequirementOrderPage = () => {
               (m) => String(m.id) === String(c.child),
             );
             if (childMat) {
-              // 【防雙重扣除機制】成品只負責扣原物料或包材，半成品的扣除由其專屬的生成單負責
               if (childMat.type === "RAW" || childMat.type === "PACK") {
                 traverse(c.child, multiplier * parseFloat(c.quantity_required));
               }

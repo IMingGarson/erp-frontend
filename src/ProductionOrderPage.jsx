@@ -80,19 +80,11 @@ const getFlattenedMaterials = (materials_info) => {
           materialName: mat.materialName,
           requiredQty: mat.requiredQty,
           allocatedQty: parseFloat(b.used),
+          input_bags: b.input_bags,
+          empty_bags: b.empty_bags,
           batch_number: b.batch_number,
           unit: mat.unit || "kg",
         });
-      });
-    } else {
-      result.push({
-        isChild: false,
-        code: materialCode,
-        materialName: mat.materialName,
-        requiredQty: mat.requiredQty,
-        allocatedQty: 0,
-        batch_number: "缺料",
-        unit: mat.unit || "kg",
       });
     }
   });
@@ -112,7 +104,6 @@ const ProductionFormTemplate = ({ order, isChildForm = false, onPrint }) => {
     day: "2-digit",
   });
   const flattenedMaterials = getFlattenedMaterials(order.materials_info);
-
   let vInfo = {};
   try {
     vInfo =
@@ -246,8 +237,12 @@ const ProductionFormTemplate = ({ order, isChildForm = false, onPrint }) => {
                     {mat.materialName}
                   </span>
                 </td>
-                <td className="border border-black"></td>
-                <td className="border border-black"></td>
+                <td className="border border-black text-right px-2 font-mono font-bold text-[13px]">
+                  {mat.input_bags}
+                </td>
+                <td className="border border-black text-right px-2 font-mono font-bold text-[13px]">
+                  {mat.empty_bags}
+                </td>
                 <td className="border border-black text-right px-2 font-mono font-bold text-[13px]">
                   {formatNum(mat.allocatedQty, "RAW")}
                 </td>

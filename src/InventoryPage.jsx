@@ -31,8 +31,101 @@ const TypeTag = ({ type }) => {
   );
 };
 
+// --- 白紙黑字風格的實體標籤 UI (直接讀取 DB 的中文結構) ---
+const ProductLabel = ({ product }) => {
+  const profile = product?.product_profile;
+  if (!profile) return null;
+
+  const labelInfo = profile.label_info || {};
+  const nutrition = labelInfo.nutrition_facts;
+
+  return (
+    <div className="w-full max-w-md">
+      <div className="flex items-center gap-2 mb-4 border-b border-slate-200 pb-2">
+        <h3 className="text-lg font-bold text-slate-800">產品標籤預覽</h3>
+      </div>
+
+      {/* 模擬實體白紙黑字標籤 */}
+      <div className="bg-white p-5 border-2 border-black text-black font-sans shadow-md">
+        <h2 className="text-2xl font-black text-center mb-3 pb-2 border-b-2 border-black tracking-widest">
+          {labelInfo.product_name || product.name}
+        </h2>
+
+        <div className="text-sm space-y-1.5 leading-relaxed mb-4">
+          <p>
+            <strong>包裝規格：</strong>
+            {profile.spec || "-"}
+          </p>
+          <p>
+            <strong>原產地：</strong>
+            {labelInfo.origin || "台灣"}
+          </p>
+
+          {labelInfo.allergens && (
+            <p>
+              <strong>過敏原資訊：</strong>
+              本產品含有 {labelInfo.allergens.contains?.join("、") || "無"}。
+              <span className="text-xs ml-1 block mt-0.5 text-gray-700">
+                (生產廠房其設備亦處理：
+                {labelInfo.allergens.cross_contamination?.join("、") || "無"})
+              </span>
+            </p>
+          )}
+
+          <p>
+            <strong>保存方式：</strong>
+            {labelInfo.storage || "請置於陰涼乾燥處"}
+          </p>
+        </div>
+
+        {/* 營養標示表 */}
+        {nutrition && (
+          <div className="border-2 border-black text-xs">
+            <div className="bg-black text-white font-bold text-center py-1 text-sm tracking-widest">
+              營養標示
+            </div>
+            <div className="p-1.5 border-b border-black font-medium">
+              {nutrition["份量資訊"] || "-"}
+            </div>
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="border-b-2 border-black">
+                  <th className="p-1.5 border-r border-black w-1/3">項目</th>
+                  <th className="p-1.5 border-r border-black w-1/3 text-right">
+                    每份
+                  </th>
+                  <th className="p-1.5 w-1/3 text-right">每100公克</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Object.keys(nutrition["每份"] || {}).map((key) => (
+                  <tr
+                    key={key}
+                    className="border-b border-black last:border-b-0"
+                  >
+                    <td className="p-1.5 border-r border-black font-bold">
+                      {key}
+                    </td>
+                    <td className="p-1.5 border-r border-black text-right">
+                      {nutrition["每份"][key]}
+                    </td>
+                    <td className="p-1.5 text-right">
+                      {nutrition["每100公克"]?.[key] || "-"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 const BomNode = ({ node, level = 0 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
+
   const hasChildren = node.children && node.children.length > 0;
   const hasBatches = node.batches && node.batches.length > 0;
   const isExpandable = hasChildren || hasBatches;
@@ -40,8 +133,12 @@ const BomNode = ({ node, level = 0 }) => {
   const totalOriginal = node.batches
     ? node.batches.reduce((sum, b) => sum + parseFloat(b.original_qty || 0), 0)
     : 0;
+
+  // 只有當不是半成品時，才計算低水位
   const isLowStock =
-    totalOriginal > 0 && (node.totalInventory || 0) < totalOriginal * 0.2;
+    node.type !== "SEMI" &&
+    totalOriginal > 0 &&
+    (node.totalInventory || 0) < totalOriginal * 0.2;
 
   return (
     <div
@@ -64,35 +161,48 @@ const BomNode = ({ node, level = 0 }) => {
           >
             {node.name}
           </span>
-          {isLowStock && (
-            <span className="flex-shrink-0 px-2 py-0.5 bg-red-100 text-red-700 text-xs font-bold rounded border border-red-200">
-              ⚠️ 低水位
-            </span>
-          )}
+
+          <div className="ml-auto flex items-center gap-2 pr-4 sm:pr-0">
+            {node.qtyRequired && (
+              <span className="flex-shrink-0 text-sm text-blue-700 font-medium bg-blue-50 px-2.5 py-0.5 rounded border border-blue-200">
+                用量: {parseFloat(node.qtyRequired).toString()} {node.unit}
+              </span>
+            )}
+
+            {isLowStock && (
+              <span className="flex-shrink-0 px-2 py-0.5 bg-red-100 text-red-700 text-xs font-bold rounded border border-red-200">
+                ⚠️ 低水位
+              </span>
+            )}
+          </div>
         </div>
 
-        <div className="mt-2 sm:mt-0 flex-shrink-0 flex items-baseline w-full sm:w-auto pl-7 sm:pl-0">
-          <span className="text-slate-500 text-sm font-medium w-24 sm:text-right">
-            現有庫存：
-          </span>
-          <span
-            className={`text-xl font-black w-24 text-right tracking-tight ${isLowStock ? "text-red-600" : "text-slate-800"}`}
-          >
-            {(node.totalInventory || 0).toFixed(2)}
-          </span>
-          <span className="text-sm font-normal text-slate-500 w-12 text-left ml-2">
-            {node.unit}
-          </span>
-        </div>
+        {/* 判斷如果是半成品 (SEMI) 就不顯示現有庫存 */}
+        {node.type !== "SEMI" && (
+          <div className="mt-2 sm:mt-0 flex-shrink-0 flex items-baseline w-full sm:w-auto pl-7 sm:pl-0">
+            <span className="text-slate-500 text-sm font-medium w-24 sm:text-right">
+              現有庫存：
+            </span>
+            <span
+              className={`text-xl font-black w-24 text-right tracking-tight ${isLowStock ? "text-red-600" : "text-slate-800"}`}
+            >
+              {(node.totalInventory || 0).toFixed(2)}
+            </span>
+            <span className="text-sm font-normal text-slate-500 w-12 text-left ml-2">
+              {node.unit}
+            </span>
+          </div>
+        )}
       </div>
 
       {isExpanded && (
         <div className="bg-slate-50 p-4 border-t border-slate-200">
+          {/* 配方與包裝明細區塊 */}
           {hasChildren && (
-            <div className="mb-4">
+            <div className="mb-5">
               <div className="text-sm font-bold text-slate-500 mb-3 uppercase tracking-wider flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-slate-400"></span>
-                配方組成
+                <span className="w-2 h-2 rounded-full bg-blue-400"></span>
+                配方與包裝明細
               </div>
               {node.children.map((child) => (
                 <BomNode key={child.id} node={child} level={level + 1} />
@@ -100,10 +210,11 @@ const BomNode = ({ node, level = 0 }) => {
             </div>
           )}
 
+          {/* 可用批號明細區塊 */}
           {hasBatches && (
             <div>
               <div className="text-sm font-bold text-slate-500 mb-3 uppercase tracking-wider flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
                 可用批號明細
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -166,7 +277,13 @@ const InventoryPage = () => {
   const [sortOrder, setSortOrder] = useState("desc");
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedStatItem, setSelectedStatItem] = useState("");
+
   const [selectedProduct, setSelectedProduct] = useState("");
+  const [isBomDropdownOpen, setIsBomDropdownOpen] = useState(false);
+  const [bomSearchTerm, setBomSearchTerm] = useState("");
+  const bomSelectBtnRef = useRef(null);
+  const [bomDropdownStyle, setBomDropdownStyle] = useState({});
+
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const itemsPerPage = 20;
@@ -214,20 +331,19 @@ const InventoryPage = () => {
   const filteredMaterials = materials.filter(
     (m) =>
       m.name.includes(materialSearchTerm) ||
-      TYPE_CONFIG[m.type.toUpperCase()].label.includes(materialSearchTerm),
+      TYPE_CONFIG[m.type.toUpperCase()]?.label.includes(materialSearchTerm),
   );
 
   const selectedMaterial = materials.find(
     (m) => String(m.id) === String(selectedMaterialId),
   );
   const selectedMaterialDisplay = selectedMaterial
-    ? `[${TYPE_CONFIG[selectedMaterial.type.toUpperCase()].label}] ${selectedMaterial.name}`
+    ? `[${TYPE_CONFIG[selectedMaterial.type.toUpperCase()]?.label}] ${selectedMaterial.name}`
     : "-- 請選擇物料 --";
 
   const selectButtonRef = useRef(null);
   const [dropdownStyle, setDropdownStyle] = useState({});
 
-  // 開啟選單並計算位置的函式
   const handleToggleDropdown = () => {
     if (!isMaterialDropdownOpen && selectButtonRef.current) {
       const rect = selectButtonRef.current.getBoundingClientRect();
@@ -284,48 +400,6 @@ const InventoryPage = () => {
     }
   }, [uniqueMaterials, selectedStatItem]);
 
-  const stats = useMemo(() => {
-    if (!selectedStatItem) {
-      return {
-        totalOriginal: 0,
-        totalRemaining: 0,
-        lowStockCount: 0,
-        batchCount: 0,
-        healthPercentage: 0,
-        unit: "",
-      };
-    }
-
-    const targetBatches = batches.filter(
-      (b) => b.material_name === selectedStatItem,
-    );
-    const totalOriginal = targetBatches.reduce(
-      (sum, b) => sum + parseFloat(b.original_qty || 0),
-      0,
-    );
-    const totalRemaining = targetBatches.reduce(
-      (sum, b) => sum + parseFloat(b.remaining_qty || 0),
-      0,
-    );
-    const lowStockCount = targetBatches.filter(
-      (b) => parseFloat(b.remaining_qty) < parseFloat(b.original_qty) * 0.2,
-    ).length;
-    const healthPercentage =
-      totalOriginal > 0
-        ? ((totalRemaining / totalOriginal) * 100).toFixed(1)
-        : 0;
-    const unit = targetBatches.length > 0 ? targetBatches[0].unit : "";
-
-    return {
-      totalOriginal,
-      totalRemaining,
-      lowStockCount,
-      batchCount: targetBatches.length,
-      healthPercentage,
-      unit,
-    };
-  }, [batches, selectedStatItem]);
-
   const processedBatches = useMemo(() => {
     let filtered = batches.filter(
       (b) =>
@@ -375,6 +449,30 @@ const InventoryPage = () => {
   const producsAndSemis = useMemo(() => {
     return materials.filter((m) => m.type === "PRODUCT" || m.type === "SEMI");
   }, [materials]);
+
+  const filteredBomProducts = useMemo(() => {
+    return producsAndSemis.filter(
+      (m) =>
+        m.name.includes(bomSearchTerm) ||
+        (m.code && m.code.includes(bomSearchTerm)),
+    );
+  }, [producsAndSemis, bomSearchTerm]);
+
+  const selectedProductData = useMemo(() => {
+    return materials.find((m) => String(m.id) === String(selectedProduct));
+  }, [selectedProduct, materials]);
+
+  const handleToggleBomDropdown = () => {
+    if (!isBomDropdownOpen && bomSelectBtnRef.current) {
+      const rect = bomSelectBtnRef.current.getBoundingClientRect();
+      setBomDropdownStyle({
+        top: `${rect.bottom + 4}px`,
+        left: `${rect.left}px`,
+        width: `${rect.width}px`,
+      });
+    }
+    setIsBomDropdownOpen(!isBomDropdownOpen);
+  };
 
   const handleSaveNewBatch = async () => {
     const payload = {
@@ -446,15 +544,17 @@ const InventoryPage = () => {
   const bomTree = useMemo(() => {
     if (!selectedProduct) return [];
 
+    // 定義排序優先級：半成品 -> 原物料 -> 包材
+    const typePriority = { SEMI: 1, RAW: 2, PACK: 3, PRODUCT: 4 };
+
     const buildBomTree = (parentId) => {
-      // 修正：統一轉字串進行 ID 匹配，防止數字與字串類型衝突
       const childrenBoms = boms.filter(
-        (b) => String(b.parent) === String(parentId),
+        (b) => String(b.parent?.id) === String(parentId),
       );
 
-      return childrenBoms
+      const mappedChildren = childrenBoms
         .map((bom) => {
-          const mat = materials.find((m) => String(m.id) === String(bom.child));
+          const mat = bom.child;
           if (!mat) return null;
 
           const validBatches = batches
@@ -475,16 +575,24 @@ const InventoryPage = () => {
 
           return {
             ...mat,
+            qtyRequired: bom.quantity_required,
             totalInventory,
             batches: validBatches,
             children,
           };
         })
         .filter(Boolean);
+
+      // 直接在這裡將子節點進行排序
+      return mappedChildren.sort((a, b) => {
+        const pA = typePriority[a.type?.toUpperCase()] || 99;
+        const pB = typePriority[b.type?.toUpperCase()] || 99;
+        return pA - pB;
+      });
     };
 
     return buildBomTree(selectedProduct);
-  }, [selectedProduct, boms, materials, batches]);
+  }, [selectedProduct, boms, batches]);
 
   if (loading) {
     return (
@@ -529,12 +637,8 @@ const InventoryPage = () => {
             ，方便追蹤特定批次。
           </li>
           <li>
-            切換至「產品清單」可選擇成品或半成品，展開檢視其
-            <strong>「配方組成與包材」</strong>。
-          </li>
-          <li>
-            在配方樹狀圖中，系統會直接列出底層物料的
-            <strong>「可用庫存批號與剩餘量」</strong>。
+            切換至「產品清單」可選擇成品或半成品，檢視
+            <strong>「專屬規格與營養標籤」</strong>，並展開底層物料庫存。
           </li>
         </ul>
       </div>
@@ -563,95 +667,7 @@ const InventoryPage = () => {
 
       {activeTab === "list" && (
         <>
-          {/* <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4 border-b border-slate-100 pb-4">
-              <h3 className="text-lg font-bold text-slate-800 truncate pr-4">
-                {selectedStatItem ? `${selectedStatItem} 庫存分析` : "庫存分析"}
-              </h3>
-              <select
-                value={selectedStatItem}
-                onChange={(e) => setSelectedStatItem(e.target.value)}
-                className="w-full md:w-64 flex-shrink-0 bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
-              >
-                {uniqueMaterials.map((m) => (
-                  <option key={m} value={m}>
-                    {m}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div className="bg-slate-50 p-4 rounded-lg border border-slate-100">
-                <p className="text-sm text-slate-500 font-medium mb-1">
-                  總剩餘量 / 總進貨量
-                </p>
-                <p className="text-2xl font-bold text-slate-800">
-                  {stats.totalRemaining.toLocaleString(undefined, {
-                    minimumFractionDigits: 2,
-                  })}
-                  <span className="text-base font-normal text-slate-400">
-                    {" "}
-                    /{" "}
-                    {stats.totalOriginal.toLocaleString(undefined, {
-                      minimumFractionDigits: 2,
-                    })}{" "}
-                    {stats.unit}
-                  </span>
-                </p>
-                <div className="w-full bg-slate-200 rounded-full h-1.5 mt-3">
-                  <div
-                    className={`h-1.5 rounded-full ${stats.healthPercentage < 20 ? "bg-red-500" : "bg-blue-600"}`}
-                    style={{
-                      width: `${Math.min(stats.healthPercentage, 100)}%`,
-                    }}
-                  ></div>
-                </div>
-              </div>
-
-              <div className="bg-slate-50 p-4 rounded-lg border border-slate-100">
-                <p className="text-sm text-slate-500 font-medium mb-1">
-                  現存批號總數
-                </p>
-                <p className="text-2xl font-bold text-slate-800">
-                  {stats.batchCount}{" "}
-                  <span className="text-base font-normal text-slate-400">
-                    批
-                  </span>
-                </p>
-                <p className="text-xs text-slate-400 mt-2">
-                  目前存放於廠內尚未耗盡之批次
-                </p>
-              </div>
-
-              <div
-                className={`p-4 rounded-lg border transition-colors ${stats.lowStockCount > 0 ? "bg-red-50/50 border-red-100" : "bg-slate-50 border-slate-100"}`}
-              >
-                <p className="text-sm text-slate-500 font-medium mb-1">
-                  低水位批號數量
-                </p>
-                <p
-                  className={`text-2xl font-bold ${stats.lowStockCount > 0 ? "text-red-600" : "text-slate-800"}`}
-                >
-                  {stats.lowStockCount}{" "}
-                  <span className="text-base font-normal text-slate-400">
-                    批
-                  </span>
-                </p>
-                {stats.lowStockCount > 0 ? (
-                  <p className="text-xs text-red-600/80 font-medium mt-2">
-                    ⚠️ 庫存低於進貨量 20%，建議盡速安排採購補貨
-                  </p>
-                ) : (
-                  <p className="text-xs text-slate-400 mt-2">
-                    目前庫存水位健康
-                  </p>
-                )}
-              </div>
-            </div>
-          </div> */}
-
-          <div className="flex flex-col md:flex-row justify-between items-center gap-4 p-4">
+          <div className="flex flex-col md:flex-row justify-between items-center gap-4 p-4 mt-2">
             <input
               type="text"
               placeholder="搜尋名稱或批號"
@@ -860,53 +876,128 @@ const InventoryPage = () => {
       )}
 
       {activeTab === "bom" && (
-        <div className="bg-slate-50/50 p-6 rounded-xl shadow-sm border border-slate-200 min-h-[500px]">
-          <div className="mb-6 max-w-md bg-white p-4 rounded-lg shadow-sm border border-slate-100">
+        <div className="bg-slate-50/50 p-6 mt-4 rounded-xl shadow-sm border border-slate-200 min-h-[500px]">
+          <div className="mb-8 max-w-md relative">
             <label className="block text-sm font-bold text-slate-700 mb-2">
-              請選擇成品或半成品：
+              搜尋或選擇成品/半成品：
             </label>
-            <select
-              value={selectedProduct}
-              onChange={(e) => setSelectedProduct(e.target.value)}
-              className="w-full bg-white border border-slate-300 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+            <button
+              type="button"
+              ref={bomSelectBtnRef}
+              onClick={handleToggleBomDropdown}
+              className="w-full text-left bg-white border border-slate-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 flex justify-between items-center shadow-sm"
             >
-              <option value="" disabled>
-                -- 點擊展開清單 --
-              </option>
-              {producsAndSemis.map((m) => (
-                <option key={m.id} value={m.id}>
-                  [{m.type === "PRODUCT" ? "成品" : "半成品"}] {m.name}
-                </option>
-              ))}
-            </select>
+              <span
+                className={
+                  selectedProduct
+                    ? "text-slate-800 font-bold"
+                    : "text-slate-400"
+                }
+              >
+                {selectedProductData
+                  ? `[${selectedProductData.type === "PRODUCT" ? "成品" : "半成品"}] ${selectedProductData.name}`
+                  : "-- 點擊展開清單或輸入搜尋 --"}
+              </span>
+              <span className="text-slate-400 text-xs shrink-0">▼</span>
+            </button>
+
+            {isBomDropdownOpen && (
+              <>
+                <div
+                  className="fixed inset-0 z-[98]"
+                  onClick={() => setIsBomDropdownOpen(false)}
+                ></div>
+                <div
+                  className="fixed z-[99] bg-white border border-slate-200 rounded-lg shadow-xl flex flex-col max-h-80 overflow-hidden"
+                  style={bomDropdownStyle}
+                >
+                  <div className="p-3 border-b border-slate-100 bg-slate-50 shrink-0">
+                    <input
+                      type="text"
+                      placeholder="輸入產品料號或名稱搜尋..."
+                      value={bomSearchTerm}
+                      onChange={(e) => setBomSearchTerm(e.target.value)}
+                      className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                      autoFocus
+                    />
+                  </div>
+                  <ul className="overflow-y-auto p-1 flex-1">
+                    {filteredBomProducts.length > 0 ? (
+                      filteredBomProducts.map((m) => (
+                        <li
+                          key={m.id}
+                          onClick={() => {
+                            setSelectedProduct(String(m.id));
+                            setIsBomDropdownOpen(false);
+                            setBomSearchTerm("");
+                          }}
+                          className={`px-3 py-2.5 text-sm rounded-md cursor-pointer transition-colors ${
+                            String(selectedProduct) === String(m.id)
+                              ? "bg-blue-50 text-blue-700 font-bold"
+                              : "text-slate-700 hover:bg-slate-100"
+                          }`}
+                        >
+                          <div className="flex flex-col gap-1">
+                            <span>
+                              [{m.type === "PRODUCT" ? "成品" : "半成品"}]{" "}
+                              {m.name}
+                            </span>
+                            {m.product_profile?.spec && (
+                              <span className="text-xs text-slate-400 font-normal">
+                                規格: {m.product_profile.spec}
+                              </span>
+                            )}
+                          </div>
+                        </li>
+                      ))
+                    ) : (
+                      <li className="px-3 py-4 text-sm text-center text-slate-400">
+                        查無符合的品項
+                      </li>
+                    )}
+                  </ul>
+                </div>
+              </>
+            )}
           </div>
 
-          {selectedProduct ? (
-            <div>
-              <div className="flex items-center gap-2 mb-4 border-b border-slate-200 pb-2">
-                <h3 className="text-lg font-bold text-slate-800">
-                  配方細節及包材
-                </h3>
-                <span className="text-xs text-slate-500 bg-slate-200 px-2 py-0.5 rounded-full">
-                  點擊節點展開
-                </span>
-              </div>
-              {bomTree.length > 0 ? (
-                <div className="mt-4">
-                  {bomTree.map((node) => (
-                    <BomNode key={node.id} node={node} />
-                  ))}
+          <div className="flex flex-col gap-8 w-full">
+            {selectedProductData?.product_profile && (
+              <ProductLabel product={selectedProductData} />
+            )}
+
+            {/* 下方：配方及包裝明細 */}
+            <div className="w-full">
+              {selectedProduct ? (
+                <div>
+                  <div className="flex items-center gap-2 mb-4 border-b border-slate-200 pb-2">
+                    <h3 className="text-lg font-bold text-slate-800">
+                      配方及包裝明細
+                    </h3>
+                    <span className="text-xs text-slate-500 bg-slate-200 px-2 py-0.5 rounded-full">
+                      點擊節點展開
+                    </span>
+                  </div>
+                  {bomTree.length > 0 ? (
+                    <div className="mt-4">
+                      {bomTree.map((node) => (
+                        <BomNode key={node.id} node={node} />
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-slate-500">
+                      此項目尚未建立配方或包裝關聯。
+                    </p>
+                  )}
                 </div>
               ) : (
-                <p className="text-slate-500">此項目尚未建立配方或包材關聯。</p>
+                <div className="py-16 text-center text-slate-400 border-2 border-dashed border-slate-200 rounded-lg bg-white/50">
+                  <span className="text-3xl mb-2 block">📋</span>
+                  請從上方搜尋或選擇一個品項以檢視專屬規格與底層庫存。
+                </div>
               )}
             </div>
-          ) : (
-            <div className="py-16 text-center text-slate-400 border-2 border-dashed border-slate-200 rounded-lg bg-white/50">
-              <span className="text-3xl mb-2 block">📋</span>
-              請從上方選擇一個品項以檢視所需之底層庫存。
-            </div>
-          )}
+          </div>
         </div>
       )}
 
@@ -925,7 +1016,6 @@ const InventoryPage = () => {
               </button>
             </div>
 
-            {/* 讓表單區塊佔滿剩餘空間，但不再控制 overflow */}
             <div className="space-y-4 flex-1">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -939,7 +1029,6 @@ const InventoryPage = () => {
                 />
               </div>
 
-              {/* 自訂的搜尋下拉選單 */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   關聯物料/產品 <span className="text-red-500">*</span>

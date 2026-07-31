@@ -20,28 +20,26 @@ const MENU_GROUPS = [
   {
     group: "營運資料",
     items: [
-      { path: "/", label: "批號與庫存監控", icon: Activity },
-      { path: "/materials", label: "品項與物料管理", icon: Database },
+      { path: "/", label: "庫存監控", icon: Activity },
+      { path: "/materials", label: "產品管理", icon: Database },
       { path: "/trace", label: "追蹤追溯", icon: ShieldAlert },
     ],
   },
   {
-    group: "生產管理",
+    group: "客戶管理",
+    items: [{ path: "/vendors", label: "客戶名錄", icon: Building2 }],
+  },
+  {
+    group: "單據管理",
     items: [
+      { path: "/requirement", label: "訂購單管理", icon: ClipboardList },
+      { path: "/delivery-notes", label: "銷貨單管理", icon: PackageCheck },
       { path: "/production", label: "生產單管理", icon: FileText },
       {
         path: "/purchase-requisitions",
         label: "請購單管理",
         icon: ShoppingCart,
       },
-    ],
-  },
-  {
-    group: "客戶管理",
-    items: [
-      { path: "/vendors", label: "客戶名錄", icon: Building2 },
-      { path: "/delivery-notes", label: "客戶銷貨單", icon: PackageCheck },
-      { path: "/requirement", label: "客戶訂購單", icon: ClipboardList },
     ],
   },
   {

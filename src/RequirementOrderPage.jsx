@@ -1287,21 +1287,21 @@ const RequirementOrderPage = () => {
     });
   }, [mrpPlans, filterVendor, filterProduct]);
 
-  // 利用 vendor_info 裡的 batch_id 將資料自動組成 Card 群組
   const groupedMrpPlans = useMemo(() => {
     const groups = {};
     filteredMrp.forEach((d) => {
-      const batchId = d.vendor_info.batch_id;
-
-      if (!groups[batchId]) {
-        groups[batchId] = {
-          batchId,
-          plans: [],
-          createdAt: d.created_at,
-          vendorInfo: d.vendor_info || {},
-        };
-      }
-      groups[batchId].plans.push(d);
+      d.customer_orders.forEach((dco) => {
+        const batchId = dco.logistics_info.batch_id;
+        if (!groups[batchId]) {
+          groups[batchId] = {
+            batchId,
+            plans: [],
+            createdAt: d.created_at,
+            vendorInfo: d.vendor_info,
+          };
+        }
+        groups[batchId].plans.push(d);
+      });
     });
 
     return Object.values(groups).sort(
@@ -2287,7 +2287,7 @@ const RequirementOrderPage = () => {
                           }
                           className="flex-1 md:flex-none px-4 py-2 bg-emerald-600 text-white border border-emerald-700 rounded-lg hover:bg-emerald-700 transition-colors text-sm font-bold shadow-sm flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                          <PackageCheck size={16} /> 全轉生產單
+                          <PackageCheck size={16} /> 全部轉生產單
                         </button>
                       </div>
                     </div>
@@ -2295,13 +2295,15 @@ const RequirementOrderPage = () => {
                     {/* ====== Group Body: Expandable Rows (Table 原樣式但經過優化) ====== */}
                     <div className="overflow-x-auto p-2 md:p-4 bg-slate-50/50">
                       <div className="rounded-xl border border-slate-200 overflow-hidden bg-white shadow-sm">
-                        <table className="w-full text-left border-collapse">
-                          <thead className="bg-slate-100/80 border-b-2 border-slate-200 text-sm text-slate-600 font-bold uppercase tracking-wider">
+                        <table className="w-full text-left border-collapse whitespace-nowrap">
+                          <thead className="bg-slate-50 border-b border-slate-200 text-xs text-slate-500 font-bold uppercase tracking-wider">
                             <tr>
-                              <th className="p-4 w-12 text-center rounded-tl-lg"></th>
-                              <th className="p-4">產品名稱</th>
-                              <th className="p-4 text-right">需求量</th>
-                              <th className="p-4 text-center rounded-tr-lg">
+                              <th className="py-3 px-4 w-12 text-center"></th>
+                              <th className="py-3 px-4">產品名稱</th>
+                              <th className="py-3 px-4 text-right w-40">
+                                需求量
+                              </th>
+                              <th className="py-3 px-6 text-right w-[340px]">
                                 操作
                               </th>
                             </tr>
@@ -2329,10 +2331,10 @@ const RequirementOrderPage = () => {
                                     }`}
                                     onClick={() => toggleMrpExpanded(d.id)}
                                   >
-                                    <td className="p-4 text-center text-slate-400 text-[11px] group-hover:text-blue-500 transition-colors">
+                                    <td className="py-3 px-4 text-center text-slate-400 text-[11px] group-hover:text-blue-500 transition-colors">
                                       {isExpanded ? "▼" : "▶"}
                                     </td>
-                                    <td className="p-4">
+                                    <td className="py-3 px-4">
                                       <div className="flex items-center gap-2">
                                         <span className="font-bold text-slate-700 text-base group-hover:text-blue-800 transition-colors">
                                           {d.product_name}
@@ -2347,17 +2349,17 @@ const RequirementOrderPage = () => {
                                         )}
                                       </div>
                                     </td>
-                                    <td className="p-4 text-right text-slate-800 font-bold text-base">
+                                    <td className="py-3 px-4 text-right text-slate-800 font-bold text-base">
                                       {formatNum(d.required_qty, "PRODUCT")}{" "}
                                       <span className="text-slate-500 font-normal text-sm ml-1">
                                         {d.unit}
                                       </span>
                                     </td>
                                     <td
-                                      className="p-4"
+                                      className="py-3 px-6 text-right"
                                       onClick={(e) => e.stopPropagation()}
                                     >
-                                      <div className="flex flex-wrap items-center justify-center gap-2">
+                                      <div className="flex flex-wrap items-center justify-end gap-2">
                                         {/* Row (單一單據) Level Buttons */}
                                         <button
                                           onClick={(e) =>
@@ -2387,7 +2389,7 @@ const RequirementOrderPage = () => {
                                               ? "庫存不足，無法轉為生產單"
                                               : "將此草稿轉為生產單"
                                           }
-                                          className="w-[90%] md:w-auto px-4 py-1.5 bg-emerald-50 text-emerald-700 rounded hover:bg-emerald-500 hover:text-white transition-all duration-200 font-bold text-xs shadow-sm border border-emerald-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                                          className="px-4 py-1.5 bg-emerald-50 text-emerald-700 rounded hover:bg-emerald-500 hover:text-white transition-all duration-200 font-bold text-xs shadow-sm border border-emerald-200 disabled:opacity-50 disabled:cursor-not-allowed"
                                         >
                                           轉生產單
                                         </button>
@@ -2396,7 +2398,7 @@ const RequirementOrderPage = () => {
                                             e.stopPropagation();
                                             handleDeleteDraft(d.id);
                                           }}
-                                          className="w-[90%] md:w-auto px-3 py-1.5 bg-red-50 text-red-600 rounded hover:bg-red-500 hover:text-white transition-all duration-200 font-bold text-xs shadow-sm border border-red-200 disabled:opacity-50"
+                                          className="px-3 py-1.5 bg-red-50 text-red-600 rounded hover:bg-red-500 hover:text-white transition-all duration-200 font-bold text-xs shadow-sm border border-red-200 disabled:opacity-50"
                                           disabled={isSubmitting}
                                         >
                                           刪除

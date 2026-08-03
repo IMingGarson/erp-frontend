@@ -932,17 +932,26 @@ const RequirementOrderPage = () => {
     );
 
     if (isDraft) {
-      try {
-        const res = await fetchWithAuth(`/api/mrp/${orderId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ batch_inventory_info: orderAlloc }),
-        });
-        if (res.ok) fetchData();
-        else throw new Error("更新草稿失敗");
-      } catch (err) {
-        showAlert("錯誤", err.message, "error");
-      }
+      const cleanBatchInfo = { ...orderAlloc };
+      delete cleanBatchInfo._base_qty;
+      delete cleanBatchInfo._productId;
+      showConfirm("更新內容", "確認要更新內容嗎？", async () => {
+        try {
+          const res = await fetchWithAuth(`/api/mrp/${orderId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ batch_inventory_info: cleanBatchInfo }),
+          });
+          if (res.ok) {
+            showAlert("成功", "單據已成功更新", "success");
+            fetchData();
+          } else {
+            throw new Error("更新草稿失敗");
+          }
+        } catch (err) {
+          showAlert("錯誤", err.message, "error");
+        }
+      });
     } else {
       setBatches((prev) => [...prev]);
     }

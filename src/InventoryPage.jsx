@@ -164,8 +164,12 @@ const BomNode = ({ node, level = 0 }) => {
 
           <div className="ml-auto flex items-center gap-2 pr-4 sm:pr-0">
             {node.qtyRequired && (
-              <span className="flex-shrink-0 text-sm text-blue-700 font-medium bg-blue-50 px-2.5 py-0.5 rounded border border-blue-200">
-                用量: {parseFloat(node.qtyRequired).toString()} {node.unit}
+              <span
+                className="flex-shrink-0 text-sm text-blue-700 font-medium bg-blue-50 px-2.5 py-0.5 rounded border border-blue-200 shadow-sm"
+                title={`原始配方比例：基數 ${node.baseQuantity} 需要 ${node.rawRequired} ${node.unit}`}
+              >
+                每單位用量 {parseFloat(Number(node.qtyRequired).toFixed(4))}{" "}
+                {node.unit}
               </span>
             )}
 
@@ -575,7 +579,9 @@ const InventoryPage = () => {
 
           return {
             ...mat,
-            qtyRequired: bom.quantity_required,
+            qtyRequired:
+              Number(bom.quantity_required) / Number(bom.base_quantity || 1),
+            baseQuantity: bom.base_quantity || 1,
             totalInventory,
             batches: validBatches,
             children,

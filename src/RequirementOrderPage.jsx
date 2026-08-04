@@ -903,47 +903,53 @@ const RequirementOrderPage = () => {
   }, [orderItems, mrpPlans, boms, materials, batches]);
 
   const handleBatchUsageSave = async (orderId, matId, batchId, newVal) => {
-    const orderAlloc = { ...allocations[orderId] };
-    if (!orderAlloc) return;
-    const matData = { ...orderAlloc[matId] };
-    const batchIndex = matData.batches.findIndex(
-      (b) => String(b.id) === String(batchId),
-    );
+    showConfirm("確認更新", "是否確認更新此批號的庫存用量？", async () => {
+      closeDialog();
 
-    if (batchIndex !== -1) {
-      const newBatches = [...matData.batches];
-      newBatches[batchIndex] = { ...newBatches[batchIndex], used: newVal };
-      matData.batches = newBatches;
-
-      const totalAllocated = newBatches.reduce(
-        (sum, b) => sum + (parseFloat(b.used) || 0),
-        0,
+      const orderAlloc = { ...allocations[orderId] };
+      if (!orderAlloc) return;
+      const matData = { ...orderAlloc[matId] };
+      const batchIndex = matData.batches.findIndex(
+        (b) => String(b.id) === String(batchId),
       );
-      matData.isShortage = totalAllocated < matData.requiredQty - 0.0001;
-    }
 
-    orderAlloc[matId] = matData;
-    setAllocations((prev) => ({ ...prev, [orderId]: orderAlloc }));
+      if (batchIndex !== -1) {
+        const newBatches = [...matData.batches];
+        newBatches[batchIndex] = { ...newBatches[batchIndex], used: newVal };
+        matData.batches = newBatches;
 
-    const isDraft = mrpPlans.some(
-      (p) =>
-        String(p.id) === String(orderId) ||
-        String(p.frontend_temp_id) === String(orderId),
-    );
+        const totalAllocated = newBatches.reduce(
+          (sum, b) => sum + (parseFloat(b.used) || 0),
+          0,
+        );
+        matData.isShortage = totalAllocated < matData.requiredQty - 0.0001;
+      }
 
-    if (isDraft) {
-      const cleanBatchInfo = { ...orderAlloc };
-      delete cleanBatchInfo._base_qty;
-      delete cleanBatchInfo._productId;
-      showConfirm("更新內容", "確認要更新內容嗎？", async () => {
+      orderAlloc[matId] = matData;
+      setAllocations((prev) => ({ ...prev, [orderId]: orderAlloc }));
+
+      const isDraft = mrpPlans.some(
+        (p) =>
+          String(p.id) === String(orderId) ||
+          String(p.frontend_temp_id) === String(orderId),
+      );
+
+      if (isDraft) {
         try {
+          const cleanBatchInfo = { ...orderAlloc };
+          delete cleanBatchInfo._base_qty;
+          delete cleanBatchInfo._productId;
+
+          const payloadArray = Object.values(cleanBatchInfo);
+
           const res = await fetchWithAuth(`/api/mrp/${orderId}`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ batch_inventory_info: cleanBatchInfo }),
+            body: JSON.stringify({ batch_inventory_info: payloadArray }),
           });
+
           if (res.ok) {
-            showAlert("成功", "單據已成功更新", "success");
+            showAlert("成功", "已成功更新批號用量", "success");
             fetchData();
           } else {
             throw new Error("更新草稿失敗");
@@ -951,10 +957,11 @@ const RequirementOrderPage = () => {
         } catch (err) {
           showAlert("錯誤", err.message, "error");
         }
-      });
-    } else {
-      setBatches((prev) => [...prev]);
-    }
+      } else {
+        showAlert("成功", "已成功更新批號用量", "success");
+        setBatches((prev) => [...prev]);
+      }
+    });
   };
 
   const handleOpenPreview = () => {

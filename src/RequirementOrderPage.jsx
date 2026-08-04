@@ -11,7 +11,7 @@ import {
   PackageCheck,
 } from "lucide-react";
 import { useAuthStore } from "./store/authStore";
-
+const USEAGE_THRESHOLD = 1.8;
 const getTodayString = (formatted = false) => {
   const d = new Date();
   const yyyy = d.getFullYear();
@@ -884,7 +884,7 @@ const RequirementOrderPage = () => {
           type: matInfo?.type || "",
           code: matInfo?.code || "",
           requiredQty,
-          maxQty: requiredQty * 1.2,
+          maxQty: requiredQty * USEAGE_THERSHOLD,
           batches: batchAllocations,
           isShortage: remainingToFulfill > 0.0001,
         };

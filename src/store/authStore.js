@@ -41,6 +41,10 @@ export const useAuthStore = create(
         if (!user || !user.department) return false;
         return roleArray.includes(user.department.toUpperCase());
       },
+
+      me: () => {
+        return get().user;
+      },
     }),
     {
       name: "auth-storage",

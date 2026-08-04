@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from "react";
 import CustomDialog from "./components/customDialog";
 import { fetchWithAuth } from "./utils/fetchWithAuth";
 import { CompanyLogo } from "./components/companyLogo";
+import { useAuthStore } from "./store/authStore";
 
 const STATUS_MAP = {
   WAITING: {
@@ -313,6 +314,7 @@ const RequisitionNode = ({
 // 主頁面 Component
 // ==========================================
 const PurchaseRequisitionPage = () => {
+  const me = useAuthStore((state) => state.me());
   const [requisitions, setRequisitions] = useState([]);
   const [materials, setMaterials] = useState([]);
 
@@ -368,6 +370,7 @@ const PurchaseRequisitionPage = () => {
   useEffect(() => {
     fetchRequisitions();
     fetchMaterials();
+    setFormData((prev) => ({ ...prev, applicant: me.full_name }));
   }, []);
 
   const fetchRequisitions = async () => {
@@ -473,7 +476,7 @@ const PurchaseRequisitionPage = () => {
       setEditingRequisition(null);
       setFormData({
         request_date: today,
-        applicant: "",
+        applicant: me.full_name,
         status: "WAITING",
         items: [],
       });
@@ -850,7 +853,7 @@ const PurchaseRequisitionPage = () => {
                       <input
                         type="text"
                         name="applicant"
-                        required
+                        readOnly
                         value={formData.applicant}
                         onChange={handleMasterChange}
                         className="w-full px-3 py-2 border border-slate-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none"

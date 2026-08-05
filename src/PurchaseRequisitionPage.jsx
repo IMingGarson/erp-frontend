@@ -16,7 +16,7 @@ const STATUS_MAP = {
 };
 
 const StatusTag = ({ status }) => {
-  const statusData = STATUS_MAP[status] || {
+  const statusData = STATUS_MAP[status.toUpperCase()] || {
     label: status,
     css: "bg-slate-100 text-slate-600 border-slate-200",
   };
@@ -491,6 +491,7 @@ const PurchaseRequisitionPage = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+
     if (!formData.applicant || !formData.request_date)
       return showAlert("資料不完整", "請填寫申請人與填單日期", "warning");
     if (formData.items.length === 0)
@@ -499,6 +500,7 @@ const PurchaseRequisitionPage = () => {
     setIsSubmitting(true);
     const payload = {
       ...formData,
+      status: formData.status.toLowerCase(),
       items: formData.items.map((item) => ({
         ...item,
         expected_delivery_date: item.expected_delivery_date || null,

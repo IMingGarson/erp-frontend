@@ -884,7 +884,7 @@ const RequirementOrderPage = () => {
           type: matInfo?.type || "",
           code: matInfo?.code || "",
           requiredQty,
-          maxQty: requiredQty * USEAGE_THERSHOLD,
+          maxQty: requiredQty * USEAGE_THRESHOLD,
           batches: batchAllocations,
           isShortage: remainingToFulfill > 0.0001,
         };
@@ -1257,21 +1257,31 @@ const RequirementOrderPage = () => {
         closeDialog();
         setIsSubmitting(true);
         try {
-          const promises = group.plans.map((d) =>
-            fetchWithAuth("/api/mrp/convert_to_production", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ mrp_id: d.id }),
-            }).then(async (res) => {
-              const json = await res.json();
-              if (!res.ok) {
-                throw new Error(
-                  json.error || `單據 ${d.product_name} 轉換失敗`,
-                );
-              }
-              return json;
-            }),
-          );
+          const promises = group.plans
+            .filter((d) => d.status.toUpperCase() === "PENDING")
+            .map(async (d) => {
+              console.log("mrp_id", d.id);
+              return null;
+
+              // const res = await fetchWithAuth(
+              //   "/api/mrp/convert_to_production",
+              //   {
+              //     method: "POST",
+              //     headers: { "Content-Type": "application/json" },
+              //     body: JSON.stringify({ mrp_id: d.id }),
+              //   },
+              // );
+
+              // const json = await res.json();
+
+              // if (!res.ok) {
+              //   throw new Error(
+              //     json.error || `單據 ${d.product_name} 轉換失敗`,
+              //   );
+              // }
+
+              // return json;
+            });
 
           await Promise.all(promises);
           showAlert(
@@ -2252,6 +2262,9 @@ const RequirementOrderPage = () => {
                       .some((k) => allocations[displayId][k].isShortage)
                   );
                 });
+                const allConverted = group.plans.every(
+                  (d) => d.status.toUpperCase() !== "PENDING",
+                );
 
                 return (
                   <div
@@ -2290,21 +2303,34 @@ const RequirementOrderPage = () => {
                             </button>
                           </>
                         )}
-                        {/* 批量轉生產單按鈕 */}
-                        <button
-                          onClick={(e) =>
-                            handleBatchConvertToProduction(group, e)
-                          }
-                          disabled={groupHasShortage || isSubmitting}
-                          title={
-                            groupHasShortage
-                              ? "有項目庫存不足，無法整批轉換"
-                              : "將此訂單下的項目全部轉為生產單"
-                          }
-                          className="flex-1 md:flex-none px-4 py-2 bg-emerald-600 text-white border border-emerald-700 rounded-lg hover:bg-emerald-700 transition-colors text-sm font-bold shadow-sm flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          <PackageCheck size={16} /> 全部轉生產單
-                        </button>
+                        {!allConverted ? (
+                          <button
+                            onClick={(e) =>
+                              handleBatchConvertToProduction(group, e)
+                            }
+                            disabled={groupHasShortage || isSubmitting}
+                            title={
+                              groupHasShortage
+                                ? "有項目庫存不足，無法整批轉換"
+                                : "將此訂單下的項目全部轉為生產單"
+                            }
+                            className="flex-1 md:flex-none px-4 py-2 bg-emerald-600 text-white border border-emerald-700 rounded-lg hover:bg-emerald-700 transition-colors text-sm font-bold shadow-sm flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            <PackageCheck size={16} /> 全部轉生產單
+                          </button>
+                        ) : (
+                          <button
+                            disabled
+                            title="此訂單的所有項目皆已轉換為生產單"
+                            className="flex-1 md:flex-none px-4 py-2 bg-slate-100 text-slate-500 border border-slate-300 rounded-lg text-sm font-bold shadow-sm flex items-center justify-center gap-2 cursor-not-allowed"
+                          >
+                            <PackageCheck
+                              size={16}
+                              className="text-slate-400"
+                            />{" "}
+                            已全數轉換
+                          </button>
+                        )}
                       </div>
                     </div>
 
@@ -2399,7 +2425,12 @@ const RequirementOrderPage = () => {
                                           onClick={(e) =>
                                             handleConvertToProduction(d.id, e)
                                           }
-                                          disabled={hasShortage || isSubmitting}
+                                          disabled={
+                                            hasShortage ||
+                                            isSubmitting ||
+                                            d.status.toUpperCase() ===
+                                              "CONVERTED"
+                                          }
                                           title={
                                             hasShortage
                                               ? "庫存不足，無法轉為生產單"

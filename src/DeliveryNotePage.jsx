@@ -1,11 +1,9 @@
 import React, { useState, useEffect, useMemo } from "react";
 import CustomDialog from "./components/customDialog";
 import { fetchWithAuth } from "./utils/fetchWithAuth";
-import { useAuthStore } from "./store/authStore";
-import { ReceiptText, Printer } from "lucide-react";
+import { ReceiptText, Printer, Trash2 } from "lucide-react"; // 新增 Trash2 圖示
 
 const DeliveryNoteTemplate = ({ note }) => {
-  console.log("note", note);
   if (!note) return null;
   const customer = note.customer_info || {};
   const qtyStr = Number(note.quantity).toLocaleString(undefined, {
@@ -109,10 +107,10 @@ const DeliveryNoteTemplate = ({ note }) => {
           <tr>
             <td className="border border-black px-1 py-1.5">1</td>
             <td className="border border-black px-1 py-1.5 text-left">
-              {note.production_order_detail.product_code || ""}
+              {note.production_order_detail?.product_profile?.code || ""}
             </td>
             <td className="border border-black px-1 py-1.5 text-left">
-              {note.production_order_detail.product_name || ""}
+              {note.production_order_detail?.product_profile?.name || ""}
             </td>
             <td className="border border-black px-1 py-1.5">
               {note.spec || ""}
@@ -124,7 +122,7 @@ const DeliveryNoteTemplate = ({ note }) => {
               {note.unit || "KG"}
             </td>
             <td className="border border-black px-1 py-1.5">
-              {note.unit_price || ""}
+              {note.sales_price || ""}
             </td>
             <td className="border border-black px-1 py-1.5">
               {note.subtotal || ""}
@@ -133,10 +131,9 @@ const DeliveryNoteTemplate = ({ note }) => {
               {note.note || ""}
             </td>
             <td className="border border-black px-1 py-1.5">
-              {note.production_order_detail.used_batch_number || ""}
+              {note.production_order_detail?.used_batch_number || ""}
             </td>
           </tr>
-          {/* 預留空白列 */}
           <tr>
             <td className="border border-black px-1 py-1.5 text-transparent">
               .
@@ -220,7 +217,6 @@ const DeliveryNoteTemplate = ({ note }) => {
 
 const DeliveryNotePrintTemplate = ({ data }) => {
   if (!data) return null;
-
   return (
     <div className="hidden print:block w-full bg-white text-black font-sans mx-auto print:pt-4">
       <style>
@@ -263,7 +259,7 @@ const DeliveryNotePage = () => {
     spec: "",
     quantity: "",
     unit: "KG",
-    unit_price: "",
+    sales_price: "",
     used_batch_number: "",
     note: "",
     total_amount: "",
@@ -292,6 +288,7 @@ const DeliveryNotePage = () => {
       onConfirm: null,
     });
   };
+
   const closeDialog = () => setDialog((prev) => ({ ...prev, isOpen: false }));
 
   useEffect(() => {
@@ -337,7 +334,7 @@ const DeliveryNotePage = () => {
       spec: "",
       quantity: "",
       unit: "KG",
-      unit_price: "",
+      sales_price: "",
       used_batch_number: "",
       note: "",
       total_amount: "",
@@ -372,6 +369,7 @@ const DeliveryNotePage = () => {
         );
         vendor_detail = vres.ok ? (await vres.json()).data : {};
       }
+
       setFormData((prev) => ({
         ...prev,
         customer_name: vendor.name || vendor_detail.name || "",
@@ -381,9 +379,11 @@ const DeliveryNotePage = () => {
         contact: vendor.contact_person || vendor_detail.contact_person || "",
         phone: vendor.phone || vendor_detail.phone || "",
         address: vendor.address || vendor_detail.address || "",
-        product_name: data.product_name || "",
-        product_code: data.product_code || "",
-        spec: data.spec || "",
+        product_name: data.product_profile?.name || "",
+        product_code: data.product_profile?.code || "",
+        spec: data.product_profile?.spec || "",
+        unit: data.product_profile?.unit || "KG",
+        sales_price: data.product_profile?.sales_price || 0,
         quantity: data.remaining_qty || data.target_qty || "",
       }));
     } catch (error) {
@@ -400,18 +400,19 @@ const DeliveryNotePage = () => {
 
   useEffect(() => {
     const qty = parseFloat(formData.quantity) || 0;
-    const price = parseFloat(formData.unit_price) || 0;
+    const price = parseFloat(formData.sales_price) || 0;
     if (qty > 0 && price > 0) {
       const total = Math.round(qty * price);
       const tax = Math.round(total * 0.05);
       setFormData((prev) => ({
         ...prev,
+        sales_price: price,
         total_amount: total,
         tax_amount: tax,
         grand_total: total + tax,
       }));
     }
-  }, [formData.quantity, formData.unit_price]);
+  }, [formData.quantity, formData.sales_price]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -424,7 +425,7 @@ const DeliveryNotePage = () => {
       quantity: formData.quantity,
       unit: formData.unit,
       spec: formData.spec,
-      unit_price: formData.unit_price || null,
+      sales_price: formData.sales_price || null,
       batch_number: formData.batch_number,
       total_amount: formData.total_amount || null,
       tax_amount: formData.tax_amount || null,
@@ -469,15 +470,44 @@ const DeliveryNotePage = () => {
 
   const handlePrintRow = (e, note) => {
     if (e) e.stopPropagation();
-
     setPrintData(note);
-
     setTimeout(() => {
       const originalTitle = document.title;
       document.title = `銷貨單_${note.note_number}`;
       window.print();
       document.title = originalTitle;
     }, 150);
+  };
+
+  // --- 刪除銷貨單邏輯 ---
+  const handleDeleteNote = (e, note) => {
+    if (e) e.stopPropagation();
+
+    // 彈出確認對話框
+    setDialog({
+      isOpen: true,
+      type: "confirm",
+      status: "warning",
+      title: "確認刪除",
+      message: `您確定要刪除銷貨單「${note.note_number}」嗎？此操作會標記為作廢。`,
+      onConfirm: async () => {
+        closeDialog();
+        try {
+          const res = await fetchWithAuth(`/api/delivery_notes/${note.id}`, {
+            method: "DELETE",
+          });
+          if (!res.ok) throw new Error("刪除失敗");
+          showAlert(
+            "刪除成功",
+            `銷貨單 ${note.note_number} 已成功停用。`,
+            "success",
+          );
+          fetchDeliveryNotes(); // 重新載入列表
+        } catch (error) {
+          showAlert("刪除錯誤", error.message, "error");
+        }
+      },
+    });
   };
 
   const processedNotes = useMemo(() => {
@@ -602,12 +632,23 @@ const DeliveryNotePage = () => {
                             {Number(note.quantity).toLocaleString()} {note.unit}
                           </td>
                           <td className="p-4 text-center whitespace-nowrap">
-                            <button
-                              onClick={(e) => handlePrintRow(e, note)}
-                              className="px-3 py-1.5 bg-green-50 text-green-700 border border-green-200 rounded-md hover:bg-green-600 hover:text-white transition-all duration-200 text-xs font-bold inline-flex items-center gap-1 shadow-sm"
-                            >
-                              <Printer size={14} /> 列印
-                            </button>
+                            <div className="flex items-center justify-center gap-2">
+                              <button
+                                onClick={(e) => handlePrintRow(e, note)}
+                                className="px-3 py-1.5 bg-green-50 text-green-700 border border-green-200 rounded-md hover:bg-green-600 hover:text-white transition-all duration-200 text-xs font-bold inline-flex items-center gap-1 shadow-sm"
+                              >
+                                <Printer size={14} /> 列印
+                              </button>
+
+                              {/* 刪除按鈕 */}
+                              <button
+                                onClick={(e) => handleDeleteNote(e, note)}
+                                className="px-3 py-1.5 bg-red-50 text-red-600 border border-red-200 rounded-md hover:bg-red-600 hover:text-white transition-all duration-200 text-xs font-bold inline-flex items-center gap-1 shadow-sm"
+                                title="刪除單據"
+                              >
+                                <Trash2 size={14} /> 刪除
+                              </button>
+                            </div>
                           </td>
                         </tr>
 
@@ -641,7 +682,7 @@ const DeliveryNotePage = () => {
           </div>
         </div>
 
-        {/* Modal 表單區塊 (未更動) */}
+        {/* Modal 表單區塊 */}
         {isModalOpen && (
           <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-40 p-4">
             <div className="bg-white max-w-4xl w-full max-h-[90vh] overflow-y-auto rounded-xl shadow-xl">
@@ -674,8 +715,13 @@ const DeliveryNotePage = () => {
                         -- 請先選擇生產單 --
                       </option>
                       {productionOrders.map((po) => (
-                        <option key={po.id} value={po.id}>
-                          #{po.order_number} {po.product_name}
+                        <option
+                          key={po.id}
+                          value={po.id}
+                          disabled={po.is_fully_delivered}
+                        >
+                          {po.order_number} {po.product_profile?.name || ""}{" "}
+                          {po.is_fully_delivered ? "(已銷貨完畢)" : ""}
                         </option>
                       ))}
                     </select>
@@ -817,8 +863,8 @@ const DeliveryNotePage = () => {
                         <td className="p-2">
                           <input
                             type="number"
-                            name="unit_price"
-                            value={formData.unit_price}
+                            name="sales_price"
+                            value={formData.sales_price}
                             onChange={handleFormChange}
                             className="w-full border-b focus:outline-none"
                           />

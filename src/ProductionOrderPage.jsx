@@ -136,12 +136,14 @@ const ProductionFormTemplate = ({ order, isChildForm = false, onPrint }) => {
           </div>
           <div className="mt-1">
             產品編號 :{" "}
-            <span className="font-mono">{order.product_code || "-"}</span>
+            <span className="font-mono">
+              {order.product_profile.code || "-"}
+            </span>
           </div>
           <div className="mt-1 text-[14px] font-bold whitespace-nowrap">
-            產品名稱 : {order.product_name}
+            產品名稱 : {order.product_profile.name}
           </div>
-          <div className="mt-1">產品規格 : -</div>
+          <div className="mt-1">產品規格 : {order.product_profile.spec}</div>
           <div className="mt-1 italic underline">生產注意 : </div>
         </div>
 
@@ -163,7 +165,7 @@ const ProductionFormTemplate = ({ order, isChildForm = false, onPrint }) => {
             <span className="font-mono font-bold text-xl">
               {formatNum(order.target_qty, "PRODUCT")}
             </span>
-            <span>{order.product_unit || "KG"}</span>
+            <span>{order.product_profile.unit || "KG"}</span>
           </div>
         </div>
 
@@ -572,7 +574,7 @@ const ProductionOrderPage = () => {
     setPrintData(orderToPrint);
     setTimeout(() => {
       const originalTitle = document.title;
-      document.title = `${po.order_number}_${po.product_name}`;
+      document.title = `${po.order_number}_${po.product_profile.name}`;
       window.print();
       document.title = originalTitle;
     }, 150);
@@ -586,8 +588,10 @@ const ProductionOrderPage = () => {
           po.order_number.toLowerCase().includes(filterOrder.toLowerCase()));
       const matchProduct =
         !filterProduct ||
-        (po.product_name &&
-          po.product_name.toLowerCase().includes(filterProduct.toLowerCase()));
+        (po.product_profile.name &&
+          po.product_profile.name
+            .toLowerCase()
+            .includes(filterProduct.toLowerCase()));
       return matchOrder && matchProduct;
     });
   }, [productionOrders, filterOrder, filterProduct]);
@@ -667,6 +671,7 @@ const ProductionOrderPage = () => {
               <tbody className="divide-y divide-slate-100 text-sm">
                 {filteredOrders.length > 0 ? (
                   filteredOrders.map((po) => {
+                    console.log("po", po);
                     const isExpanded = expandedOrderIds.includes(po.id);
                     return (
                       <React.Fragment key={po.id}>
@@ -683,14 +688,14 @@ const ProductionOrderPage = () => {
                           <td className="p-4">
                             <div className="flex items-center gap-2">
                               <span className="font-bold text-slate-800">
-                                {po.product_name}
+                                {po.product_profile.name}
                               </span>
                             </div>
                           </td>
                           <td className="p-4 text-right text-slate-800 font-mono font-bold">
-                            {formatNum(po.target_qty, po.product_type)}{" "}
+                            {formatNum(po.target_qty, po.product_profile.type)}{" "}
                             <span className="text-xs text-slate-500 font-sans font-normal">
-                              {po.product_unit}
+                              {po.product_profile.unit}
                             </span>
                           </td>
                           <td className="p-4 text-center text-slate-600">

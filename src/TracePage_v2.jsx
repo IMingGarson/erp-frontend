@@ -880,9 +880,6 @@ const TracePage = () => {
                                         <div>
                                           入庫日期: {batch.received_date}
                                         </div>
-                                        <div>
-                                          有效期限: {batch.expiration_date}
-                                        </div>
                                       </div>
                                     </div>
                                     {/* 欄位二 */}

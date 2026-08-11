@@ -435,12 +435,11 @@ const TracePage = () => {
     return ((actualRec + inStock) / totalProduced) * 100;
   }, [reportData, formData.actualRecovered]);
 
-  // 注意最外層使用了 <> Fragment 包覆，確保 print:hidden 不會干涉到要列印的元件
   return (
     <>
       <div className="p-6 md:p-8 max-w-7xl mx-auto bg-blue-50/20 min-h-screen font-sans relative text-slate-900 print:hidden">
         {/* 標題區 */}
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4 border-b border-slate-200 pb-4">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-3 gap-4 border-slate-200 pb-4">
           <h2 className="text-3xl font-black text-black tracking-tight flex items-center gap-2">
             追蹤追溯
           </h2>

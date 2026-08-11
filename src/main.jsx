@@ -16,6 +16,7 @@ import TracePage from "./TracePage_v2.jsx";
 import UserPage from "./UserPage.jsx";
 import "./index.css";
 import DeliveryNotePage from "./DeliveryNotePage.jsx";
+import MaterialProviderPage from "./MaterialProvider.jsx";
 
 const router = createBrowserRouter([
   {
@@ -58,6 +59,10 @@ const router = createBrowserRouter([
               {
                 path: "users",
                 element: <UserPage />,
+              },
+              {
+                path: "material-providers",
+                element: <MaterialProviderPage />,
               },
               {
                 path: "*",

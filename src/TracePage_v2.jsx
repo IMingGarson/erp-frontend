@@ -97,7 +97,7 @@ const RecallReportPrintTemplate = ({
                 預定完成回收期限
               </td>
               <td className="border border-black px-2 py-1.5 text-slate-500 font-normal">
-                {formData.deadline || "請輸入預定日期"}
+                {formData.deadline || ""}
               </td>
             </tr>
             <tr>
@@ -147,7 +147,10 @@ const RecallReportPrintTemplate = ({
                 回收原料總量
               </td>
               <td className="border border-black px-2 py-1.5 text-center font-mono">
-                {parseFloat(reportData.used_raw_total).toFixed(4)}
+                {(
+                  parseFloat(reportData.used_raw_total) +
+                  parseFloat(reportData.unused_raw_total)
+                ).toFixed(4)}
               </td>
               <td className="border border-black px-2 py-1.5 text-xs font-normal">
                 異常原料進貨總量(kg)
@@ -215,7 +218,7 @@ const RecallReportPrintTemplate = ({
                 整體回收率 (%)
               </td>
               <td className="border border-black px-2 py-1.5 text-center text-red-600 font-mono">
-                {recoveryRate !== null ? `${recoveryRate.toFixed(2)}%` : "-"}
+                {recoveryRate !== null ? `${recoveryRate.toFixed(2)}%` : ""}
               </td>
               <td className="border border-black px-2 py-1.5 text-xs font-normal">
                 (產品實際回收總量+庫存) / 總生產量
@@ -583,7 +586,10 @@ const TracePage = () => {
                         回收原料總量
                       </td>
                       <td className="border border-slate-300 px-4 py-2.5 text-center font-mono">
-                        {parseFloat(reportData.used_raw_total).toFixed(4)}
+                        {(
+                          parseFloat(reportData.used_raw_total) +
+                          parseFloat(reportData.unused_raw_total)
+                        ).toFixed(4)}
                       </td>
                       <td className="border border-slate-300 px-4 py-2.5 text-xs font-normal">
                         異常原料進貨總量(kg)
@@ -670,7 +676,7 @@ const TracePage = () => {
                       <td className="border border-slate-300 px-4 py-2.5 text-center text-red-600 font-mono">
                         {recoveryRate !== null
                           ? `${recoveryRate.toFixed(2)}%`
-                          : "-"}
+                          : ""}
                       </td>
                       <td className="border border-slate-300 px-4 py-2.5 text-xs font-normal">
                         (產品實際回收總量+庫存) / 總生產量
@@ -796,10 +802,7 @@ const TracePage = () => {
                       <th className="p-4 whitespace-nowrap">物料名稱</th>
                       <th className="p-4 whitespace-nowrap">剩餘庫存</th>
                       <th className="p-4 whitespace-nowrap">入庫日期</th>
-                      <th className="p-4 whitespace-nowrap">有效期限</th>
-                      <th className="p-4 text-center whitespace-nowrap">
-                        操作
-                      </th>
+                      <th className="p-4 whitespace-nowrap">操作</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-blue-50 text-sm">
@@ -839,9 +842,6 @@ const TracePage = () => {
                               </td>
                               <td className="p-4 font-mono text-sm text-black">
                                 {batch.received_date}
-                              </td>
-                              <td className="p-4 font-mono text-sm text-black">
-                                {batch.expiration_date}
                               </td>
                               <td className="p-4 text-center whitespace-nowrap">
                                 <button
@@ -949,7 +949,7 @@ const TracePage = () => {
                                     {/* 欄位三 */}
                                     <div className="bg-white border border-blue-100 rounded-xl p-4 shadow-sm flex flex-col h-full">
                                       <div className="text-xs font-bold text-blue-600 uppercase tracking-wider mb-3">
-                                        3. 物料需求單 ({mrpsList.length})
+                                        3. 尚未生產之單據 ({mrpsList.length})
                                       </div>
                                       <div className="space-y-3 flex-1 overflow-y-auto max-h-[300px] pr-1">
                                         {mrpsList.length > 0 ? (

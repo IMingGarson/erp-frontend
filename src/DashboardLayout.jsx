@@ -13,6 +13,7 @@ import {
   Users,
   PackageCheck,
   FileText,
+  BriefcaseBusiness,
 } from "lucide-react";
 import { useAuthStore } from "./store/authStore";
 
@@ -26,8 +27,19 @@ const MENU_GROUPS = [
     ],
   },
   {
-    group: "客戶管理",
-    items: [{ path: "/vendors", label: "客戶名錄", icon: Building2 }],
+    group: "研發專區",
+    items: [{ path: "/bom-dev", label: "配方研製", icon: ShieldAlert }],
+  },
+  {
+    group: "往來單位",
+    items: [
+      { path: "/vendors", label: "客戶名錄", icon: Building2 },
+      {
+        path: "/material-providers",
+        label: "供應商名錄",
+        icon: BriefcaseBusiness,
+      },
+    ],
   },
   {
     group: "單據管理",
@@ -40,6 +52,7 @@ const MENU_GROUPS = [
         label: "請購單管理",
         icon: ShoppingCart,
       },
+      { path: "/client-quotation", label: "報價單管理", icon: ShoppingCart },
     ],
   },
   {
@@ -60,6 +73,7 @@ export default function DashboardLayout() {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, logout } = useAuthStore();
+  const isRD = useAuthStore((state) => state.isRD());
 
   const rawDepartment = user?.department?.toLowerCase() || "";
   const displayDepartment = DEPARTMENT_MAP[rawDepartment];
@@ -83,7 +97,6 @@ export default function DashboardLayout() {
 
   const username = user.username || "Guest";
   const avatarInitials = username.substring(0, 2).toUpperCase();
-
   return (
     <div className="flex h-screen print:h-auto bg-slate-50 font-sans overflow-hidden print:overflow-visible">
       <aside className="w-64 bg-slate-900 text-slate-300 flex flex-col flex-shrink-0 shadow-2xl z-20 print:hidden">
@@ -101,6 +114,9 @@ export default function DashboardLayout() {
               </h3>
               <ul className="space-y-1">
                 {group.items.map((item) => {
+                  if (!isRD && group.group === "研發專區") {
+                    return null;
+                  }
                   const isActive = location.pathname === item.path;
                   const Icon = item.icon;
                   return (

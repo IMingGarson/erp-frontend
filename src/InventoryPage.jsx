@@ -134,7 +134,6 @@ const BomNode = ({ node, level = 0 }) => {
     ? node.batches.reduce((sum, b) => sum + parseFloat(b.original_qty || 0), 0)
     : 0;
 
-  // 只有當不是半成品時，才計算低水位
   const isLowStock =
     node.type !== "SEMI" &&
     totalOriginal > 0 &&
@@ -162,20 +161,53 @@ const BomNode = ({ node, level = 0 }) => {
             {node.name}
           </span>
 
-          <div className="ml-auto flex items-center gap-2 pr-4 sm:pr-0">
+          <div className="ml-auto flex items-center gap-2 pr-4 sm:pr-0 max-w-full min-w-0">
             {node.qtyRequired && (
               <span
-                className="flex-shrink-0 text-sm text-blue-700 font-medium bg-blue-50 px-2.5 py-0.5 rounded border border-blue-200 shadow-sm"
-                title={`原始配方比例：基數 ${node.baseQuantity} 需要 ${node.rawRequired} ${node.unit}`}
+                className="
+                  inline-flex items-center gap-1.5
+                  min-w-0 max-w-full
+                  px-2.5 py-1
+                  rounded-md
+                  bg-blue-50
+                  border border-blue-200
+                  text-blue-700
+                  text-xs sm:text-sm
+                  font-medium
+                  shadow-sm
+                "
               >
-                每單位用量 {parseFloat(Number(node.qtyRequired).toFixed(4))}{" "}
-                {node.unit}
+                <span className="truncate">
+                  <span className="hidden sm:inline">比例：</span>
+                  <span className="font-bold">
+                    {node.baseQuantity} {node.unit}
+                  </span>
+                  <span className="mx-1"> 需要 </span>
+                  <span className="font-bold">
+                    {node.qtyRequired} {node.unit}
+                  </span>
+                </span>
               </span>
             )}
 
             {isLowStock && (
-              <span className="flex-shrink-0 px-2 py-0.5 bg-red-100 text-red-700 text-xs font-bold rounded border border-red-200">
-                ⚠️ 低水位
+              <span
+                className="
+                  inline-flex items-center gap-1
+                  flex-shrink-0
+                  px-2.5 py-1
+                  rounded-md
+                  bg-red-50
+                  border border-red-200
+                  text-red-600
+                  text-xs
+                  font-bold
+                  shadow-sm
+                  whitespace-nowrap
+                "
+              >
+                {" "}
+                <span>⚠</span> <span>低水位</span>{" "}
               </span>
             )}
           </div>
@@ -579,9 +611,8 @@ const InventoryPage = () => {
 
           return {
             ...mat,
-            qtyRequired:
-              Number(bom.quantity_required) / Number(bom.base_quantity || 1),
-            baseQuantity: bom.base_quantity || 1,
+            qtyRequired: Number(bom.quantity_required).toFixed(3),
+            baseQuantity: Number(bom.base_quantity).toFixed(2) || 1,
             totalInventory,
             batches: validBatches,
             children,

@@ -1,4 +1,5 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, Fragment } from "react";
+import { ChevronDown, ChevronUp } from "lucide-react";
 import CustomDialog from "./components/customDialog";
 import { fetchWithAuth } from "./utils/fetchWithAuth";
 import { useAuthStore } from "./store/authStore";
@@ -9,6 +10,7 @@ const VendorPage = () => {
   const [vendors, setVendors] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [expandedRows, setExpandedRows] = useState({});
 
   // 搜尋狀態
   const [searchTerm, setSearchTerm] = useState("");
@@ -17,7 +19,7 @@ const VendorPage = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingVendor, setEditingVendor] = useState(null);
   const [formData, setFormData] = useState({
-    code: "", // 新增代碼欄位
+    code: "",
     name: "",
     tax_id: "",
     contact_person: "",
@@ -62,19 +64,20 @@ const VendorPage = () => {
     setDialog((prev) => ({ ...prev, isOpen: false }));
   };
 
+  const toggleRow = (id) => {
+    setExpandedRows((prev) => ({ ...prev, [id]: !prev[id] }));
+  };
+
   useEffect(() => {
     fetchVendors();
   }, []);
 
-  // 1. 修正 Fetch 邏輯：解析 .data
   const fetchVendors = async () => {
     setLoading(true);
     try {
-      // 移除 API 結尾的 /
       const res = await fetchWithAuth("/api/vendors");
       if (!res.ok) throw new Error("無法載入客戶資料");
       const json = await res.json();
-      // 根據統一 Response 格式取用 data
       setVendors(json.data || []);
     } catch (err) {
       setError(err.message);
@@ -92,7 +95,7 @@ const VendorPage = () => {
       (v) =>
         (v.name && v.name.toLowerCase().includes(searchTerm.toLowerCase())) ||
         (v.tax_id && v.tax_id.includes(searchTerm)) ||
-        (v.code && v.code.toLowerCase().includes(searchTerm.toLowerCase())), // 新增代碼搜尋
+        (v.code && v.code.toLowerCase().includes(searchTerm.toLowerCase())),
     );
   }, [vendors, searchTerm]);
 
@@ -101,7 +104,7 @@ const VendorPage = () => {
     if (vendor) {
       setEditingVendor(vendor);
       setFormData({
-        code: vendor.code || "", // 載入代碼
+        code: vendor.code || "",
         name: vendor.name || "",
         tax_id: vendor.tax_id || "",
         contact_person: vendor.contact_person || "",
@@ -117,7 +120,7 @@ const VendorPage = () => {
         contact_person: "",
         phone: "",
         address: "",
-      }); // 重置包含代碼
+      });
     }
     setIsModalOpen(true);
   };
@@ -132,21 +135,13 @@ const VendorPage = () => {
     setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
-  // 2. 修正 Submit 邏輯：處理 PUT/POST URL
-  // 2. 修正 Submit 邏輯：加入格式驗證與處理 PUT/POST URL
-  const handleSubmit = async (e) => {
+  const handleSubmit = (e) => {
     e.preventDefault();
-
-    // ==========================================
-    // 🛡️ 表單資料 Validation 驗證區塊
-    // ==========================================
 
     if (!formData.name) {
       return showAlert("資料不完整", "請填寫客戶名稱", "warning");
     }
 
-    // 1. 驗證名稱：只允許中文 (\u4E00-\u9FFF)、半形英文 (a-zA-Z)、半形數字 (0-9) 以及空白 (\s)
-    // 因為嚴格指定了半形範圍，使用者若輸入「全形英數字」或「特殊符號」都會被阻擋
     const nameRegex = /^[\u4E00-\u9FFFa-zA-Z0-9\s]+$/;
     if (!nameRegex.test(formData.name)) {
       return showAlert(
@@ -156,7 +151,6 @@ const VendorPage = () => {
       );
     }
 
-    // 2. 驗證代碼：只允許半形數字 (\d) 與橫槓 (-)
     const codeRegex = /^[\d-]+$/;
     if (formData.code && !codeRegex.test(formData.code)) {
       return showAlert(
@@ -174,7 +168,6 @@ const VendorPage = () => {
       );
     }
 
-    // 3. 驗證統一編號：只允許半形數字 (\d)
     const taxIdRegex = /^\d+$/;
     if (formData.tax_id && !taxIdRegex.test(formData.tax_id)) {
       return showAlert(
@@ -183,51 +176,54 @@ const VendorPage = () => {
         "warning",
       );
     }
-    // ==========================================
 
-    setIsSubmitting(true);
+    showConfirm(
+      "儲存確認",
+      `確定要${editingVendor ? "更新" : "新增"}客戶「${formData.name}」的資料嗎？`,
+      async () => {
+        closeDialog();
+        setIsSubmitting(true);
 
-    const url = editingVendor
-      ? `/api/vendors/${editingVendor.id}`
-      : "/api/vendors";
+        const url = editingVendor
+          ? `/api/vendors/${editingVendor.id}`
+          : "/api/vendors";
 
-    const method = editingVendor ? "PUT" : "POST";
+        const method = editingVendor ? "PUT" : "POST";
 
-    try {
-      const res = await fetchWithAuth(url, {
-        method,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formData),
-      });
+        try {
+          const res = await fetchWithAuth(url, {
+            method,
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(formData),
+          });
 
-      if (!res.ok) throw new Error("儲存失敗");
+          if (!res.ok) throw new Error("儲存失敗");
 
-      await fetchVendors();
-      closeModal();
-      showAlert(
-        "儲存成功",
-        `已成功${editingVendor ? "更新" : "新增"}客戶「${formData.name}」的資料。`,
-        "success",
-      );
-    } catch (err) {
-      showAlert("發生錯誤", err.message, "error");
-    } finally {
-      setIsSubmitting(false);
-    }
+          await fetchVendors();
+          closeModal();
+          showAlert(
+            "儲存成功",
+            `已成功${editingVendor ? "更新" : "新增"}客戶「${formData.name}」的資料。`,
+            "success",
+          );
+        } catch (err) {
+          showAlert("發生錯誤", err.message, "error");
+        } finally {
+          setIsSubmitting(false);
+        }
+      },
+    );
   };
 
-  // 3. 修正 Delete 邏輯：移除 URL 斜線
   const handleDelete = (id, name) => {
     showConfirm("刪除確認", `確定要刪除客戶「${name}」嗎？`, async () => {
       closeDialog();
       try {
-        // 移除 API 結尾的 /
         const res = await fetchWithAuth(`/api/vendors/${id}`, {
           method: "DELETE",
         });
         if (!res.ok) throw new Error("刪除失敗");
 
-        // 重新拉取或從本地過濾
         setVendors((prev) => prev.filter((v) => v.id !== id));
         showAlert("刪除成功", `已成功移除「${name}」。`, "success");
       } catch (err) {
@@ -279,7 +275,7 @@ const VendorPage = () => {
         </div>
       )}
 
-      {/* 操作區與篩選器 (修改為統一風格) */}
+      {/* 操作區與篩選器 */}
       <div className="flex flex-col md:flex-row justify-between items-center gap-4 p-4 mt-2">
         <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto items-center">
           <input
@@ -309,11 +305,12 @@ const VendorPage = () => {
         )}
       </div>
 
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden min-h-[400px]">
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200 text-sm text-slate-600">
+                <th className="p-4 w-10"></th>
                 <th className="p-4 font-semibold whitespace-nowrap">
                   客戶代碼
                 </th>
@@ -338,49 +335,106 @@ const VendorPage = () => {
             <tbody className="divide-y divide-slate-100">
               {processedVendors.length > 0 ? (
                 processedVendors.map((vendor) => (
-                  <tr
-                    key={vendor.id}
-                    className="hover:bg-slate-50 outline-none transition-colors"
-                  >
-                    <td className="p-4 text-slate-600 font-mono text-sm">
-                      {vendor.code || "-"}
-                    </td>
-                    <td className="p-4 text-slate-800 font-bold">
-                      {vendor.name}
-                    </td>
-                    <td className="p-4 text-slate-600 font-mono text-sm">
-                      {vendor.tax_id || "-"}
-                    </td>
-                    <td className="p-4 text-slate-600">
-                      {vendor.contact_person || "-"}
-                    </td>
-                    <td className="p-4 text-slate-600 font-mono text-sm">
-                      {vendor.phone || "-"}
-                    </td>
-                    <td className="p-4 text-slate-500 font-mono text-sm">
-                      {vendor.address || "-"}
-                    </td>
-                    {isRD && (
-                      <td className="p-4 text-center whitespace-nowrap">
-                        <button
-                          onClick={() => openModal(vendor)}
-                          className="px-3 py-1.5 bg-blue-50 text-blue-600 border border-blue-200 rounded-md hover:bg-blue-600 hover:text-white transition-all duration-200 text-xs font-bold mr-2 outline-none shadow-sm"
-                        >
-                          編輯
-                        </button>
-                        <button
-                          onClick={() => handleDelete(vendor.id, vendor.name)}
-                          className="px-3 py-1.5 bg-red-50 text-red-600 border border-red-200 rounded-md hover:bg-red-500 hover:text-white transition-all duration-200 text-xs font-bold outline-none shadow-sm"
-                        >
-                          刪除
-                        </button>
+                  <Fragment key={vendor.id}>
+                    <tr
+                      className="hover:bg-slate-50 outline-none transition-colors cursor-pointer"
+                      onClick={() => toggleRow(vendor.id)}
+                    >
+                      <td className="p-4 text-slate-400">
+                        {expandedRows[vendor.id] ? (
+                          <ChevronUp size={16} />
+                        ) : (
+                          <ChevronDown size={16} />
+                        )}
                       </td>
+                      <td className="p-4 text-slate-600 font-mono text-sm">
+                        {vendor.code || "-"}
+                      </td>
+                      <td className="p-4 text-slate-800 font-bold">
+                        {vendor.name}
+                      </td>
+                      <td className="p-4 text-slate-600 font-mono text-sm">
+                        {vendor.tax_id || "-"}
+                      </td>
+                      <td className="p-4 text-slate-600">
+                        {vendor.contact_person || "-"}
+                      </td>
+                      <td className="p-4 text-slate-600 font-mono text-sm">
+                        {vendor.phone || "-"}
+                      </td>
+                      <td className="p-4 text-slate-500 font-mono text-sm truncate max-w-xs">
+                        {vendor.address || "-"}
+                      </td>
+                      {isRD && (
+                        <td className="p-4 text-center whitespace-nowrap">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openModal(vendor);
+                            }}
+                            className="px-3 py-1.5 bg-blue-50 text-blue-600 border border-blue-200 rounded-md hover:bg-blue-600 hover:text-white transition-all duration-200 text-xs font-bold mr-2 outline-none shadow-sm"
+                          >
+                            編輯
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDelete(vendor.id, vendor.name);
+                            }}
+                            className="px-3 py-1.5 bg-red-50 text-red-600 border border-red-200 rounded-md hover:bg-red-500 hover:text-white transition-all duration-200 text-xs font-bold outline-none shadow-sm"
+                          >
+                            刪除
+                          </button>
+                        </td>
+                      )}
+                    </tr>
+
+                    {/* 展開詳情列 */}
+                    {expandedRows[vendor.id] && (
+                      <tr className="bg-slate-50/50">
+                        <td colSpan={isRD ? "8" : "7"} className="px-12 py-4">
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-6 text-sm text-slate-600">
+                            <div>
+                              <p className="font-bold text-slate-400 uppercase text-xs mb-1">
+                                客戶代碼
+                              </p>
+                              <p className="font-mono">{vendor.code || "-"}</p>
+                            </div>
+                            <div>
+                              <p className="font-bold text-slate-400 uppercase text-xs mb-1">
+                                統一編號
+                              </p>
+                              <p className="font-mono">
+                                {vendor.tax_id || "-"}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="font-bold text-slate-400 uppercase text-xs mb-1">
+                                負責人
+                              </p>
+                              <p>{vendor.contact_person || "-"}</p>
+                            </div>
+                            <div>
+                              <p className="font-bold text-slate-400 uppercase text-xs mb-1">
+                                聯絡電話
+                              </p>
+                              <p className="font-mono">{vendor.phone || "-"}</p>
+                            </div>
+                            <div className="col-span-2 md:col-span-4">
+                              <p className="font-bold text-slate-400 uppercase text-xs mb-1">
+                                完整地址
+                              </p>
+                              <p>{vendor.address || "-"}</p>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
                     )}
-                  </tr>
+                  </Fragment>
                 ))
               ) : (
                 <tr>
-                  <td colSpan="7" className="p-12 text-center text-slate-400">
+                  <td colSpan="8" className="p-12 text-center text-slate-400">
                     找不到符合的客戶資料
                   </td>
                 </tr>
@@ -454,7 +508,7 @@ const VendorPage = () => {
                   </div>
                   <div>
                     <label className="block text-sm font-bold text-slate-700 mb-1">
-                      聯絡人
+                      負責人
                     </label>
                     <input
                       type="text"
@@ -462,7 +516,7 @@ const VendorPage = () => {
                       value={formData.contact_person}
                       onChange={handleFormChange}
                       className="w-full px-3 py-2 border border-slate-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                      placeholder="輸入聯絡人名稱"
+                      placeholder="輸入負責人名稱"
                     />
                   </div>
                 </div>

@@ -70,6 +70,10 @@ const router = createBrowserRouter([
                 element: <BOMCreatePage />,
               },
               {
+                path: "bom-create/:materialCode",
+                element: <BOMCreatePage />,
+              },
+              {
                 path: "*",
                 element: (
                   <div className="p-6 text-red-500 font-bold">

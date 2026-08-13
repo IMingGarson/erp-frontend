@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, Fragment } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   ChevronDown,
   ChevronUp,
@@ -7,6 +8,7 @@ import {
   Edit2,
   Trash2,
   Eye,
+  Layers,
 } from "lucide-react";
 import CustomDialog from "./components/customDialog";
 import { fetchWithAuth } from "./utils/fetchWithAuth";
@@ -36,6 +38,7 @@ const getPhaseLabel = (phaseValue) => {
 
 export default function MaterialPage() {
   const isRD = useAuthStore((state) => state.isRD());
+  const navigate = useNavigate();
 
   const [materials, setMaterials] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -422,27 +425,41 @@ export default function MaterialPage() {
                         className="p-3 text-center whitespace-nowrap"
                         onClick={(e) => e.stopPropagation()}
                       >
-                        <div className="flex w-full justify-center gap-3">
+                        <div className="flex w-full justify-center gap-2">
                           <button
                             onClick={() => setViewingMaterial(mat)}
-                            className="px-3 py-1.5 bg-slate-50 text-slate-600 border border-slate-200 rounded-md hover:bg-slate-600 hover:text-white transition-all text-xs font-bold shadow-sm"
+                            className="w-16 py-1.5 bg-slate-50 text-slate-600 border border-slate-200 rounded-md hover:bg-slate-600 hover:text-white transition-all text-xs font-bold shadow-sm"
                           >
                             詳情
                           </button>
+                          <button
+                            onClick={() => handleOpenEditModal(mat)}
+                            className="w-16 py-1.5 bg-blue-50 text-blue-600 border border-blue-200 rounded-md hover:bg-blue-600 hover:text-white transition-all text-xs font-bold shadow-sm"
+                          >
+                            編輯
+                          </button>
+                          <button
+                            onClick={() => handleDelete(mat.id, mat.name)}
+                            className="w-16 py-1.5 bg-red-50 text-red-600 border border-red-200 rounded-md hover:bg-red-500 hover:text-white transition-all text-xs font-bold shadow-sm"
+                          >
+                            刪除
+                          </button>
                           {isRD && (
                             <>
-                              <button
-                                onClick={() => handleOpenEditModal(mat)}
-                                className="px-3 py-1.5 bg-blue-50 text-blue-600 border border-blue-200 rounded-md hover:bg-blue-600 hover:text-white transition-all text-xs font-bold shadow-sm"
-                              >
-                                編輯
-                              </button>
-                              <button
-                                onClick={() => handleDelete(mat.id, mat.name)}
-                                className="px-3 py-1.5 bg-red-50 text-red-600 border border-red-200 rounded-md hover:bg-red-500 hover:text-white transition-all text-xs font-bold shadow-sm"
-                              >
-                                刪除
-                              </button>
+                              {mat.phase === "IN_DEV" &&
+                              ["PRODUCT", "SEMI"].includes(mat.type) ? (
+                                <button
+                                  onClick={() =>
+                                    navigate(`/bom-create/${mat.code}`)
+                                  }
+                                  className="w-20 py-1.5 bg-purple-50 text-purple-600 border border-purple-200 rounded-md hover:bg-purple-600 hover:text-white transition-all text-xs font-bold shadow-sm"
+                                >
+                                  調整配方
+                                </button>
+                              ) : (
+                                /* 🌟 隱形佔位符：確保下方的「編輯」與「刪除」不會往左邊塌陷 */
+                                <div className="w-20"></div>
+                              )}
                             </>
                           )}
                         </div>

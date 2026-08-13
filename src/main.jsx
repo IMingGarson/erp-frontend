@@ -17,6 +17,7 @@ import UserPage from "./UserPage.jsx";
 import "./index.css";
 import DeliveryNotePage from "./DeliveryNotePage.jsx";
 import MaterialProviderPage from "./MaterialProvider.jsx";
+import BOMCreatePage from "./BOMCreatePage.jsx";
 
 const router = createBrowserRouter([
   {
@@ -63,6 +64,10 @@ const router = createBrowserRouter([
               {
                 path: "material-providers",
                 element: <MaterialProviderPage />,
+              },
+              {
+                path: "bom-create",
+                element: <BOMCreatePage />,
               },
               {
                 path: "*",

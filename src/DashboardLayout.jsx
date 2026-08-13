@@ -28,7 +28,7 @@ const MENU_GROUPS = [
   },
   {
     group: "研發專區",
-    items: [{ path: "/bom-dev", label: "配方研製", icon: ShieldAlert }],
+    items: [{ path: "/bom-create", label: "配方研製", icon: ShieldAlert }],
   },
   {
     group: "往來單位",

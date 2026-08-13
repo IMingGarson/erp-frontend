@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
+import { Search, ChevronDown, Trash2 } from "lucide-react";
 import CustomDialog from "./components/customDialog";
 import { fetchWithAuth } from "./utils/fetchWithAuth";
 import { CompanyLogo } from "./components/companyLogo";
@@ -29,6 +30,9 @@ const StatusTag = ({ status }) => {
   );
 };
 
+// ==========================================
+// 列印專用 Template
+// ==========================================
 const PurchaseRequisitionPrintTemplate = ({ data }) => {
   if (!data) return null;
 
@@ -124,7 +128,8 @@ const PurchaseRequisitionPrintTemplate = ({ data }) => {
                   {deliveryStr}
                 </td>
                 <td className="border-r border-black p-1 text-lg">
-                  {item.supplier || ""}
+                  {/* 使用後端回傳的 provider_name 供列印顯示 */}
+                  {item.provider_name || ""}
                 </td>
                 <td className="border-r border-black p-1"></td>
                 <td className="p-1 text-lg">{item.remark || ""}</td>
@@ -150,6 +155,9 @@ const PurchaseRequisitionPrintTemplate = ({ data }) => {
   );
 };
 
+// ==========================================
+// 表格卡片 Component
+// ==========================================
 const RequisitionNode = ({
   req,
   isExpanded,
@@ -197,7 +205,6 @@ const RequisitionNode = ({
           </div>
 
           <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
-            {/* 🖨️ 呼叫 onPrint */}
             <button
               onClick={() => onPrint(req)}
               className="px-3 py-1.5 text-slate-600 border border-slate-200 bg-white rounded-md hover:bg-slate-50 transition-colors text-xs font-bold shadow-sm"
@@ -228,72 +235,76 @@ const RequisitionNode = ({
             請購品項明細
           </div>
           {hasItems ? (
-            <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
               {req.items.map((item, idx) => (
                 <div
                   key={item.id || idx}
-                  className="bg-white border border-slate-200 p-3 rounded-md shadow-sm hover:shadow-md transition-shadow"
+                  className="bg-white border border-slate-200 rounded-xl shadow-sm hover:shadow-md transition-all flex flex-col overflow-hidden"
                 >
-                  <div className="flex justify-between items-start mb-2 border-b border-slate-100 pb-2">
-                    <span className="font-bold text-slate-800 text-base">
+                  {/* 1. 標題與標籤區 */}
+                  <div className="p-4 border-b border-slate-100 flex justify-between items-start gap-3 bg-white">
+                    <span className="font-bold text-slate-800 text-base leading-tight">
                       {item.material_name}
                     </span>
-                    {item.expected_delivery_date && (
-                      <span className="text-xs text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded flex-shrink-0">
-                        需於 {item.expected_delivery_date} 到貨
-                      </span>
-                    )}
                   </div>
-                  <div className="flex justify-between items-end mt-2">
-                    {/* 左側：供應商與備註 (保持原樣) */}
-                    <div className="flex flex-col gap-1">
-                      <span className="text-xs text-slate-500">
-                        供應商:{" "}
-                        <span className="font-medium text-slate-700">
-                          {item.supplier || "-"}
-                        </span>
+                  {/* 2. 供應商與備註區 */}
+                  <div className="p-4 flex-1 flex flex-col gap-2.5 bg-white">
+                    <div className="flex text-sm">
+                      <span className="text-slate-400 font-bold w-14 shrink-0">
+                        供應商
                       </span>
-                      <span
-                        className="text-xs text-slate-500 truncate max-w-[120px]"
-                        title={item.remark}
-                      >
-                        備註:{" "}
-                        <span className="italic">{item.remark || "-"}</span>
+                      <span className="text-slate-700 font-medium truncate">
+                        {item.provider_name || "-"}
+                      </span>
+                    </div>
+                    <div className="flex text-sm">
+                      <span className="text-slate-400 font-bold w-14 shrink-0">
+                        備註
+                      </span>
+                      <span className="text-slate-600 italic line-clamp-2 leading-snug">
+                        {item.remark || "-"}
+                      </span>
+                    </div>
+                    <div className="flex text-sm">
+                      {item.expected_delivery_date && (
+                        <span className="text-sm font-bold text-blue-700 bg-blue-50 border border-blue-100 px-1 rounded-md whitespace-nowrap shrink-0">
+                          預計 {item.expected_delivery_date} 到貨
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* 3. 數量與金額 Footer 區塊 (特別用淺灰底色區隔) */}
+                  <div className="bg-slate-50 p-4 border-t border-slate-100 flex justify-between items-center mt-auto">
+                    {/* 計算公式 */}
+                    <div className="text-xs text-slate-500 font-mono flex items-center">
+                      <span className="font-bold text-slate-700 text-sm">
+                        {parseFloat(item.quantity || 0).toLocaleString()}
+                      </span>
+                      <span className="ml-1 mr-1.5 text-[10px] text-slate-400">
+                        {item.unit}
+                      </span>
+                      <span className="text-slate-300 mx-1">×</span>
+                      <span>
+                        $
+                        {item.purchased_price
+                          ? parseFloat(item.purchased_price).toLocaleString()
+                          : "0"}
                       </span>
                     </div>
 
-                    {/* 右側：數量、單價與總計 */}
-                    <div className="flex flex-col items-end">
-                      {/* 上排：數量 × 單價 */}
-                      <div className="text-xs text-slate-500 font-medium mb-0.5 flex items-center">
-                        <span>
-                          {parseFloat(item.quantity || 0).toLocaleString()}
-                        </span>
-                        <span className="ml-1 mr-1.5 text-[10px] text-slate-400">
-                          {item.unit}
-                        </span>
-                        <span className="text-slate-400 mx-1">×</span>
-                        <span>
-                          $
-                          {item.purchased_price
-                            ? parseFloat(item.purchased_price).toLocaleString()
-                            : "0"}
-                        </span>
-                      </div>
-
-                      {/* 下排：總金額 */}
-                      <div className="flex items-baseline gap-1.5">
-                        <span className="text-xs text-slate-500 font-bold">
-                          小計
-                        </span>
-                        <span className="font-black text-lg text-blue-700 tracking-tight">
-                          $
-                          {(
-                            (parseFloat(item.quantity) || 0) *
-                            (parseFloat(item.purchased_price) || 0)
-                          ).toLocaleString()}
-                        </span>
-                      </div>
+                    {/* 總計 */}
+                    <div className="flex items-baseline gap-1.5">
+                      <span className="text-xs text-slate-400 font-bold">
+                        小計
+                      </span>
+                      <span className="font-black text-lg text-blue-700 tracking-tight">
+                        $
+                        {(
+                          (parseFloat(item.quantity) || 0) *
+                          (parseFloat(item.purchased_price) || 0)
+                        ).toLocaleString()}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -317,6 +328,7 @@ const PurchaseRequisitionPage = () => {
   const me = useAuthStore((state) => state.me());
   const [requisitions, setRequisitions] = useState([]);
   const [materials, setMaterials] = useState([]);
+  const [materialProviders, setMaterialProviders] = useState([]);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -347,6 +359,7 @@ const PurchaseRequisitionPage = () => {
     message: "",
     onConfirm: null,
   });
+
   const showAlert = (title, message, status = "info") =>
     setDialog({
       isOpen: true,
@@ -356,6 +369,7 @@ const PurchaseRequisitionPage = () => {
       message,
       onConfirm: null,
     });
+
   const showConfirm = (title, message, onConfirm) =>
     setDialog({
       isOpen: true,
@@ -365,13 +379,22 @@ const PurchaseRequisitionPage = () => {
       message,
       onConfirm,
     });
+
   const closeDialog = () => setDialog((prev) => ({ ...prev, isOpen: false }));
 
   useEffect(() => {
-    fetchRequisitions();
-    fetchMaterials();
-    setFormData((prev) => ({ ...prev, applicant: me.full_name }));
+    Promise.all([
+      fetchRequisitions(),
+      fetchMaterials(),
+      fetchMaterialProviders(),
+    ]);
   }, []);
+
+  useEffect(() => {
+    if (me?.full_name) {
+      setFormData((prev) => ({ ...prev, applicant: me.full_name }));
+    }
+  }, [me]);
 
   const fetchRequisitions = async () => {
     setLoading(true);
@@ -395,17 +418,26 @@ const PurchaseRequisitionPage = () => {
   };
 
   const fetchMaterials = async () => {
-    setLoading(true);
     try {
       const response = await fetchWithAuth("/api/materials");
-      if (!response.ok) throw new Error("無法取得物料資料");
-      const data = await response.json();
-      setMaterials(data.data || []);
+      if (response.ok) {
+        const data = await response.json();
+        setMaterials(data.data || []);
+      }
     } catch (error) {
-      console.error("Fetch error:", error);
-      alert("載入資料失敗，請稍後再試。");
-    } finally {
-      setLoading(false);
+      console.error(error);
+    }
+  };
+
+  const fetchMaterialProviders = async () => {
+    try {
+      const response = await fetchWithAuth("/api/material_providers");
+      if (response.ok) {
+        const data = await response.json();
+        setMaterialProviders(data.data || []);
+      }
+    } catch (error) {
+      console.error(error);
     }
   };
 
@@ -476,7 +508,7 @@ const PurchaseRequisitionPage = () => {
       setEditingRequisition(null);
       setFormData({
         request_date: today,
-        applicant: me.full_name,
+        applicant: me?.full_name || "",
         status: "WAITING",
         items: [],
       });
@@ -534,6 +566,7 @@ const PurchaseRequisitionPage = () => {
 
   const handleMasterChange = (e) =>
     setFormData((prev) => ({ ...prev, [e.target.name]: e.target.value }));
+
   const handleAddItem = () =>
     setFormData((prev) => ({
       ...prev,
@@ -541,20 +574,22 @@ const PurchaseRequisitionPage = () => {
         ...prev.items,
         {
           material_name: null,
-          quantity: null,
+          quantity: "",
           unit: "Kg",
-          purchased_price: null,
+          purchased_price: "",
           expected_delivery_date: null,
-          supplier: null,
+          material_provider_id: null, // 🌟 綁定為 ID
           remark: null,
         },
       ],
     }));
+
   const handleRemoveItem = (index) =>
     setFormData((prev) => ({
       ...prev,
       items: prev.items.filter((_, i) => i !== index),
     }));
+
   const handleItemChange = (index, field, value) =>
     setFormData((prev) => {
       const newItems = [...prev.items];
@@ -562,11 +597,12 @@ const PurchaseRequisitionPage = () => {
       return { ...prev, items: newItems };
     });
 
+  // ========== UI Components ==========
+
   const MaterialSelect = ({ value, onChange, options }) => {
     const [isOpen, setIsOpen] = useState(false);
     const [searchTerm, setSearchTerm] = useState("");
     const [dropdownStyle, setDropdownStyle] = useState({});
-
     const selectRef = useRef(null);
     const dropdownMenuRef = useRef(null);
 
@@ -591,35 +627,45 @@ const PurchaseRequisitionPage = () => {
         if (
           dropdownMenuRef.current &&
           dropdownMenuRef.current.contains(e.target)
-        ) {
+        )
           return;
-        }
         if (isOpen) setIsOpen(false);
       };
-
       if (isOpen) {
         window.addEventListener("scroll", handleScroll, true);
+        window.addEventListener("resize", () => setIsOpen(false), true);
       }
-      return () => window.removeEventListener("scroll", handleScroll, true);
+      return () => {
+        window.removeEventListener("scroll", handleScroll, true);
+        window.removeEventListener("resize", () => setIsOpen(false), true);
+      };
     }, [isOpen]);
 
     return (
       <>
         <div
           ref={selectRef}
-          className="w-full h-[34px] px-2 py-1.5 border border-slate-300 rounded text-sm cursor-pointer bg-white flex justify-between items-center transition-colors focus-within:border-blue-500 focus-within:ring-1 focus-within:ring-blue-500"
           onClick={handleToggle}
+          className={`w-full h-[38px] px-3 py-2 border rounded-md text-sm cursor-pointer bg-white flex justify-between items-center transition-colors ${
+            isOpen
+              ? "border-blue-500 ring-2 ring-blue-500/20"
+              : "border-slate-300 hover:border-slate-400"
+          }`}
         >
           <span
             className={
-              value ? "text-slate-800 truncate" : "text-slate-400 truncate"
+              value
+                ? "text-slate-800 truncate font-medium"
+                : "text-slate-400 truncate"
             }
           >
             {value || "選擇物料..."}
           </span>
-          <span className="text-slate-400 text-xs ml-2 shrink-0">▼</span>
+          <ChevronDown
+            size={16}
+            className="text-slate-400 flex-shrink-0 ml-2"
+          />
         </div>
-
         {isOpen && (
           <>
             <div
@@ -628,8 +674,8 @@ const PurchaseRequisitionPage = () => {
             ></div>
             <div
               ref={dropdownMenuRef}
-              className="fixed z-[9999] bg-white border border-slate-200 rounded-md shadow-xl flex flex-col max-h-60 overflow-hidden"
               style={dropdownStyle}
+              className="fixed z-[9999] bg-white border border-slate-200 rounded-md shadow-xl flex flex-col max-h-60 overflow-hidden"
             >
               <div className="p-2 border-b border-slate-100 bg-slate-50 shrink-0">
                 <input
@@ -640,18 +686,17 @@ const PurchaseRequisitionPage = () => {
                   onChange={(e) => setSearchTerm(e.target.value)}
                 />
               </div>
-
-              <div className="overflow-y-auto flex-1 p-1">
+              <div className="overflow-y-auto flex-1 p-1 custom-scrollbar">
                 {filtered.length > 0 ? (
                   filtered.map((m) => (
                     <div
                       key={m.id}
-                      className="px-3 py-2 text-sm text-slate-700 rounded hover:bg-blue-50 hover:text-blue-700 cursor-pointer transition-colors"
                       onClick={() => {
                         onChange(m.id, m.name);
                         setIsOpen(false);
                         setSearchTerm("");
                       }}
+                      className="px-3 py-2 text-sm text-slate-700 rounded hover:bg-blue-50 hover:text-blue-700 cursor-pointer transition-colors"
                     >
                       {m.name}
                     </div>
@@ -659,6 +704,145 @@ const PurchaseRequisitionPage = () => {
                 ) : (
                   <div className="px-3 py-4 text-center text-slate-400 text-sm">
                     查無符合的物料
+                  </div>
+                )}
+              </div>
+            </div>
+          </>
+        )}
+      </>
+    );
+  };
+
+  // 🌟 修改：SupplierSelect 接收 valueId，並回傳 id 給 onChange
+  const SupplierSelect = ({ valueId, onChange, options }) => {
+    const [isOpen, setIsOpen] = useState(false);
+    const [searchTerm, setSearchTerm] = useState("");
+    const [dropdownStyle, setDropdownStyle] = useState({});
+    const selectRef = useRef(null);
+    const dropdownMenuRef = useRef(null);
+
+    const selectedProvider = useMemo(() => {
+      if (!valueId) return null;
+      return options.find((opt) => opt.id === valueId) || null;
+    }, [valueId, options]);
+
+    const filtered = useMemo(() => {
+      if (!searchTerm) return options;
+      const lowerTerm = searchTerm.toLowerCase();
+      return options.filter(
+        (m) =>
+          (m.name && m.name.toLowerCase().includes(lowerTerm)) ||
+          (m.code && m.code.toLowerCase().includes(lowerTerm)),
+      );
+    }, [options, searchTerm]);
+
+    const handleToggle = () => {
+      if (!isOpen && selectRef.current) {
+        const rect = selectRef.current.getBoundingClientRect();
+        setDropdownStyle({
+          top: `${rect.bottom + 4}px`,
+          left: `${rect.left}px`,
+          width: `${rect.width}px`,
+        });
+      }
+      setIsOpen(!isOpen);
+    };
+
+    useEffect(() => {
+      const handleScroll = (e) => {
+        if (
+          dropdownMenuRef.current &&
+          dropdownMenuRef.current.contains(e.target)
+        )
+          return;
+        if (isOpen) setIsOpen(false);
+      };
+      if (isOpen) {
+        window.addEventListener("scroll", handleScroll, true);
+        window.addEventListener("resize", () => setIsOpen(false), true);
+      }
+      return () => {
+        window.removeEventListener("scroll", handleScroll, true);
+        window.removeEventListener("resize", () => setIsOpen(false), true);
+      };
+    }, [isOpen]);
+
+    return (
+      <>
+        <div
+          ref={selectRef}
+          onClick={handleToggle}
+          className={`w-full h-[38px] px-3 py-2 border rounded-md text-sm cursor-pointer bg-white flex justify-between items-center transition-colors ${
+            isOpen
+              ? "border-blue-500 ring-2 ring-blue-500/20"
+              : "border-slate-300 hover:border-slate-400"
+          }`}
+        >
+          <div className="flex items-center gap-1.5 overflow-hidden w-full">
+            <Search size={14} className="text-slate-400 flex-shrink-0" />
+            <span
+              className={`truncate ${
+                selectedProvider
+                  ? "text-slate-800 font-medium"
+                  : "text-slate-400"
+              }`}
+            >
+              {selectedProvider
+                ? `[${selectedProvider.code}] ${selectedProvider.name}`
+                : "選擇供應商..."}
+            </span>
+          </div>
+          <ChevronDown
+            size={16}
+            className="text-slate-400 flex-shrink-0 ml-1"
+          />
+        </div>
+        {isOpen && (
+          <>
+            <div
+              className="fixed inset-0 z-[9998]"
+              onClick={() => setIsOpen(false)}
+            ></div>
+            <div
+              ref={dropdownMenuRef}
+              style={dropdownStyle}
+              className="fixed z-[9999] bg-white border border-slate-200 rounded-md shadow-xl flex flex-col max-h-60 overflow-hidden"
+            >
+              <div className="p-2 border-b border-slate-100 bg-slate-50 shrink-0">
+                <input
+                  autoFocus
+                  className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                  placeholder="輸入代碼或名稱..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                />
+              </div>
+              <div className="overflow-y-auto flex-1 p-1 custom-scrollbar">
+                {filtered.length > 0 ? (
+                  filtered.map((m) => {
+                    return (
+                      <div
+                        key={m.id}
+                        onClick={() => {
+                          onChange(m.id); // 🌟 傳遞 ID
+                          setIsOpen(false);
+                          setSearchTerm("");
+                        }}
+                        className="px-2 py-2 text-sm text-slate-700 rounded hover:bg-blue-50 cursor-pointer transition-colors flex items-center gap-2"
+                      >
+                        <span className="text-[11px] font-mono bg-slate-100 px-1.5 py-0.5 rounded text-slate-500 border border-slate-200 whitespace-nowrap">
+                          {m.code}
+                        </span>
+                        <span className="truncate text-slate-700 font-medium">
+                          {m.name}
+                        </span>
+                      </div>
+                    );
+                  })
+                ) : (
+                  <div className="px-3 py-4 text-center text-slate-400 text-sm">
+                    查無符合的供應商
                   </div>
                 )}
               </div>
@@ -812,6 +996,7 @@ const PurchaseRequisitionPage = () => {
           )}
         </div>
 
+        {/* 新增/編輯表單 Modal */}
         {isModalOpen && (
           <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-lg w-full max-w-5xl shadow-xl flex flex-col max-h-[90vh] overflow-hidden">
@@ -833,10 +1018,11 @@ const PurchaseRequisitionPage = () => {
                 onSubmit={handleSubmit}
                 className="flex flex-col overflow-hidden flex-1"
               >
-                <div className="p-6 overflow-y-auto flex-1">
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 bg-slate-50 p-4 rounded-lg border border-slate-200">
+                <div className="p-6 overflow-y-auto flex-1 bg-slate-50/50">
+                  {/* 單頭區塊 */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
                     <div>
-                      <label className="block text-sm font-bold text-slate-700 mb-1">
+                      <label className="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider">
                         填單日期 <span className="text-red-500">*</span>
                       </label>
                       <input
@@ -845,11 +1031,11 @@ const PurchaseRequisitionPage = () => {
                         required
                         value={formData.request_date}
                         onChange={handleMasterChange}
-                        className="w-full px-3 py-2 border border-slate-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                        className="w-full px-3 py-2 border border-slate-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none text-sm"
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-bold text-slate-700 mb-1">
+                      <label className="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider">
                         請購人 <span className="text-red-500">*</span>
                       </label>
                       <input
@@ -858,19 +1044,19 @@ const PurchaseRequisitionPage = () => {
                         readOnly
                         value={formData.applicant}
                         onChange={handleMasterChange}
-                        className="w-full px-3 py-2 border border-slate-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                        className="w-full px-3 py-2 border border-slate-300 rounded-md bg-slate-50 focus:outline-none text-sm text-slate-600 font-medium"
                         placeholder="請輸入姓名"
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-bold text-slate-700 mb-1">
+                      <label className="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider">
                         單據狀態
                       </label>
                       <select
                         name="status"
                         value={formData.status}
                         onChange={handleMasterChange}
-                        className="w-full px-3 py-2 border border-slate-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white"
+                        className="w-full px-3 py-2 border border-slate-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white text-sm"
                       >
                         <option value="WAITING">等待進貨</option>
                         <option value="STOCKED">已經入庫</option>
@@ -878,85 +1064,92 @@ const PurchaseRequisitionPage = () => {
                     </div>
                   </div>
 
-                  <div className="flex justify-between items-center mb-3">
-                    <h4 className="text-lg font-bold text-slate-700">
-                      請購明細
+                  <div className="flex justify-between items-center mb-4">
+                    <h4 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                      <span className="w-1.5 h-6 bg-blue-500 rounded-full inline-block"></span>
+                      請購明細 ({formData.items.length})
                     </h4>
                     <button
                       type="button"
                       onClick={handleAddItem}
-                      className="text-sm bg-blue-50 text-blue-600 border border-blue-200 px-3 py-1.5 rounded-md hover:bg-blue-100 font-bold transition-colors shadow-sm"
+                      className="text-sm bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 font-bold transition-colors shadow-sm"
                     >
                       + 加入品項
                     </button>
                   </div>
 
-                  <div className="border border-slate-200 rounded-lg overflow-hidden">
-                    <table className="w-full text-left border-collapse min-w-[800px]">
-                      <thead>
-                        <tr className="bg-slate-100 border-b border-slate-200 text-xs text-slate-600">
-                          <th className="p-3 font-semibold w-56">
-                            原物料名稱 <span className="text-red-500">*</span>
-                          </th>
-                          <th className="p-3 font-semibold w-24">
-                            數量 <span className="text-red-500">*</span>
-                          </th>
-                          <th className="p-3 font-semibold w-24">
-                            單價 <span className="text-red-500">*</span>
-                          </th>
-                          <th className="p-3 font-semibold w-20">單位</th>
-                          <th className="p-3 font-semibold w-36">指定到貨日</th>
-                          <th className="p-3 font-semibold w-40">供應商</th>
-                          <th className="p-3 font-semibold">備註</th>
-                          <th className="p-3 font-semibold w-12 text-center"></th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {formData.items.length === 0 ? (
-                          <tr>
-                            <td
-                              colSpan="7"
-                              className="p-8 text-center text-slate-400 text-sm"
+                  {/* 卡片式由上至下設計 */}
+                  <div className="space-y-4">
+                    {formData.items.length === 0 ? (
+                      <div className="p-12 text-center border-2 border-dashed border-slate-300 rounded-xl text-slate-500 bg-white text-sm font-medium">
+                        請點擊右上方按鈕加入請購品項
+                      </div>
+                    ) : (
+                      formData.items.map((item, index) => (
+                        <div
+                          key={index}
+                          className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm relative transition-all hover:border-blue-300 hover:shadow-md group"
+                        >
+                          {/* 卡片標題與刪除 */}
+                          <div className="flex justify-between items-center mb-4 pb-3 border-b border-slate-100">
+                            <h5 className="font-bold text-slate-700 flex items-center gap-2 text-sm">
+                              <span className="bg-slate-100 text-slate-600 w-6 h-6 flex items-center justify-center rounded-full text-xs border border-slate-200">
+                                {index + 1}
+                              </span>
+                              品項內容
+                            </h5>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveItem(index)}
+                              className="text-slate-400 hover:text-red-600 hover:bg-red-50 p-1.5 rounded-md transition-colors flex items-center gap-1 text-sm font-bold opacity-80 group-hover:opacity-100"
                             >
-                              請點擊右上方按鈕加入請購品項
-                            </td>
-                          </tr>
-                        ) : (
-                          formData.items.map((item, index) => (
-                            <tr key={index} className="bg-white">
-                              <td className="p-2 align-middle">
-                                <MaterialSelect
-                                  value={item.material_name}
-                                  options={materials}
-                                  onChange={async (id, name) => {
-                                    handleItemChange(
-                                      index,
-                                      "material_name",
-                                      name,
+                              <Trash2 size={16} /> 移除
+                            </button>
+                          </div>
+
+                          {/* 網格排版 (3欄) */}
+                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                            {/* 第一列 */}
+                            <div>
+                              <label className="block text-xs font-bold text-slate-500 mb-1">
+                                原物料名稱{" "}
+                                <span className="text-red-500">*</span>
+                              </label>
+                              <MaterialSelect
+                                value={item.material_name}
+                                options={materials}
+                                onChange={async (id, name) => {
+                                  handleItemChange(
+                                    index,
+                                    "material_name",
+                                    name,
+                                  );
+                                  handleItemChange(index, "material_id", id);
+                                  try {
+                                    const res = await fetchWithAuth(
+                                      `/api/purchase_requisitions/prev_purchase_price?material_id=${id}`,
                                     );
-                                    handleItemChange(index, "material_id", id);
-                                    try {
-                                      const response = await fetchWithAuth(
-                                        `/api/purchase_requisitions/prev_purchase_price?material_id=${id}`,
+                                    if (res.ok) {
+                                      const data = await res.json();
+                                      const pvp = data.data.latest_price;
+                                      handleItemChange(
+                                        index,
+                                        "purchased_price",
+                                        pvp !== null ? pvp : "",
                                       );
-
-                                      if (response.ok) {
-                                        const data = await response.json();
-                                        const pvp = data.data.latest_price;
-                                        handleItemChange(
-                                          index,
-                                          "purchased_price",
-                                          pvp !== null ? pvp : "",
-                                        );
-                                      }
-                                    } catch (error) {
-                                      console.error("無法獲取最新單價", error);
                                     }
-                                  }}
-                                />
-                              </td>
+                                  } catch (error) {
+                                    console.error(error);
+                                  }
+                                }}
+                              />
+                            </div>
 
-                              <td className="p-2">
+                            <div className="flex gap-3">
+                              <div className="flex-1">
+                                <label className="block text-xs font-bold text-slate-500 mb-1">
+                                  數量 <span className="text-red-500">*</span>
+                                </label>
                                 <input
                                   type="number"
                                   required
@@ -967,28 +1160,17 @@ const PurchaseRequisitionPage = () => {
                                     handleItemChange(
                                       index,
                                       "quantity",
-                                      parseInt(e.target.value),
+                                      e.target.value,
                                     )
                                   }
-                                  className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none font-mono"
+                                  className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 outline-none font-mono placeholder-slate-300"
+                                  placeholder="0.00"
                                 />
-                              </td>
-                              <td className="p-2">
-                                <input
-                                  type="text"
-                                  value={item.purchased_price ?? ""}
-                                  placeholder="無前紀錄"
-                                  onChange={(e) => {
-                                    handleItemChange(
-                                      index,
-                                      "purchased_price",
-                                      e.target.value,
-                                    );
-                                  }}
-                                  className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                                />
-                              </td>
-                              <td className="p-2">
+                              </div>
+                              <div className="w-24 shrink-0">
+                                <label className="block text-xs font-bold text-slate-500 mb-1">
+                                  單位
+                                </label>
                                 <input
                                   type="text"
                                   value={item.unit}
@@ -999,80 +1181,111 @@ const PurchaseRequisitionPage = () => {
                                       e.target.value,
                                     )
                                   }
-                                  className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                                  className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 outline-none"
                                 />
-                              </td>
-                              <td className="p-2">
+                              </div>
+                            </div>
+
+                            <div>
+                              <label className="block text-xs font-bold text-slate-500 mb-1">
+                                單價 <span className="text-red-500">*</span>
+                              </label>
+                              <div className="relative">
+                                <span className="absolute left-3 top-2 text-slate-400">
+                                  $
+                                </span>
                                 <input
-                                  type="date"
-                                  value={item.expected_delivery_date || ""}
+                                  type="number"
+                                  step="0.01"
+                                  value={item.purchased_price ?? ""}
+                                  placeholder="無前次紀錄"
                                   onChange={(e) =>
                                     handleItemChange(
                                       index,
-                                      "expected_delivery_date",
+                                      "purchased_price",
                                       e.target.value,
                                     )
                                   }
-                                  className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                                  className="w-full pl-7 pr-3 py-2 border border-slate-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 outline-none font-mono"
                                 />
-                              </td>
-                              <td className="p-2">
-                                <input
-                                  type="text"
-                                  value={item.supplier || ""}
-                                  onChange={(e) =>
-                                    handleItemChange(
-                                      index,
-                                      "supplier",
-                                      e.target.value,
-                                    )
-                                  }
-                                  className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                                />
-                              </td>
-                              <td className="p-2">
-                                <input
-                                  type="text"
-                                  value={item.remark || ""}
-                                  onChange={(e) =>
-                                    handleItemChange(
-                                      index,
-                                      "remark",
-                                      e.target.value,
-                                    )
-                                  }
-                                  className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                                />
-                              </td>
-                              <td className="p-2 text-center">
-                                <button
-                                  type="button"
-                                  onClick={() => handleRemoveItem(index)}
-                                  className="text-slate-400 hover:text-red-500 hover:bg-red-50 p-1.5 rounded transition-colors text-lg leading-none font-bold"
-                                >
-                                  ✕
-                                </button>
-                              </td>
-                            </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
+                              </div>
+                            </div>
+
+                            {/* 第二列 */}
+                            <div>
+                              <label className="block text-xs font-bold text-slate-500 mb-1">
+                                供應商
+                              </label>
+                              {/* 🌟 傳入 ID，且欄位改為 material_provider_id */}
+                              <SupplierSelect
+                                valueId={item.material_provider_id}
+                                options={materialProviders}
+                                onChange={(valId) =>
+                                  handleItemChange(
+                                    index,
+                                    "material_provider_id",
+                                    valId,
+                                  )
+                                }
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-xs font-bold text-slate-500 mb-1">
+                                指定到貨日
+                              </label>
+                              <input
+                                type="date"
+                                value={item.expected_delivery_date || ""}
+                                onChange={(e) =>
+                                  handleItemChange(
+                                    index,
+                                    "expected_delivery_date",
+                                    e.target.value,
+                                  )
+                                }
+                                className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-xs font-bold text-slate-500 mb-1">
+                                備註說明
+                              </label>
+                              <input
+                                type="text"
+                                value={item.remark || ""}
+                                placeholder="特殊要求或附註..."
+                                onChange={(e) =>
+                                  handleItemChange(
+                                    index,
+                                    "remark",
+                                    e.target.value,
+                                  )
+                                }
+                                className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      ))
+                    )}
                   </div>
                 </div>
 
-                <div className="p-4 border-t border-slate-100 flex justify-end gap-3 bg-white shrink-0">
+                {/* Footer 按鈕 */}
+                <div className="p-4 border-t border-slate-200 flex justify-end gap-3 bg-white shrink-0 z-10 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
                   <button
                     type="button"
                     onClick={closeModal}
-                    className="px-4 py-2 border border-slate-300 rounded-md text-slate-700 hover:bg-slate-50 transition-colors text-sm font-medium"
+                    className="px-5 py-2.5 border border-slate-300 rounded-md text-slate-700 hover:bg-slate-50 transition-colors text-sm font-bold"
                   >
                     取消
                   </button>
                   <button
                     type="submit"
                     disabled={isSubmitting}
-                    className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 shadow-sm transition-colors text-sm font-medium disabled:opacity-50"
+                    className="px-6 py-2.5 bg-[#1f4e78] text-white rounded-md hover:bg-blue-900 shadow-md transition-colors text-sm font-bold disabled:opacity-50"
                   >
                     {isSubmitting ? "儲存中..." : "確認儲存"}
                   </button>

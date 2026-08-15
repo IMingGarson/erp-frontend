@@ -7,7 +7,6 @@ import {
   Plus,
   Calculator,
   Save,
-  ArrowLeft,
   ArrowDown,
   ArrowUp,
   ListOrdered,
@@ -43,7 +42,6 @@ const BOMCreatePage = () => {
     items: [],
   });
 
-  // 🌟 修改：新增 onCloseCallback 狀態
   const [dialog, setDialog] = useState({
     isOpen: false,
     type: "alert",
@@ -54,7 +52,6 @@ const BOMCreatePage = () => {
     onCloseCallback: null,
   });
 
-  // 🌟 修改：Alert 接收第四個參數作為 onCloseCallback
   const showAlert = (title, message, status = "info", onCloseCallback = null) =>
     setDialog({
       isOpen: true,
@@ -77,11 +74,10 @@ const BOMCreatePage = () => {
       onCloseCallback: null,
     });
 
-  // 🌟 修改：在關閉對話框時，檢查並執行 onCloseCallback
   const closeDialog = () => {
     const callback = dialog.onCloseCallback;
     setDialog((prev) => ({ ...prev, isOpen: false, onCloseCallback: null }));
-    if (callback) callback(); // 執行傳入的 reload 動作
+    if (callback) callback();
   };
 
   // 1. 初始化載入資料
@@ -111,7 +107,7 @@ const BOMCreatePage = () => {
             "錯誤",
             "找不到該配方資料，可能已被刪除或代碼錯誤。",
             "error",
-            () => navigate(-1),
+            () => navigate("/materials"), // 找不到就導回物料頁
           );
         }
 
@@ -124,16 +120,21 @@ const BOMCreatePage = () => {
         const bomList = bomJson.data || bomJson || [];
 
         const loadedItems = bomList
-          .map((bom) => ({
-            id: bom.id,
-            material_id: bom.child?.id || bom.child,
-            material_code: bom.child?.code || "",
-            material_name: bom.child?.name || "未知物料",
-            type: bom.child?.type || "",
-            unit: bom.child?.unit || "KG",
-            estimated_cost: bom.child?.estimated_cost || 0,
-            quantity: bom.quantity_required,
-          }))
+          .map((bom) => {
+            const childId = bom.child?.id || bom.child;
+            const fullMat = allMaterials.find((m) => m.id === childId);
+
+            return {
+              id: bom.id,
+              material_id: childId,
+              material_code: bom.child?.code || "",
+              material_name: bom.child?.name || "未知物料",
+              type: bom.child?.type || "",
+              unit: bom.child?.unit || "KG",
+              estimated_cost: fullMat ? fullMat.estimated_cost || 0 : 0,
+              quantity: bom.quantity_required,
+            };
+          })
           .sort(
             (a, b) =>
               (parseFloat(b.quantity) || 0) - (parseFloat(a.quantity) || 0),
@@ -334,7 +335,6 @@ const BOMCreatePage = () => {
 
       await Promise.all(bomPromises);
 
-      // 🌟 送出成功後，點擊 OK 就會觸發 reload
       showAlert(
         "儲存成功",
         `配方已成功${isEditMode ? "更新" : "建立"}！`,
@@ -536,50 +536,41 @@ const BOMCreatePage = () => {
   }
 
   return (
-    <div className="w-full p-6 md:p-8 max-w-6xl mx-auto bg-slate-50 min-h-screen font-sans text-slate-800">
-      {/* 標題與說明 */}
-      <div className="mb-6">
-        <div className="flex items-center gap-4 mb-4">
-          <button
-            onClick={() => navigate(-1)}
-            className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-200 rounded-full transition-colors"
-          >
-            <ArrowLeft size={24} />
-          </button>
-          <h2 className="text-2xl font-extrabold text-slate-800 tracking-tight flex items-center gap-2">
-            <Calculator className="text-blue-600" size={28} />
-            {isEditMode ? "調整配方內容" : "配方與成本估算建立"}
+    <div className="w-full p-6 md:p-8 pb-12 max-w-6xl mx-auto bg-slate-50 min-h-screen font-sans text-slate-800">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
+        <div>
+          <h2 className="text-3xl font-extrabold text-slate-800 tracking-tight flex items-center gap-3">
+            <Calculator className="text-blue-600" size={32} />
+            {isEditMode ? "調整配方內容" : "配方建立與成本估算"}
           </h2>
         </div>
+      </div>
 
-        <div className="bg-blue-50 text-blue-800 text-sm p-4 rounded-lg border border-blue-100 shadow-sm ml-12">
-          <p className="flex items-center gap-2 font-medium mb-2">
-            <span className="text-lg leading-none">💡</span> 系統功能說明
-          </p>
-          <ul className="list-disc list-inside space-y-1 ml-6 text-slate-700">
-            <li>請輸入配方代碼 (如 P9202020)、名稱與基準產量。</li>
-            <li>
-              下方清單加入物料時，系統會自動抓取該物料目前的
-              <strong className="text-slate-800 mx-1">
-                預估成本 (Estimated Cost)
-              </strong>{" "}
-              進行配方總價與每 KG 成本試算。
-            </li>
-            <li>
-              可利用<strong className="text-slate-800 mx-1">用量排序</strong>與
-              <strong className="text-slate-800 mx-1">小計排序</strong>
-              功能，快速檢視成本大戶；再次點擊可切換高低順序。
-            </li>
-          </ul>
-        </div>
+      <div className="bg-blue-50 text-blue-800 text-sm p-4 rounded-lg mb-6 border border-blue-100 shadow-sm">
+        <p className="flex items-center gap-2 font-medium mb-2">
+          <span className="text-lg leading-none">💡</span> 系統功能說明
+        </p>
+        <ul className="list-disc list-inside space-y-1 ml-6 text-slate-700">
+          <li>請輸入配方代碼 (如 P9202020)、名稱與基準產量。</li>
+          <li>
+            下方清單加入物料時，系統會自動抓取該物料目前的
+            <strong className="text-slate-800 mx-1">預估成本</strong>{" "}
+            進行配方總價與每 KG 成本試算。
+          </li>
+          <li>
+            可利用<strong className="text-slate-800 mx-1">用量排序</strong>與
+            <strong className="text-slate-800 mx-1">小計排序</strong>
+            功能，快速檢視成本大戶；再次點擊可切換高低順序。
+          </li>
+        </ul>
       </div>
 
       <form
         onSubmit={handleSubmit}
-        className="flex flex-col gap-6 ml-0 md:ml-12"
+        className="flex flex-col gap-6 mb-10 w-full md:w-auto"
       >
         {/* 單頭區塊 */}
-        <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+        <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm w-full">
           <h3 className="text-base font-bold text-slate-800 mb-4 border-b border-slate-100 pb-2">
             基本資訊
           </h3>
@@ -643,7 +634,7 @@ const BOMCreatePage = () => {
         </div>
 
         {/* 明細區塊 */}
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col w-full">
           <div className="px-6 py-4 border-b border-slate-200 flex flex-col sm:flex-row justify-between items-start sm:items-center bg-slate-50/50 gap-3">
             <h3 className="text-base font-bold text-slate-800">
               配方用料明細{" "}
@@ -702,7 +693,7 @@ const BOMCreatePage = () => {
             </div>
           </div>
 
-          <div className="flex-1 overflow-x-auto">
+          <div className="flex-1 overflow-x-auto w-full">
             {formData.items.length === 0 ? (
               <div className="p-16 text-center text-slate-400 text-sm font-medium">
                 尚未加入任何原料，請點擊上方按鈕開始設計配方
@@ -839,7 +830,7 @@ const BOMCreatePage = () => {
               <div className="w-px h-8 bg-slate-200 hidden md:block"></div>
               <div>
                 <p className="text-slate-500 text-[10px] font-bold uppercase tracking-widest mb-0.5">
-                  每 KG 成本 (÷ {formData.base_quantity})
+                  每 KG 成本 (除 {formData.base_quantity} KG 基準)
                 </p>
                 <div className="text-blue-700 font-mono font-black text-2xl">
                   $

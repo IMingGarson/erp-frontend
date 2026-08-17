@@ -18,6 +18,7 @@ import "./index.css";
 import DeliveryNotePage from "./DeliveryNotePage.jsx";
 import MaterialProviderPage from "./MaterialProvider.jsx";
 import BOMCreatePage from "./BOMCreatePage.jsx";
+import QuotationCreatePage from "./QuotationCreatePage.jsx";
 
 const router = createBrowserRouter([
   {
@@ -72,6 +73,10 @@ const router = createBrowserRouter([
               {
                 path: "bom-create/:materialCode",
                 element: <BOMCreatePage />,
+              },
+              {
+                path: "quotation",
+                element: <QuotationCreatePage />,
               },
               {
                 path: "*",

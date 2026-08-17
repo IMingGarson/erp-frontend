@@ -21,7 +21,6 @@ const RecallReportPrintTemplate = ({
       <style>
         {`
           @media print {
-            /* 將 margin 設為 0 可強制隱藏瀏覽器預設的頁首(日期標題)與頁尾(網址頁碼) */
             @page { size: A4 portrait; margin: 0; }
             body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
           }

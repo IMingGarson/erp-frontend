@@ -538,9 +538,6 @@ const DeliveryNotePage = () => {
       <div className="print:hidden p-6 md:p-8 max-w-7xl mx-auto bg-slate-50 min-h-screen font-sans relative text-slate-800">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-blue-100 text-blue-600 rounded-lg">
-              <ReceiptText size={28} strokeWidth={2.5} />
-            </div>
             <h2 className="text-3xl font-extrabold text-slate-800 tracking-tight">
               銷貨單管理
             </h2>

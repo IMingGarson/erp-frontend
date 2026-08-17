@@ -52,7 +52,7 @@ const MENU_GROUPS = [
         label: "請購單管理",
         icon: ShoppingCart,
       },
-      { path: "/client-quotation", label: "報價單管理", icon: ShoppingCart },
+      { path: "/quotation", label: "報價單管理", icon: ShoppingCart },
     ],
   },
   {

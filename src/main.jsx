@@ -19,6 +19,8 @@ import DeliveryNotePage from "./DeliveryNotePage.jsx";
 import MaterialProviderPage from "./MaterialProvider.jsx";
 import BOMCreatePage from "./BOMCreatePage.jsx";
 import QuotationCreatePage from "./QuotationCreatePage.jsx";
+import QuotationListPage from "./QuotationListPage.jsx";
+import QuotationEditPage from "./QuotationEditPage.jsx";
 
 const router = createBrowserRouter([
   {
@@ -75,8 +77,16 @@ const router = createBrowserRouter([
                 element: <BOMCreatePage />,
               },
               {
-                path: "quotation",
+                path: "quotations",
+                element: <QuotationListPage />,
+              },
+              {
+                path: "quotation-create",
                 element: <QuotationCreatePage />,
+              },
+              {
+                path: "quotation/:id",
+                element: <QuotationEditPage />,
               },
               {
                 path: "*",

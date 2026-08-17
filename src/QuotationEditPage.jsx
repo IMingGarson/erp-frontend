@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import {
   Search,
   ChevronDown,
@@ -14,14 +15,23 @@ import {
 import CustomDialog from "./components/customDialog";
 import { fetchWithAuth } from "./utils/fetchWithAuth";
 
-// 預設的三組成本選項
+// 🌟 預設的三組成本選項 (純料成本 -> 原料成本)
 const COST_OPTIONS = [
   { key: "material_cost", name: "原料成本" },
   { key: "packaging_cost", name: "包材成本" },
   { key: "manual_cost", name: "人工成本" },
 ];
 
-// --- 🌟 客製化新增成本下拉選單 ---
+// 取得強制排序過的 Cost Keys (確保順序永遠是 原料 -> 包材 -> 人工)
+const getSortedCostKeys = (breakdownObj) => {
+  if (!breakdownObj) return [];
+  const existingKeys = Object.keys(breakdownObj);
+  return COST_OPTIONS.map((opt) => opt.key).filter((key) =>
+    existingKeys.includes(key),
+  );
+};
+
+// --- 客製化新增成本下拉選單 ---
 const AddCostDropdown = ({ existingKeys, onSelect }) => {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef(null);
@@ -75,7 +85,7 @@ const AddCostDropdown = ({ existingKeys, onSelect }) => {
   );
 };
 
-// --- 擬真列印預覽元件 (支援列印樣式，強制新細明體) ---
+// --- 擬真列印預覽元件 ---
 const DocumentPreview = ({
   formData,
   vendors,
@@ -86,9 +96,10 @@ const DocumentPreview = ({
   const customer = vendors.find(
     (v) => String(v.id) === String(formData.customer),
   );
-  const today = new Date().toISOString().split("T")[0].replace(/-/g, "/");
+  const today = formData.issue_date
+    ? formData.issue_date.replace(/-/g, "/")
+    : new Date().toISOString().split("T")[0].replace(/-/g, "/");
 
-  // 取得成品的 BOM 原料清單
   const getBomItems = (productId) => {
     return boms
       .filter((b) => String(b.parent?.id) === String(productId))
@@ -122,11 +133,8 @@ const DocumentPreview = ({
       className="flex flex-col gap-8 bg-slate-200 p-8 rounded-lg overflow-y-auto max-h-[75vh] custom-scrollbar print:bg-white print:p-0 print:overflow-visible print:block print:max-h-none"
       style={{ fontFamily: "'MingLiU', 'PMingLiU', serif" }}
     >
-      {/* ========================================== */}
-      {/* 外部視角：產品報價單 (Image 3)               */}
-      {/* ========================================== */}
+      {/* 外部視角：產品報價單 */}
       <div className="bg-white p-10 shadow-lg mx-auto w-full max-w-[210mm] min-h-[297mm] text-black relative print:shadow-none print:w-full print:max-w-none print:m-0 print:p-[15mm] flex flex-col">
-        {/* Header */}
         <div className="flex justify-between items-start mb-6 shrink-0">
           <div className="w-1/3 text-xs leading-relaxed">
             <h2 className="text-base font-bold mb-1">基香食品有限公司</h2>
@@ -144,12 +152,11 @@ const DocumentPreview = ({
           </div>
         </div>
 
-        {/* Meta Data */}
         <div className="flex justify-between text-xs mb-4 shrink-0">
           <div className="space-y-1">
             <p>
               <span className="inline-block w-16">客戶名稱:</span>{" "}
-              {customer?.name || ""}
+              {customer?.name || formData.customer_name || ""}
             </p>
             <p>
               <span className="inline-block w-16">客戶統編:</span>{" "}
@@ -190,7 +197,6 @@ const DocumentPreview = ({
           </div>
         </div>
 
-        {/* Items Table */}
         <table className="w-full text-xs border-collapse shrink-0">
           <thead>
             <tr className="border-t border-b border-black text-left">
@@ -204,9 +210,10 @@ const DocumentPreview = ({
           </thead>
           <tbody>
             {formData.items.map((item, idx) => {
-              const mat = materials.find(
-                (m) => String(m.id) === String(item.product),
-              );
+              const mat =
+                allMaterials.find(
+                  (m) => String(m.id) === String(item.product),
+                ) || item.product_detail;
               return (
                 <tr
                   key={idx}
@@ -218,6 +225,7 @@ const DocumentPreview = ({
                   <td className="py-3 px-1 text-right">
                     {Math.round(parseFloat(item.final_price_per_kg || 0))}
                   </td>
+                  {/* 🌟 統一對接 spec */}
                   <td className="py-3 px-1 text-center">{item.spec || ""}</td>
                   <td className="py-3 px-1"></td>
                 </tr>
@@ -226,10 +234,8 @@ const DocumentPreview = ({
           </tbody>
         </table>
 
-        {/* 彈性空白區塊 */}
         <div className="flex-1 min-h-[100px]"></div>
 
-        {/* Footer Notes */}
         <div className="mt-auto text-xs leading-relaxed space-y-4 pt-10 shrink-0">
           <div>
             <span className="text-sm">產品備註：</span>
@@ -251,11 +257,9 @@ const DocumentPreview = ({
               </p>
             </div>
           </div>
-
           <div>
             <span className="text-sm">專用原料清單：</span>
           </div>
-
           <div>
             <span className="text-sm">通用備註：</span>
             <div className="pl-6 space-y-0.5 mt-1 text-gray-800">
@@ -279,7 +283,6 @@ const DocumentPreview = ({
           </div>
         </div>
 
-        {/* Signatures */}
         <div className="flex justify-between mt-16 text-sm shrink-0">
           <div className="w-1/4">審 核：</div>
           <div className="w-1/4">經 辦：</div>
@@ -288,22 +291,19 @@ const DocumentPreview = ({
         </div>
       </div>
 
-      {/* ========================================== */}
-      {/* 內部視角：成本估算單 (Image 4) - 每個品項一頁  */}
-      {/* ========================================== */}
+      {/* 內部視角：成本估算單 */}
       {formData.items.map((item, idx) => {
-        const mat = materials.find(
-          (m) => String(m.id) === String(item.product),
-        );
+        const mat =
+          allMaterials.find((m) => String(m.id) === String(item.product)) ||
+          item.product_detail;
         const bomItems = getBomItems(item.product);
 
-        // 內部成本精算
         const totalMaterialCost = Math.round(
           bomItems.reduce((sum, b) => sum + b.cost * b.qty, 0),
         );
         const manualCost = Math.round(
           Object.values(item.costs_breakdown)
-            .filter((c) => c.name !== "原料成本")
+            .filter((c) => c.name !== "原料成本") // 🌟 統一改為原料成本
             .reduce((sum, c) => sum + (parseFloat(c.value) || 0), 0),
         );
         const totalEstimatedCost = totalMaterialCost + manualCost;
@@ -313,7 +313,6 @@ const DocumentPreview = ({
             key={`cost-${idx}`}
             className="page-break bg-white p-10 shadow-lg mx-auto w-full max-w-[210mm] min-h-[297mm] text-black relative print:shadow-none print:w-full print:max-w-none print:m-0 print:p-[15mm] flex flex-col"
           >
-            {/* Header */}
             <div className="flex justify-between items-start mb-6 shrink-0">
               <div className="w-1/3 text-xs leading-relaxed">
                 <h2 className="text-base font-bold mb-1">基香食品有限公司</h2>
@@ -333,7 +332,6 @@ const DocumentPreview = ({
               </div>
             </div>
 
-            {/* 🌟 Meta Data (使用 Flexbox 嚴格對齊) */}
             <div className="flex justify-between text-xs mb-4 shrink-0">
               <div className="space-y-1 w-[30%]">
                 <div className="flex">
@@ -391,7 +389,6 @@ const DocumentPreview = ({
               </div>
             </div>
 
-            {/* BOM Table */}
             <table className="w-full text-xs border-collapse mb-8 shrink-0">
               <thead>
                 <tr className="border-t border-b border-black text-left">
@@ -437,14 +434,10 @@ const DocumentPreview = ({
                 )}
               </tbody>
             </table>
-
             <div className="flex-1 min-h-[50px]"></div>
-
             <div className="mt-8 text-xs shrink-0">
               <p>單據備註：</p>
             </div>
-
-            {/* Signatures */}
             <div className="flex justify-between mt-auto pt-16 text-sm shrink-0">
               <div>審 核：</div>
               <div>經 辦：</div>
@@ -482,9 +475,8 @@ const FilterableDropdown = ({
 
   useEffect(() => {
     const handleClickOutside = (e) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target))
         setIsOpen(false);
-      }
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
@@ -545,11 +537,7 @@ const FilterableDropdown = ({
                     setIsOpen(false);
                     setSearchTerm("");
                   }}
-                  className={`px-3 py-2.5 text-sm rounded cursor-pointer transition-colors ${
-                    String(value) === String(opt.id)
-                      ? "bg-blue-50 text-blue-700 font-bold"
-                      : "text-slate-700 hover:bg-slate-100"
-                  }`}
+                  className={`px-3 py-2.5 text-sm rounded cursor-pointer transition-colors ${String(value) === String(opt.id) ? "bg-blue-50 text-blue-700 font-bold" : "text-slate-700 hover:bg-slate-100"}`}
                 >
                   {renderItem ? renderItem(opt) : opt.name}
                 </div>
@@ -567,7 +555,10 @@ const FilterableDropdown = ({
 };
 
 // --- 主頁面 ---
-const QuotationCreatePage = () => {
+const QuotationEditPage = () => {
+  const navigate = useNavigate();
+  const { id } = useParams();
+
   const [vendors, setVendors] = useState([]);
   const [allMaterials, setAllMaterials] = useState([]);
   const [materials, setMaterials] = useState([]);
@@ -600,27 +591,55 @@ const QuotationCreatePage = () => {
   useEffect(() => {
     const fetchInitialData = async () => {
       try {
-        const [vendorRes, matRes, bomRes] = await Promise.all([
+        // 🌟 修正：移除 Trailing Slash
+        const [vendorRes, matRes, bomRes, quotRes] = await Promise.all([
           fetchWithAuth("/api/vendors?is_active=true"),
           fetchWithAuth("/api/materials"),
           fetchWithAuth("/api/boms"),
+          fetchWithAuth(`/api/quotations/${id}`),
         ]);
 
         const vendorJson = await vendorRes.json();
         const matJson = await matRes.json();
         const bomJson = await bomRes.json();
+        const quotJson = await quotRes.json();
 
         setVendors(vendorJson.data || vendorJson || []);
         setBoms(bomJson.data || bomJson || []);
 
         const allMats = matJson.data || matJson || [];
         setAllMaterials(allMats);
-
-        const filteredMats = allMats.filter(
-          (m) =>
-            m.type === "PRODUCT" && ["IN_DEV", "IN_PROD"].includes(m.phase),
+        setMaterials(
+          allMats.filter(
+            (m) =>
+              m.type === "PRODUCT" && ["IN_DEV", "IN_PROD"].includes(m.phase),
+          ),
         );
-        setMaterials(filteredMats);
+
+        // 🌟 修正：資料回填 (Populate)
+        const currentQuot = quotJson.data || quotJson;
+
+        setFormData({
+          id: currentQuot.id,
+          quotation_number: currentQuot.quotation_number,
+          issue_date: currentQuot.issue_date,
+          customer: currentQuot.customer,
+          customer_name: currentQuot.customer_name,
+          status: currentQuot.status,
+          items: currentQuot.items.map((item) => {
+            // 確保舊資料的名稱如果叫「純料成本」，會被強制修改顯示為「原料成本」
+            let breakdown = item.costs_breakdown || {};
+            if (breakdown.material_cost) {
+              breakdown.material_cost.name = "原料成本";
+            }
+            return {
+              ...item,
+              product: item.product_detail?.id || "", // 🌟 自動帶入下拉選單的值
+              spec: item.spec || "", // 🌟 統一改為 spec
+              costs_breakdown: breakdown,
+            };
+          }),
+        });
       } catch (err) {
         setDialog({
           isOpen: true,
@@ -628,13 +647,14 @@ const QuotationCreatePage = () => {
           status: "error",
           title: "載入失敗",
           message: err.message,
+          onCloseCallback: () => navigate("/quotations"),
         });
       } finally {
         setLoading(false);
       }
     };
     fetchInitialData();
-  }, []);
+  }, [id, navigate]);
 
   const handleAddItem = () => {
     setFormData((prev) => ({
@@ -644,9 +664,9 @@ const QuotationCreatePage = () => {
         {
           id: `temp_${Date.now()}`,
           product: "",
-          spec: "",
+          spec: "", // 🌟 統一改為 spec
           costs_breakdown: {
-            material_cost: { name: "原料成本", value: "" },
+            material_cost: { name: "原料成本", value: "" }, // 🌟 改為原料成本
           },
           pricing_multiplier: 1.0,
           final_price_per_kg: "",
@@ -667,7 +687,6 @@ const QuotationCreatePage = () => {
       const newItems = [...prev.items];
       newItems[index] = { ...newItems[index], [field]: value };
 
-      // 自動連動原料成本 (並四捨五入)
       if (field === "product" && value) {
         const selectedMat = allMaterials.find(
           (m) => String(m.id) === String(value),
@@ -721,7 +740,7 @@ const QuotationCreatePage = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!formData.customer) {
+    if (!formData.customer)
       return setDialog({
         isOpen: true,
         type: "alert",
@@ -729,8 +748,7 @@ const QuotationCreatePage = () => {
         title: "資料不完整",
         message: "請先選擇客戶",
       });
-    }
-    if (formData.items.length === 0) {
+    if (formData.items.length === 0)
       return setDialog({
         isOpen: true,
         type: "alert",
@@ -738,10 +756,9 @@ const QuotationCreatePage = () => {
         title: "資料不完整",
         message: "請至少新增一筆報價品項",
       });
-    }
     if (
       formData.items.some((item) => !item.product || !item.final_price_per_kg)
-    ) {
+    )
       return setDialog({
         isOpen: true,
         type: "alert",
@@ -749,7 +766,6 @@ const QuotationCreatePage = () => {
         title: "資料不完整",
         message: "所有品項皆須選擇產品並輸入最終報價",
       });
-    }
 
     setDialog({
       isOpen: true,
@@ -767,15 +783,17 @@ const QuotationCreatePage = () => {
           const payload = {
             ...formData,
             items: formData.items.map((item) => {
-              const { id, ...rest } = item;
+              // 🌟 將 product_detail 拿掉，避免干擾 API
+              const { id, product_detail, ...rest } = item;
               return typeof id === "string" && id.startsWith("temp_")
                 ? rest
-                : item;
+                : { id, ...rest };
             }),
           };
 
-          const res = await fetchWithAuth("/api/quotations", {
-            method: "POST",
+          // 🌟 修正：移除了 URL 的 trailing slash
+          const res = await fetchWithAuth(`/api/quotations/${id}`, {
+            method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload),
           });
@@ -786,9 +804,9 @@ const QuotationCreatePage = () => {
             isOpen: true,
             type: "alert",
             status: "success",
-            title: "儲存成功",
-            message: "報價單已成功建立！",
-            onCloseCallback: () => window.location.reload(),
+            title: "更新成功",
+            message: "報價單已成功更新！",
+            onCloseCallback: () => navigate("/quotations"),
           });
         } catch (err) {
           setDialog({
@@ -821,16 +839,11 @@ const QuotationCreatePage = () => {
 
   return (
     <div className="w-full p-6 md:p-8 pb-12 max-w-7xl mx-auto bg-slate-50 min-h-screen font-sans text-slate-800 print:bg-white print:p-0">
-      <style>{`
-        @media print {
-          .page-break { page-break-before: always; }
-          @page { size: A4 portrait; margin: 0; }
-        }
-      `}</style>
+      <style>{`@media print { .page-break { page-break-before: always; } @page { size: A4 portrait; margin: 0; } }`}</style>
 
       <div className="mb-6 print:hidden">
         <h2 className="text-3xl font-extrabold text-slate-800 tracking-tight flex items-center gap-3">
-          新增報價單
+          編輯報價單
         </h2>
       </div>
 
@@ -848,7 +861,6 @@ const QuotationCreatePage = () => {
       </div>
 
       <form className="flex flex-col gap-6 w-full pb-6 print:hidden">
-        {/* 單頭區塊 */}
         <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
           <h3 className="text-base font-bold text-slate-800 mb-4 border-b border-slate-100 pb-2 flex items-center gap-2">
             <Building2 size={18} className="text-slate-500" /> 客戶與單據資訊
@@ -886,7 +898,6 @@ const QuotationCreatePage = () => {
           </div>
         </div>
 
-        {/* 單身區塊 */}
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
           <div className="px-6 py-4 border-b border-slate-200 flex flex-col sm:flex-row justify-between items-start sm:items-center bg-slate-50/50 gap-3">
             <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
@@ -914,7 +925,8 @@ const QuotationCreatePage = () => {
               </div>
             ) : (
               formData.items.map((item, index) => {
-                const costsKeys = Object.keys(item.costs_breakdown);
+                // 🌟 修正：取得排序過的 Cost Keys，確保順序正確
+                const costsKeys = getSortedCostKeys(item.costs_breakdown);
                 const totalCost = Math.round(
                   costsKeys.reduce(
                     (sum, key) =>
@@ -985,7 +997,6 @@ const QuotationCreatePage = () => {
                         </div>
                       </div>
 
-                      {/* 中間：成本結構動態 Json */}
                       <div className="lg:col-span-4 flex flex-col gap-3 border-b lg:border-b-0 lg:border-r border-slate-100 pb-4 lg:pb-0 lg:pr-6">
                         <div className="flex justify-between items-center mb-1 relative">
                           <label className="block text-xs font-bold text-slate-500 uppercase">
@@ -999,12 +1010,12 @@ const QuotationCreatePage = () => {
                           />
                         </div>
 
+                        {/* 🌟 修正：按照 COST_OPTIONS 順序渲染 */}
                         {costsKeys.map((costKey) => (
                           <div
                             key={costKey}
                             className="flex gap-2 items-center"
                           >
-                            {/* 🌟 彈性等寬排版 */}
                             <input
                               type="text"
                               value={item.costs_breakdown[costKey].name}
@@ -1030,7 +1041,6 @@ const QuotationCreatePage = () => {
                                 className="w-full px-2 py-1.5 border border-slate-300 rounded focus:border-blue-500 outline-none text-xs text-right font-mono"
                               />
                             </div>
-                            {/* 🌟 固定寬度的按鈕佔位區，確保上下對齊 */}
                             <div className="w-6 flex justify-center shrink-0">
                               {costKey !== "material_cost" && (
                                 <button
@@ -1057,7 +1067,6 @@ const QuotationCreatePage = () => {
                         </div>
                       </div>
 
-                      {/* 右側：最終報價 */}
                       <div className="lg:col-span-3 flex flex-col justify-center gap-4">
                         <div>
                           <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase">
@@ -1139,13 +1148,11 @@ const QuotationCreatePage = () => {
             disabled={isSubmitting}
             className="w-full md:w-auto px-8 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-md shadow-sm transition-all font-bold text-sm flex items-center justify-center gap-2 disabled:opacity-50"
           >
-            <Save size={16} /> {isSubmitting ? "儲存中..." : "儲存報價"}
+            <Save size={16} /> {isSubmitting ? "更新中..." : "更新報價"}
           </button>
         </div>
       </form>
 
-      {/* 雙視角列印預覽 Modal */}
-      {/* 雙視角列印預覽 Modal */}
       {isPreviewOpen && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 print:static print:block print:bg-transparent print:p-0 print:backdrop-blur-none">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200 print:shadow-none print:w-full print:max-w-none print:max-h-none print:overflow-visible print:block">
@@ -1183,17 +1190,9 @@ const QuotationCreatePage = () => {
         </div>
       )}
 
-      <CustomDialog
-        isOpen={dialog.isOpen}
-        type={dialog.type}
-        status={dialog.status}
-        title={dialog.title}
-        message={dialog.message}
-        onClose={closeDialog}
-        onConfirm={dialog.onConfirm}
-      />
+      <CustomDialog isOpen={dialog.isOpen} {...dialog} onClose={closeDialog} />
     </div>
   );
 };
 
-export default QuotationCreatePage;
+export default QuotationEditPage;

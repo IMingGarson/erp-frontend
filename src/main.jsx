@@ -12,7 +12,7 @@ import ProductionOrderDetailEditPage from "./ProductionOrderDetailEditPage.jsx";
 import VendorPage from "./VendorPage.jsx";
 import MaterialPage from "./MaterialPage.jsx";
 import PurchaseRequisitionPage from "./PurchaseRequisitionPage.jsx";
-import TracePage from "./TracePage_v2.jsx";
+import TracePage from "./TracePage.jsx";
 import UserPage from "./UserPage.jsx";
 import "./index.css";
 import DeliveryNotePage from "./DeliveryNotePage.jsx";

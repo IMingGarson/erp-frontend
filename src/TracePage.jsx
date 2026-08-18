@@ -1,35 +1,88 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import CustomDialog from "./components/customDialog";
 import { fetchWithAuth } from "./utils/fetchWithAuth";
-import { Printer, FileText, Search, ChevronDown } from "lucide-react";
+import {
+  Printer,
+  FileText,
+  Search,
+  ChevronDown,
+  ArrowLeft,
+} from "lucide-react";
 
 // ==========================================
-// 列印專用 Template (完美致敬 Excel 格式)
+// 列印專用 Template (包含 4 頁，完美版面比例)
 // ==========================================
 const RecallReportPrintTemplate = ({
   reportData,
   formData,
   recoveryRate,
-  className = "",
+  traceResults,
+  selectedMaterial,
+  isSimulation,
+  activeTab,
 }) => {
   if (!reportData) return null;
 
+  // 1. 扁平化所有生產單，並帶上所屬批號與有效期限
+  const allOrders = (traceResults || []).flatMap((b) =>
+    (b.trace_details?.orders || []).map((o) => ({
+      ...o,
+      batch_number: b.batch_number,
+      expiration_date: b.expiration_date,
+    })),
+  );
+
+  // 2. 扁平化下游銷貨單
+  const downstreamShipments = allOrders.flatMap((o) =>
+    (o.delivery_notes || []).map((dn) => ({
+      ...dn,
+      product_code: o.product_code,
+      product_name: o.product_name,
+      target_qty: o.target_qty,
+      actual_qty: o.actual_qty,
+      order_created_at: o.order_created_at,
+      expiration_date: o.expiration_date,
+      vendor_address: o.po_vendor_info?.address || "",
+      vendor_phone: o.po_vendor_info?.phone || "",
+    })),
+  );
+
+  // 3. 取得不重複的下游廠商清單
+  const uniqueVendors = Array.from(
+    new Map(
+      downstreamShipments.map((s) => [
+        s.customer_code,
+        {
+          code: s.customer_code,
+          name: s.customer_name,
+          address: s.vendor_address,
+          phone: s.vendor_phone,
+        },
+      ]),
+    ).values(),
+  );
+
+  const todayStr = new Date().toISOString().split("T")[0].replace(/-/g, "/");
+
   return (
-    <div
-      className={`w-full bg-white text-black font-sans mx-auto ${className}`}
-    >
+    <div className="w-full bg-white text-black font-sans mx-auto shadow-xl ring-1 ring-black/5 print:shadow-none print:ring-0 max-w-[210mm]">
       <style>
         {`
           @media print {
-            /* 將 margin 設為 0 可強制隱藏瀏覽器預設的頁首(日期標題)與頁尾(網址頁碼) */
             @page { size: A4 portrait; margin: 0; }
             body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            .print-force-block { display: flex !important; }
+            .page-break { page-break-before: always; }
           }
         `}
       </style>
 
-      <div className="border-2 border-green-600 p-1">
-        {/* 表頭 Logo & Title */}
+      {/* ========================================================= */}
+      {/* 📄 頁面 1：基本資訊與統計看板 */}
+      {/* ========================================================= */}
+      <div
+        className={`border-2 border-green-600 p-8 min-h-[297mm] relative flex-col bg-white ${activeTab === 0 ? "flex" : "hidden"} print-force-block`}
+      >
         <table className="w-full border-collapse border-2 border-black text-center mb-2">
           <tbody>
             <tr>
@@ -48,13 +101,12 @@ const RecallReportPrintTemplate = ({
               </td>
               <td className="border-2 border-black w-32 align-top text-left text-sm font-bold p-1">
                 <div className="border-b border-black pb-1 mb-1">版次： 04</div>
-                <div>頁次：</div>
+                <div>頁次： 1</div>
               </td>
             </tr>
           </tbody>
         </table>
 
-        {/* 區塊一：責任廠商基本資訊 */}
         <div className="font-bold text-[#1f4e78] text-sm mb-0.5 mt-4">
           【責任廠商基本資訊】
         </div>
@@ -97,7 +149,7 @@ const RecallReportPrintTemplate = ({
                 預定完成回收期限
               </td>
               <td className="border border-black px-2 py-1.5 text-slate-500 font-normal">
-                {formData.deadline || "請輸入預定日期"}
+                {formData.deadline || ""}
               </td>
             </tr>
             <tr>
@@ -123,7 +175,6 @@ const RecallReportPrintTemplate = ({
           </tbody>
         </table>
 
-        {/* 區塊二：回收進度統計看板 */}
         <div className="font-bold text-[#1f4e78] text-sm mb-0.5">
           【回收進度統計看板】
         </div>
@@ -147,7 +198,10 @@ const RecallReportPrintTemplate = ({
                 回收原料總量
               </td>
               <td className="border border-black px-2 py-1.5 text-center font-mono">
-                {parseFloat(reportData.used_raw_total).toFixed(4)}
+                {(
+                  parseFloat(reportData.used_raw_total) +
+                  parseFloat(reportData.unused_raw_total)
+                ).toFixed(4)}
               </td>
               <td className="border border-black px-2 py-1.5 text-xs font-normal">
                 異常原料進貨總量(kg)
@@ -215,7 +269,7 @@ const RecallReportPrintTemplate = ({
                 整體回收率 (%)
               </td>
               <td className="border border-black px-2 py-1.5 text-center text-red-600 font-mono">
-                {recoveryRate !== null ? `${recoveryRate.toFixed(2)}%` : "-"}
+                {recoveryRate !== null ? `${recoveryRate.toFixed(2)}%` : ""}
               </td>
               <td className="border border-black px-2 py-1.5 text-xs font-normal">
                 (產品實際回收總量+庫存) / 總生產量
@@ -263,6 +317,704 @@ const RecallReportPrintTemplate = ({
           </tbody>
         </table>
       </div>
+
+      {/* ========================================================= */}
+      {/* 📄 頁面 2：回收產品與庫存資料 */}
+      {/* ========================================================= */}
+      <div
+        className={`page-break border-2 border-green-600 p-8 min-h-[297mm] relative flex-col bg-white ${activeTab === 1 ? "flex" : "hidden"} print-force-block`}
+      >
+        <table className="w-full border-collapse border-2 border-black text-center mb-2">
+          <tbody>
+            <tr>
+              <td className="border-2 border-black w-32 h-20 align-middle">
+                <div className="text-red-600 font-black text-5xl italic font-serif">
+                  G
+                </div>
+              </td>
+              <td className="border-2 border-black align-middle">
+                <div className="text-2xl font-bold tracking-widest border-b-2 border-black py-1">
+                  基香食品有限公司
+                </div>
+                <div className="text-2xl font-bold tracking-widest py-1">
+                  產品回收計畫書
+                </div>
+              </td>
+              <td className="border-2 border-black w-32 align-top text-left text-sm font-bold p-1">
+                <div className="border-b border-black pb-1 mb-1">版次： 04</div>
+                <div>頁次： 2</div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div className="text-lg font-bold text-[#1f4e78] mb-2 mt-4 text-left">
+          回收產品與庫存基本明細
+        </div>
+
+        <table className="w-full border-collapse border border-black text-xs text-center">
+          <thead className="bg-[#1f4e78] text-white">
+            <tr>
+              {/* 🌟 嚴格分配寬度比例，名稱變寬，數量壓縮 */}
+              <th className="border border-black px-1 py-1.5 font-bold w-[8%]">
+                配方編號
+              </th>
+              <th className="border border-black px-1 py-1.5 font-bold w-[9%]">
+                產品編號
+              </th>
+              <th className="border border-black px-1 py-1.5 font-bold w-[20%]">
+                回收產品名稱
+              </th>
+              <th className="border border-black px-1 py-1.5 font-bold w-[15%]">
+                包裝規格
+              </th>
+              <th className="border border-black px-1 py-1.5 font-bold w-[9%]">
+                批號編號
+              </th>
+              <th className="border border-black px-1 py-1.5 font-bold w-[10%]">
+                銷貨單編號
+              </th>
+              <th className="border border-black px-0.5 py-1.5 font-bold w-[4%] leading-tight">
+                數量
+                <br />
+                (包)
+              </th>
+              <th className="border border-black px-0.5 py-1.5 font-bold w-[4%] leading-tight">
+                KG
+              </th>
+              <th className="border border-black px-1 py-1.5 font-bold w-[9%]">
+                製令單號
+              </th>
+              <th className="border border-black px-0.5 py-1.5 font-bold w-[4%] leading-tight">
+                產品數量
+                <br />
+                (kg)
+              </th>
+              <th className="border border-black px-0.5 py-1.5 font-bold w-[4%] leading-tight">
+                原料用量
+                <br />
+                (kg)
+              </th>
+              <th className="border border-black px-0.5 py-1.5 font-bold w-[4%] leading-tight relative">
+                誤差量
+                <br />
+                (kg)
+                <div className="absolute left-full top-1/2 -translate-y-1/2 ml-2 text-black whitespace-nowrap font-normal text-[10px]">
+                  *誤差值為生產數量-銷貨數量
+                </div>
+              </th>
+            </tr>
+          </thead>
+          <tbody className="font-bold text-red-600">
+            {(() => {
+              const flattenedRows = [];
+              let totalBags = 0;
+              let totalProduced = 0;
+              let totalUsed = 0;
+
+              allOrders.forEach((po) => {
+                const batches =
+                  po.used_batch_numbers && po.used_batch_numbers.length > 0
+                    ? po.used_batch_numbers
+                    : ["-"];
+                const deliveries =
+                  po.delivery_notes && po.delivery_notes.length > 0
+                    ? po.delivery_notes
+                    : [null];
+                const producedQty = po.actual_qty || po.target_qty || 0;
+
+                totalProduced += parseFloat(producedQty);
+                totalUsed += parseFloat(po.used_qty || 0);
+
+                batches.forEach((batchNum) => {
+                  deliveries.forEach((dn) => {
+                    if (dn) totalBags += parseFloat(dn.quantity || 0);
+
+                    flattenedRows.push(
+                      <tr
+                        key={`${po.order_number}-${batchNum}-${dn?.note_number || "none"}`}
+                        className="h-8"
+                      >
+                        <td className="border border-slate-300 px-1">
+                          {po.product_code || "-"}
+                        </td>
+                        <td className="border border-slate-300 px-1">
+                          {po.product_code || "-"}
+                        </td>
+                        <td className="border border-slate-300 px-1 text-left break-all">
+                          {po.product_name || "-"}
+                        </td>
+                        <td className="border border-slate-300 px-1 text-left break-all">
+                          {po.product_spec || "-"}
+                        </td>
+                        <td className="border border-slate-300 px-1">
+                          {batchNum}
+                        </td>
+                        <td className="border border-slate-300 px-1">
+                          {dn ? dn.note_number : "-"}
+                        </td>
+                        <td className="border border-slate-300 px-1">
+                          {dn ? dn.quantity : "-"}
+                        </td>
+                        <td className="border border-slate-300 px-1">-</td>
+                        <td className="border border-slate-300 px-1">
+                          {po.order_number || "-"}
+                        </td>
+                        <td className="border border-slate-300 px-1">
+                          {producedQty}
+                        </td>
+                        <td className="border border-slate-300 px-1">
+                          {po.used_qty || "-"}
+                        </td>
+                        <td className="border border-slate-300 px-1">-</td>
+                      </tr>,
+                    );
+                  });
+                });
+              });
+
+              if (flattenedRows.length === 0) {
+                flattenedRows.push(
+                  <tr key="empty" className="h-8 text-slate-500">
+                    <td colSpan="12" className="border border-slate-300 py-4">
+                      無生產/出貨資料
+                    </td>
+                  </tr>,
+                );
+              }
+
+              const padCount = Math.max(0, 15 - flattenedRows.length);
+              for (let i = 0; i < padCount; i++) {
+                flattenedRows.push(
+                  <tr key={`pad-${i}`} className="h-8">
+                    <td className="border border-slate-300 px-1"></td>
+                    <td className="border border-slate-300 px-1"></td>
+                    <td className="border border-slate-300 px-1"></td>
+                    <td className="border border-slate-300 px-1"></td>
+                    <td className="border border-slate-300 px-1"></td>
+                    <td className="border border-slate-300 px-1"></td>
+                    <td className="border border-slate-300 px-1"></td>
+                    <td className="border border-slate-300 px-1"></td>
+                    <td className="border border-slate-300 px-1"></td>
+                    <td className="border border-slate-300 px-1"></td>
+                    <td className="border border-slate-300 px-1"></td>
+                    <td className="border border-slate-300 px-1"></td>
+                  </tr>,
+                );
+              }
+
+              flattenedRows.push(
+                <tr
+                  key="footer-total"
+                  className="bg-[#1f4e78] text-white font-bold h-8"
+                >
+                  <td
+                    colSpan="6"
+                    className="border border-black text-center tracking-widest"
+                  >
+                    合 計
+                  </td>
+                  <td className="border border-black bg-white text-red-600">
+                    {totalBags || "-"}
+                  </td>
+                  <td className="border border-black bg-white text-red-600">
+                    -
+                  </td>
+                  <td className="border border-black bg-white text-red-600 border-t-0"></td>
+                  <td className="border border-black bg-white text-red-600">
+                    {totalProduced.toFixed(4)}
+                  </td>
+                  <td className="border border-black bg-white text-red-600">
+                    {totalUsed.toFixed(4)}
+                  </td>
+                  <td className="border border-black bg-white text-red-600"></td>
+                </tr>,
+              );
+
+              return flattenedRows;
+            })()}
+          </tbody>
+        </table>
+      </div>
+
+      {/* ========================================================= */}
+      {/* 📄 頁面 3：下游廠商出貨與聯絡明細 */}
+      {/* ========================================================= */}
+      <div
+        className={`page-break border-2 border-green-600 p-8 min-h-[297mm] relative flex-col bg-white ${activeTab === 2 ? "flex" : "hidden"} print-force-block`}
+      >
+        <table className="w-full border-collapse border-2 border-black text-center mb-2">
+          <tbody>
+            <tr>
+              <td className="border-2 border-black w-32 h-20 align-middle">
+                <div className="text-red-600 font-black text-5xl italic font-serif">
+                  G
+                </div>
+              </td>
+              <td className="border-2 border-black align-middle">
+                <div className="text-2xl font-bold tracking-widest border-b-2 border-black py-1">
+                  基香食品有限公司
+                </div>
+                <div className="text-2xl font-bold tracking-widest py-1">
+                  產品回收計畫書
+                </div>
+              </td>
+              <td className="border-2 border-black w-32 align-top text-left text-sm font-bold p-1">
+                <div className="border-b border-black pb-1 mb-1">版次： 04</div>
+                <div>頁次： 3</div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div className="text-lg font-bold text-[#1f4e78] mb-2 mt-4 text-left">
+          下游廠商出貨與聯絡明細
+        </div>
+
+        <table className="w-full border-collapse border border-black text-[10px] text-center">
+          <thead className="bg-[#1f4e78] text-white">
+            <tr className="bg-white text-[#1f4e78]">
+              <th colSpan="8" className="border border-slate-300"></th>
+              <th
+                colSpan="2"
+                className="border border-slate-300 font-bold py-1"
+              >
+                出貨
+              </th>
+              <th
+                colSpan="2"
+                className="border border-slate-300 font-bold py-1"
+              >
+                收貨
+              </th>
+              <th
+                colSpan="2"
+                className="border border-slate-300 font-bold py-1"
+              >
+                預計回收
+              </th>
+              <th
+                colSpan="2"
+                className="border border-slate-300 font-bold py-1"
+              >
+                實際回廠
+              </th>
+            </tr>
+            <tr>
+              {/* 🌟 嚴格分配寬度比例，名稱/地址變寬，數量極度壓縮 */}
+              <th className="border border-black px-1 py-1.5 font-bold w-[7%]">
+                客戶編號
+              </th>
+              <th className="border border-black px-1 py-1.5 font-bold w-[14%]">
+                客戶名稱
+              </th>
+              <th className="border border-black px-1 py-1.5 font-bold w-[16%]">
+                地址
+              </th>
+              <th className="border border-black px-1 py-1.5 font-bold w-[9%]">
+                聯絡電話
+              </th>
+              <th className="border border-black px-1 py-1.5 font-bold w-[8%]">
+                出貨日期
+              </th>
+              <th className="border border-black px-1 py-1.5 font-bold w-[14%]">
+                出貨產品名稱
+              </th>
+              <th className="border border-black px-1 py-1.5 font-bold w-[8%]">
+                製造日期
+              </th>
+              <th className="border border-black px-1 py-1.5 font-bold w-[8%]">
+                有效期限
+              </th>
+              <th className="border border-black px-0 py-1.5 font-bold w-[2%] text-[9px] leading-tight">
+                數量
+                <br />
+                (包)
+              </th>
+              <th className="border border-black px-0 py-1.5 font-bold w-[2%] text-[9px] leading-tight">
+                數量
+                <br />
+                (kg)
+              </th>
+              <th className="border border-black px-0 py-1.5 font-bold w-[2%] text-[9px] leading-tight">
+                數量
+                <br />
+                (包)
+              </th>
+              <th className="border border-black px-0 py-1.5 font-bold w-[2%] text-[9px] leading-tight">
+                數量
+                <br />
+                (kg)
+              </th>
+              <th className="border border-black px-0 py-1.5 font-bold w-[2%] text-[9px] leading-tight">
+                數量
+                <br />
+                (包)
+              </th>
+              <th className="border border-black px-0 py-1.5 font-bold w-[2%] text-[9px] leading-tight">
+                數量
+                <br />
+                (kg)
+              </th>
+              <th className="border border-black px-0 py-1.5 font-bold w-[2%] text-[9px] leading-tight">
+                數量
+                <br />
+                (包)
+              </th>
+              <th className="border border-black px-0 py-1.5 font-bold w-[2%] text-[9px] leading-tight">
+                數量
+                <br />
+                (kg)
+              </th>
+            </tr>
+          </thead>
+          <tbody className="font-bold text-red-600">
+            {downstreamShipments.map((ship, idx) => (
+              <tr key={idx} className="h-8">
+                <td className="border border-slate-300 px-1">
+                  {ship.customer_code || "-"}
+                </td>
+                <td className="border border-slate-300 px-1 text-left break-words">
+                  {ship.customer_name || "-"}
+                </td>
+                <td className="border border-slate-300 px-1 text-left break-words">
+                  {ship.vendor_address || "-"}
+                </td>
+                <td className="border border-slate-300 px-1">
+                  {ship.vendor_phone || "-"}
+                </td>
+                <td className="border border-slate-300 px-1 font-mono">
+                  {ship.note_date || "-"}
+                </td>
+                <td className="border border-slate-300 px-1 text-left break-words">
+                  {ship.product_name} {ship.spec ? `(${ship.spec})` : ""}
+                </td>
+                <td className="border border-slate-300 px-1 font-mono">
+                  {ship.order_created_at || "-"}
+                </td>
+                <td className="border border-slate-300 px-1 font-mono">
+                  {ship.expiration_date || "-"}
+                </td>
+                <td className="border border-slate-300 px-0 font-mono">
+                  {ship.quantity}
+                </td>
+                <td className="border border-slate-300 px-0">-</td>
+                <td className="border border-slate-300 px-0">-</td>
+                <td className="border border-slate-300 px-0">-</td>
+                <td className="border border-slate-300 px-0">-</td>
+                <td className="border border-slate-300 px-0">-</td>
+                <td className="border border-slate-300 px-0">-</td>
+                <td className="border border-slate-300 px-0">-</td>
+              </tr>
+            ))}
+            {[...Array(Math.max(0, 15 - downstreamShipments.length))].map(
+              (_, i) => (
+                <tr key={`pad-${i}`} className="h-8">
+                  {[...Array(16)].map((_, col) => (
+                    <td key={col} className="border border-slate-300 px-1"></td>
+                  ))}
+                </tr>
+              ),
+            )}
+            <tr className="bg-[#1f4e78] text-white font-bold h-8">
+              <td
+                colSpan="8"
+                className="border border-black text-center tracking-widest"
+              >
+                總計
+              </td>
+              <td className="border border-black bg-white text-red-600">
+                {downstreamShipments.reduce(
+                  (sum, s) => sum + (parseFloat(s.quantity) || 0),
+                  0,
+                ) || "-"}
+              </td>
+              <td className="border border-black bg-white text-red-600">-</td>
+              <td className="border border-black bg-white text-red-600">-</td>
+              <td className="border border-black bg-white text-red-600">-</td>
+              <td className="border border-black bg-white text-red-600">-</td>
+              <td className="border border-black bg-white text-red-600">-</td>
+              <td className="border border-black bg-white text-red-600">-</td>
+              <td className="border border-black bg-white text-red-600">-</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      {/* ========================================================= */}
+      {/* 📄 頁面 4：產品回收通知單 (依廠商迴圈產生多頁) */}
+      {/* ========================================================= */}
+      {uniqueVendors.length > 0 && (
+        <div
+          className={`page-break relative flex-col bg-slate-100 ${activeTab === 3 ? "flex" : "hidden"} print-force-block print:bg-white`}
+        >
+          {uniqueVendors.map((vendor, vIdx) => {
+            const vendorShipments = downstreamShipments.filter(
+              (s) => s.customer_code === vendor.code,
+            );
+
+            return (
+              <div
+                key={`notice-${vIdx}`}
+                className="bg-white p-8 min-h-[297mm] flex flex-col mb-4 print:mb-0 border border-slate-200 print:border-none shadow-sm print:shadow-none"
+              >
+                <table className="w-full border-collapse border-2 border-black text-sm mb-0">
+                  <tbody>
+                    <tr>
+                      <td
+                        rowSpan="2"
+                        className="border border-black w-32 h-20 align-middle text-center"
+                      >
+                        <div className="text-red-600 font-black text-5xl italic font-serif">
+                          G
+                        </div>
+                      </td>
+                      <td className="border border-black align-middle text-center text-2xl font-bold tracking-widest">
+                        基香食品有限公司
+                      </td>
+                      <td className="border border-black align-middle pl-2 w-48 font-bold">
+                        版次： <span className="ml-4">04</span>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="border border-black align-middle text-center text-2xl font-bold tracking-widest">
+                        產品回收通知單
+                      </td>
+                      <td className="border border-black align-middle pl-2 w-48 font-bold">
+                        頁次：{" "}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+
+                <table className="w-full border-collapse border-x-2 border-black text-sm font-bold">
+                  <tbody>
+                    <tr>
+                      <td className="border border-black px-2 py-1 text-blue-900 w-[15%]">
+                        填表日期：
+                      </td>
+                      <td className="border border-black px-2 py-1 w-[35%]">
+                        {todayStr}
+                      </td>
+                      <td className="border border-black px-2 py-1 text-blue-900 w-[15%]">
+                        編號：
+                      </td>
+                      <td className="border border-black px-2 py-1 text-blue-900 w-[35%]">
+                        26-{String(vIdx + 1).padStart(3, "0")}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="border border-black px-2 py-1 text-blue-900">
+                        客戶名稱：
+                      </td>
+                      <td className="border border-black px-2 py-1">
+                        {vendor.name}
+                      </td>
+                      <td className="border border-black px-2 py-1 text-blue-900">
+                        連絡人：
+                      </td>
+                      <td className="border border-black px-2 py-1"></td>
+                    </tr>
+                    <tr>
+                      <td className="border border-black px-2 py-1 text-blue-900">
+                        貨品貯存位置：
+                      </td>
+                      <td className="border border-black px-2 py-1">
+                        {vendor.address}
+                      </td>
+                      <td className="border border-black px-2 py-1 text-blue-900">
+                        緊急連絡電話：
+                      </td>
+                      <td className="border border-black px-2 py-1">
+                        {vendor.phone}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+
+                <table className="w-full border-collapse border-x-2 border-black text-sm font-bold">
+                  <tbody>
+                    <tr>
+                      <td className="border border-black px-2 py-2 text-blue-900 w-[15%] align-top">
+                        回收原因：
+                      </td>
+                      <td className="border border-black px-2 py-2 text-[#1f4e78] tracking-wider leading-relaxed">
+                        {isSimulation && <div>“廠內模擬回收演練”</div>}
+                        <div>
+                          供應商通知產品中 {selectedMaterial?.name || "原料"}{" "}
+                          抽驗發現農藥殘留過量，需進行招回。
+                        </div>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+
+                <table className="w-full border-collapse border-2 border-black text-sm text-center mb-0">
+                  <thead className="bg-[#1f4e78] font-bold text-white tracking-widest">
+                    <tr>
+                      <td
+                        rowSpan="2"
+                        className="border border-black w-[5%] bg-white text-black"
+                      >
+                        NO
+                      </td>
+                      <td
+                        colSpan="3"
+                        className="border border-black text-blue-900 bg-white"
+                      >
+                        廠內填寫
+                      </td>
+                      <td
+                        rowSpan="2"
+                        className="border border-black text-white w-[12%]"
+                      >
+                        發貨數量(Kg)
+                      </td>
+                      <td
+                        colSpan="2"
+                        className="border border-black bg-white text-black"
+                      >
+                        客戶填寫
+                      </td>
+                      <td
+                        rowSpan="2"
+                        className="border border-black bg-white text-black w-[12%]"
+                      >
+                        備註
+                      </td>
+                    </tr>
+                    <tr>
+                      {/* 🌟 名稱欄變寬，日期欄適中 */}
+                      <td className="border border-black w-[35%]">
+                        產 品 名 稱
+                      </td>
+                      <td className="border border-black w-[12%]">製造日期</td>
+                      <td className="border border-black w-[12%]">有效期限</td>
+                      <td className="border border-black w-[12%]">
+                        收貨數量(Kg)
+                      </td>
+                      <td className="border border-black w-[12%]">
+                        庫存數量(Kg)
+                      </td>
+                    </tr>
+                  </thead>
+                  <tbody className="font-bold text-black bg-white">
+                    {vendorShipments.map((vp, pIdx) => (
+                      <tr key={pIdx} className="h-8">
+                        <td className="border border-black">{pIdx + 1}</td>
+                        <td className="border border-black px-1 text-left break-words">
+                          {vp.product_name} {vp.spec ? `(${vp.spec})` : ""}
+                        </td>
+                        <td className="border border-black font-mono">
+                          {vp.order_created_at || "-"}
+                        </td>
+                        <td className="border border-black font-mono">
+                          {vp.expiration_date || "-"}
+                        </td>
+                        <td className="border border-black font-mono">
+                          {vp.quantity}
+                        </td>
+                        <td className="border border-black bg-slate-100"></td>
+                        <td className="border border-black bg-slate-100"></td>
+                        <td className="border border-black text-xs text-slate-500 bg-slate-100"></td>
+                      </tr>
+                    ))}
+                    {[...Array(Math.max(0, 12 - vendorShipments.length))].map(
+                      (_, i) => (
+                        <tr key={`pad-${i}`} className="h-8">
+                          <td className="border border-black"></td>
+                          <td className="border border-black"></td>
+                          <td className="border border-black"></td>
+                          <td className="border border-black"></td>
+                          <td className="border border-black"></td>
+                          <td className="border border-black bg-slate-100"></td>
+                          <td className="border border-black bg-slate-100"></td>
+                          <td className="border border-black bg-slate-100"></td>
+                        </tr>
+                      ),
+                    )}
+                    <tr className="h-8">
+                      <td
+                        colSpan="4"
+                        className="border border-black px-1 py-1 tracking-widest text-center"
+                      >
+                        合 計
+                      </td>
+                      <td className="border border-black px-1 py-1"></td>
+                      <td className="border border-black px-1 py-1 bg-slate-100"></td>
+                      <td className="border border-black px-1 py-1 bg-slate-100"></td>
+                      <td className="border border-black px-1 py-1 bg-slate-100"></td>
+                    </tr>
+                  </tbody>
+                </table>
+
+                <table className="w-full border-collapse border-x-2 border-b-2 border-black text-sm font-bold bg-white text-center">
+                  <tbody>
+                    <tr className="h-10">
+                      <td className="border border-black w-24">製表：</td>
+                      <td className="border border-black"></td>
+                      <td className="border border-black w-32">客戶簽名：</td>
+                      <td className="border border-black bg-slate-100 w-1/3"></td>
+                    </tr>
+                  </tbody>
+                </table>
+
+                <div className="border-x-2 border-b-2 border-black p-1 text-sm font-bold min-h-[4rem]">
+                  說明：
+                  <br />
+                  <span className="ml-4">
+                    1.
+                    以上客戶及聯絡人名稱、貨品貯存位置及聯繫電話若有異動，請於回傳時更正，感謝。
+                  </span>
+                </div>
+
+                <table className="w-full border-collapse border-x-2 border-b-2 border-black text-sm font-bold bg-white text-left">
+                  <tbody>
+                    <tr className="h-8">
+                      <td colSpan="4" className="border border-black px-2">
+                        敬呈
+                      </td>
+                    </tr>
+                    <tr className="h-8">
+                      <td className="border border-black px-2 w-24">
+                        總經理：
+                      </td>
+                      <td colSpan="3" className="border border-black"></td>
+                    </tr>
+                    <tr className="h-8">
+                      <td colSpan="4" className="border border-black px-2">
+                        敬會：
+                      </td>
+                    </tr>
+                    <tr className="h-10">
+                      <td className="border border-black px-2">總務部：</td>
+                      <td className="border border-black px-2 w-1/3">
+                        生產部：
+                      </td>
+                      <td
+                        className="border border-black px-2 w-1/3"
+                        colSpan="2"
+                      >
+                        品保部：
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {uniqueVendors.length === 0 && (
+        <div
+          className={`page-break border-2 border-green-600 p-8 min-h-[297mm] flex-col items-center justify-center bg-slate-50 ${activeTab === 3 ? "flex" : "hidden"} print-force-block`}
+        >
+          <div className="text-xl font-bold text-slate-400">
+            目前尚無出貨至下游廠商之紀錄，不需產生回收通知單。
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -284,6 +1036,10 @@ const TracePage = () => {
   const dropdownRef = useRef(null);
 
   const [expandedBatches, setExpandedBatches] = useState({});
+  const [isSimulation, setIsSimulation] = useState(true);
+
+  const [viewMode, setViewMode] = useState("search");
+  const [activePreviewTab, setActivePreviewTab] = useState(0);
 
   const [formData, setFormData] = useState({
     deadline: "",
@@ -291,8 +1047,6 @@ const TracePage = () => {
     disposalMethod: "",
     destroyAmount: "",
   });
-
-  const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
 
   const [dialog, setDialog] = useState({
     isOpen: false,
@@ -330,9 +1084,8 @@ const TracePage = () => {
 
   useEffect(() => {
     const handleClickOutside = (event) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target))
         setIsDropdownOpen(false);
-      }
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
@@ -409,7 +1162,6 @@ const TracePage = () => {
   const handlePrintAction = () => {
     setTimeout(() => {
       const originalTitle = document.title;
-      // 這裡如果希望列印的檔名乾淨，保留這個設定即可
       document.title = `產品回收計畫書_${selectedMaterial?.name || ""}`;
       window.print();
       document.title = originalTitle;
@@ -432,19 +1184,83 @@ const TracePage = () => {
     return ((actualRec + inStock) / totalProduced) * 100;
   }, [reportData, formData.actualRecovered]);
 
-  // 注意最外層使用了 <> Fragment 包覆，確保 print:hidden 不會干涉到要列印的元件
+  // ==========================================
+  // 渲染: 預覽全螢幕模式 (Preview Mode)
+  // ==========================================
+  if (viewMode === "preview") {
+    const tabs = [
+      "基本資訊與統計",
+      "回收與庫存明細",
+      "下游出貨明細",
+      "產品回收通知單",
+    ];
+    return (
+      <div className="min-h-screen bg-slate-200 flex flex-col font-sans">
+        <div className="bg-white border-b border-slate-200 px-6 py-4 flex justify-between items-center shrink-0 print:hidden shadow-sm z-10 relative">
+          <div className="flex items-center gap-6">
+            <button
+              onClick={() => setViewMode("search")}
+              className="flex items-center gap-2 text-slate-500 hover:text-blue-600 font-bold transition-colors"
+            >
+              <ArrowLeft size={18} /> 返回設定頁
+            </button>
+            <div className="h-6 w-px bg-slate-300"></div>
+            <h2 className="text-xl font-bold text-[#1f4e78] tracking-widest flex items-center gap-2">
+              <FileText size={20} /> 產品回收計畫書預覽
+            </h2>
+          </div>
+          <button
+            onClick={handlePrintAction}
+            className="px-6 py-2 bg-[#1f4e78] hover:bg-blue-900 text-white font-bold rounded shadow-md transition-colors flex items-center gap-2"
+          >
+            <Printer size={16} /> 確認列印全卷
+          </button>
+        </div>
+
+        <div className="bg-white border-b border-slate-200 px-8 flex gap-8 shrink-0 print:hidden shadow-sm z-0 relative">
+          {tabs.map((tab, idx) => (
+            <button
+              key={idx}
+              onClick={() => setActivePreviewTab(idx)}
+              className={`py-4 px-2 border-b-[3px] font-bold transition-colors ${
+                activePreviewTab === idx
+                  ? "border-[#1f4e78] text-[#1f4e78]"
+                  : "border-transparent text-slate-400 hover:text-slate-600"
+              }`}
+            >
+              {idx + 1}. {tab}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-8 print:p-0 print:overflow-visible flex justify-center pb-24">
+          <RecallReportPrintTemplate
+            reportData={reportData}
+            formData={formData}
+            recoveryRate={recoveryRate}
+            traceResults={traceResults}
+            selectedMaterial={selectedMaterial}
+            isSimulation={isSimulation}
+            activeTab={activePreviewTab}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  // ==========================================
+  // 渲染: 搜尋與設定模式 (Search Mode)
+  // ==========================================
   return (
     <>
       <div className="p-6 md:p-8 max-w-7xl mx-auto bg-blue-50/20 min-h-screen font-sans relative text-slate-900 print:hidden">
-        {/* 標題區 */}
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4 border-b border-slate-200 pb-4">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-3 gap-4 border-slate-200 pb-4">
           <h2 className="text-3xl font-black text-black tracking-tight flex items-center gap-2">
             追蹤追溯
           </h2>
         </div>
 
-        {/* 系統功能說明區塊 */}
-        <div className="bg-blue-50 text-blue-800 text-sm p-4 rounded-lg mb-6 border border-blue-100">
+        <div className="bg-blue-50 text-blue-800 text-sm p-4 rounded-lg mb-6 border border-blue-100 shadow-sm">
           <p className="flex items-center gap-2 font-medium mb-1">
             <span className="text-lg">💡</span> 系統功能說明
           </p>
@@ -454,29 +1270,38 @@ const TracePage = () => {
             </li>
             <li>
               支援以批號代碼、物料名稱進行<strong>搜尋資料</strong>
-              ，產出回收計畫書核心指標。
+              ，產出回收計畫書 4 大報表。
             </li>
           </ul>
         </div>
 
-        {/* 搜尋操作區 */}
         <form
           onSubmit={handleSearch}
           className="flex flex-col sm:flex-row gap-3 w-full items-center p-4 bg-white rounded-xl shadow-md border border-blue-100 mb-6"
         >
+          <div className="flex items-center gap-2 shrink-0">
+            <label className="text-sm font-bold text-slate-700 whitespace-nowrap">
+              模擬演練
+            </label>
+            <select
+              value={isSimulation ? "YES" : "NO"}
+              onChange={(e) => setIsSimulation(e.target.value === "YES")}
+              className="border border-slate-300 rounded-md px-3 py-2.5 text-sm focus:outline-none focus:border-blue-500 bg-slate-50 cursor-pointer font-bold"
+            >
+              <option value="YES">是</option>
+              <option value="NO">否</option>
+            </select>
+          </div>
+
           <div className="relative w-full sm:flex-1" ref={dropdownRef}>
             <div
-              className={`flex items-center justify-between w-full border ${
-                isDropdownOpen
-                  ? "border-blue-500 ring-2 ring-blue-100"
-                  : "border-blue-200"
-              } rounded-md px-4 py-2.5 cursor-pointer bg-blue-50/10 hover:bg-white transition-all`}
+              className={`flex items-center justify-between w-full border ${isDropdownOpen ? "border-blue-500 ring-2 ring-blue-100" : "border-blue-200"} rounded-md px-4 py-2.5 cursor-pointer bg-blue-50/10 hover:bg-white transition-all`}
               onClick={() => setIsDropdownOpen(!isDropdownOpen)}
             >
               <div className="flex items-center gap-2 overflow-hidden">
                 <Search size={16} className="text-slate-400 flex-shrink-0" />
                 <span
-                  className={`truncate text-sm font-mono ${selectedMaterial ? "text-slate-800" : "text-slate-400"}`}
+                  className={`truncate text-sm font-mono ${selectedMaterial ? "text-slate-800 font-bold" : "text-slate-400"}`}
                 >
                   {selectedMaterial
                     ? `[${selectedMaterial.code}] ${selectedMaterial.name}`
@@ -490,7 +1315,7 @@ const TracePage = () => {
             </div>
 
             {isDropdownOpen && (
-              <div className="absolute z-50 w-full mt-1 bg-white border border-slate-200 rounded-md shadow-lg overflow-hidden flex flex-col">
+              <div className="absolute z-50 w-full mt-1 bg-white border border-slate-200 rounded-md shadow-xl overflow-hidden flex flex-col">
                 <div className="p-2 border-b border-slate-100 bg-slate-50">
                   <input
                     type="text"
@@ -511,12 +1336,12 @@ const TracePage = () => {
                           setIsDropdownOpen(false);
                           setSearchTerm("");
                         }}
-                        className="px-3 py-2 text-sm hover:bg-blue-50 cursor-pointer flex items-center gap-2"
+                        className="px-3 py-2.5 text-sm hover:bg-blue-50 cursor-pointer flex items-center gap-2"
                       >
                         <span className="text-xs font-mono bg-slate-100 px-1.5 py-0.5 rounded text-slate-500 border border-slate-200">
                           {m.code}
                         </span>
-                        <span className="truncate text-slate-700">
+                        <span className="truncate text-slate-700 font-bold">
                           {m.name}
                         </span>
                       </div>
@@ -542,7 +1367,7 @@ const TracePage = () => {
             <button
               type="button"
               onClick={handleClear}
-              className="px-4 py-2.5 bg-white text-slate-600 border border-slate-200 rounded-md hover:bg-slate-50 transition-colors text-sm font-medium whitespace-nowrap"
+              className="px-4 py-2.5 bg-white text-slate-600 border border-slate-200 rounded-md hover:bg-slate-50 transition-colors text-sm font-medium whitespace-nowrap shadow-sm"
             >
               清除
             </button>
@@ -550,105 +1375,110 @@ const TracePage = () => {
         </form>
 
         {error && (
-          <div className="p-4 mb-6 text-red-900 bg-red-50 rounded-lg border border-red-200 font-bold">
+          <div className="p-4 mb-6 text-red-900 bg-red-50 rounded-lg border border-red-200 font-bold shadow-sm">
             ⚠️ 提示：{error}
           </div>
         )}
 
-        {/* 1. 指標內容 */}
         {reportData && (
-          <div className="mb-8">
-            <h3 className="text-xl font-bold text-slate-800 mb-4">
-              1. 指標內容
+          <div className="mb-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <h3 className="text-xl font-bold text-slate-800 mb-4 flex items-center gap-2">
+              <span className="bg-[#1f4e78] text-white w-6 h-6 rounded-full flex items-center justify-center text-sm">
+                1
+              </span>{" "}
+              指標內容設定
             </h3>
-            <div className="bg-white border-2 border-blue-100 rounded-xl shadow-sm overflow-hidden relative">
-              <div className="overflow-x-auto pb-16">
+            <div className="bg-white border border-blue-200 rounded-xl shadow-lg overflow-hidden relative">
+              <div className="overflow-x-auto pb-20">
                 <table className="w-full text-left text-sm border-collapse">
                   <thead>
                     <tr className="bg-[#1f4e78] text-white">
-                      <th className="px-4 py-2.5 font-bold w-48 border border-slate-300">
+                      <th className="px-4 py-3 font-bold w-48 border border-slate-300">
                         關鍵指標 (Kg)
                       </th>
-                      <th className="px-4 py-2.5 font-bold w-48 text-center border border-slate-300">
+                      <th className="px-4 py-3 font-bold w-48 text-center border border-slate-300">
                         當前數值
                       </th>
-                      <th className="px-4 py-2.5 font-bold border border-slate-300">
+                      <th className="px-4 py-3 font-bold border border-slate-300">
                         計算公式 / 來源說明
                       </th>
                     </tr>
                   </thead>
                   <tbody className="font-bold text-slate-800">
-                    <tr>
-                      <td className="border border-slate-300 px-4 py-2.5 bg-slate-50">
+                    <tr className="hover:bg-slate-50">
+                      <td className="border border-slate-300 px-4 py-3 bg-slate-50">
                         回收原料總量
                       </td>
-                      <td className="border border-slate-300 px-4 py-2.5 text-center font-mono">
-                        {parseFloat(reportData.used_raw_total).toFixed(4)}
+                      <td className="border border-slate-300 px-4 py-3 text-center font-mono text-lg text-blue-600">
+                        {(
+                          parseFloat(reportData.used_raw_total) +
+                          parseFloat(reportData.unused_raw_total)
+                        ).toFixed(4)}
                       </td>
-                      <td className="border border-slate-300 px-4 py-2.5 text-xs font-normal">
+                      <td className="border border-slate-300 px-4 py-3 text-xs font-normal text-slate-500">
                         異常原料進貨總量(kg)
                       </td>
                     </tr>
-                    <tr>
-                      <td className="border border-slate-300 px-4 py-2.5 bg-slate-50">
+                    <tr className="hover:bg-slate-50">
+                      <td className="border border-slate-300 px-4 py-3 bg-slate-50">
                         尚未使用原料總量
                       </td>
-                      <td className="border border-slate-300 px-4 py-2.5 text-center font-mono">
+                      <td className="border border-slate-300 px-4 py-3 text-center font-mono text-lg text-blue-600">
                         {parseFloat(reportData.unused_raw_total).toFixed(4)}
                       </td>
-                      <td className="border border-slate-300 px-4 py-2.5 text-xs font-normal">
+                      <td className="border border-slate-300 px-4 py-3 text-xs font-normal text-slate-500">
                         異常原料在庫總量(kg)
                       </td>
                     </tr>
-                    <tr>
-                      <td className="border border-slate-300 px-4 py-2.5 bg-slate-50">
+                    <tr className="hover:bg-slate-50">
+                      <td className="border border-slate-300 px-4 py-3 bg-slate-50">
                         產品生產總量
                       </td>
-                      <td className="border border-slate-300 px-4 py-2.5 text-center font-mono">
+                      <td className="border border-slate-300 px-4 py-3 text-center font-mono text-lg text-blue-600">
                         {parseFloat(reportData.total_produced_product).toFixed(
                           4,
                         )}
                       </td>
-                      <td className="border border-slate-300 px-4 py-2.5 text-xs font-normal">
+                      <td className="border border-slate-300 px-4 py-3 text-xs font-normal text-slate-500">
                         各品項產品之總量(kg)
                       </td>
                     </tr>
-                    <tr>
-                      <td className="border border-slate-300 px-4 py-2.5 bg-slate-50">
+                    <tr className="hover:bg-slate-50">
+                      <td className="border border-slate-300 px-4 py-3 bg-slate-50">
                         尚未出貨產品總量
                       </td>
-                      <td className="border border-slate-300 px-4 py-2.5 text-center font-mono">
+                      <td className="border border-slate-300 px-4 py-3 text-center font-mono text-lg text-blue-600">
                         {parseFloat(reportData.total_in_stock_product).toFixed(
                           4,
                         )}
                       </td>
-                      <td className="border border-slate-300 px-4 py-2.5 text-xs font-normal">
+                      <td className="border border-slate-300 px-4 py-3 text-xs font-normal text-slate-500">
                         各品項在庫總量(kg)
                       </td>
                     </tr>
-                    <tr>
-                      <td className="border border-slate-300 px-4 py-2.5 bg-slate-50">
+                    <tr className="hover:bg-slate-50">
+                      <td className="border border-slate-300 px-4 py-3 bg-slate-50">
                         下游總出貨總量
                       </td>
-                      <td className="border border-slate-300 px-4 py-2.5 text-center text-red-600 font-mono">
+                      <td className="border border-slate-300 px-4 py-3 text-center text-red-600 font-mono text-lg">
                         {parseFloat(reportData.total_shipped_product).toFixed(
                           4,
                         )}
                       </td>
-                      <td className="border border-slate-300 px-4 py-2.5 text-xs font-normal">
+                      <td className="border border-slate-300 px-4 py-3 text-xs font-normal text-slate-500">
                         已出貨至下游廠商之總量
                       </td>
                     </tr>
-                    <tr>
-                      <td className="border border-slate-300 px-4 py-2.5 bg-slate-50">
-                        實際回收總量
+                    <tr className="bg-yellow-50/30">
+                      <td className="border border-slate-300 px-4 py-3 bg-yellow-100/50 text-yellow-900">
+                        實際回收總量 <span className="text-red-500">*</span>
                       </td>
-                      <td className="border border-slate-300 px-2 py-1.5 text-center">
+                      <td className="border border-slate-300 px-3 py-2 text-center">
                         <input
                           type="number"
                           min="0"
                           step="0.01"
-                          placeholder="輸入數量"
+                          placeholder="輸入回收 Kg"
                           value={formData.actualRecovered}
                           onChange={(e) =>
                             setFormData({
@@ -656,93 +1486,83 @@ const TracePage = () => {
                               actualRecovered: e.target.value,
                             })
                           }
-                          className="w-full max-w-[120px] px-2 py-1 border border-slate-300 rounded font-mono text-sm text-center focus:outline-none focus:border-blue-500"
+                          className="w-full max-w-[140px] px-3 py-2 border-2 border-yellow-400 rounded-md font-mono text-base font-black text-center focus:outline-none focus:border-blue-500 shadow-sm"
                         />
                       </td>
-                      <td className="border border-slate-300 px-4 py-2.5 text-xs font-normal">
+                      <td className="border border-slate-300 px-4 py-3 text-xs font-normal text-slate-500">
                         各品項實際收回之重量/容量
                       </td>
                     </tr>
-                    <tr>
-                      <td className="border border-slate-300 px-4 py-2.5 bg-slate-50">
+                    <tr className="hover:bg-slate-50">
+                      <td className="border border-slate-300 px-4 py-3 bg-slate-50">
                         整體回收率 (%)
                       </td>
-                      <td className="border border-slate-300 px-4 py-2.5 text-center text-red-600 font-mono">
+                      <td className="border border-slate-300 px-4 py-3 text-center text-red-600 font-mono text-xl">
                         {recoveryRate !== null
                           ? `${recoveryRate.toFixed(2)}%`
-                          : "-"}
+                          : ""}
                       </td>
-                      <td className="border border-slate-300 px-4 py-2.5 text-xs font-normal">
+                      <td className="border border-slate-300 px-4 py-3 text-xs font-normal text-slate-500">
                         (產品實際回收總量+庫存) / 總生產量
                       </td>
                     </tr>
-                    <tr>
-                      <td className="border border-slate-300 px-4 py-2.5 bg-slate-50 align-top">
-                        最終處置方式
+                    <tr className="bg-yellow-50/30">
+                      <td className="border border-slate-300 px-4 py-3 bg-yellow-100/50 text-yellow-900 align-top">
+                        最終處置方式 <span className="text-red-500">*</span>
                       </td>
                       <td
-                        className="border border-slate-300 px-4 py-2.5 align-top"
+                        className="border border-slate-300 px-4 py-3 align-top"
                         colSpan={2}
                       >
-                        <div className="flex items-start gap-2 mb-2">
-                          <input
-                            type="radio"
-                            name="disposal"
-                            value="MEASURE"
-                            checked={formData.disposalMethod === "MEASURE"}
-                            onChange={(e) =>
-                              setFormData({
-                                ...formData,
-                                disposalMethod: e.target.value,
-                              })
-                            }
-                            className="mt-1 cursor-pointer"
-                          />
-                          <span
-                            className="text-sm font-normal cursor-pointer"
-                            onClick={() =>
-                              setFormData({
-                                ...formData,
-                                disposalMethod: "MEASURE",
-                              })
-                            }
+                        <div className="flex flex-col gap-3">
+                          <label
+                            className={`flex items-start gap-3 p-3 rounded-lg border-2 cursor-pointer transition-colors ${formData.disposalMethod === "MEASURE" ? "border-blue-500 bg-blue-50" : "border-slate-200 hover:bg-slate-50"}`}
                           >
-                            採行消毒、改製或其他適當安全措施者，應載明所採用之措施方法與實施程序，及預定完成日期。
-                          </span>
-                        </div>
-                        <div className="flex items-start gap-2">
-                          <input
-                            type="radio"
-                            name="disposal"
-                            value="DESTROY"
-                            checked={formData.disposalMethod === "DESTROY"}
-                            onChange={(e) =>
-                              setFormData({
-                                ...formData,
-                                disposalMethod: e.target.value,
-                              })
-                            }
-                            className="mt-1 cursor-pointer"
-                          />
-                          <span
-                            className="text-sm font-normal cursor-pointer"
-                            onClick={() =>
-                              setFormData({
-                                ...formData,
-                                disposalMethod: "DESTROY",
-                              })
-                            }
+                            <input
+                              type="radio"
+                              name="disposal"
+                              value="MEASURE"
+                              checked={formData.disposalMethod === "MEASURE"}
+                              onChange={(e) =>
+                                setFormData({
+                                  ...formData,
+                                  disposalMethod: e.target.value,
+                                })
+                              }
+                              className="mt-1 w-4 h-4 text-blue-600"
+                            />
+                            <span className="text-sm font-bold text-slate-800">
+                              採行消毒、改製或其他適當安全措施者，應載明所採用之措施方法與實施程序，及預定完成日期。
+                            </span>
+                          </label>
+                          <label
+                            className={`flex items-start gap-3 p-3 rounded-lg border-2 cursor-pointer transition-colors ${formData.disposalMethod === "DESTROY" ? "border-red-500 bg-red-50" : "border-slate-200 hover:bg-slate-50"}`}
                           >
-                            銷毀者，應載明銷毀之方式與期限，及銷毀產品之重量或容量。
-                          </span>
+                            <input
+                              type="radio"
+                              name="disposal"
+                              value="DESTROY"
+                              checked={formData.disposalMethod === "DESTROY"}
+                              onChange={(e) =>
+                                setFormData({
+                                  ...formData,
+                                  disposalMethod: e.target.value,
+                                })
+                              }
+                              className="mt-1 w-4 h-4 text-red-600"
+                            />
+                            <span className="text-sm font-bold text-slate-800">
+                              銷毀者，應載明銷毀之方式與期限，及銷毀產品之重量或容量。
+                            </span>
+                          </label>
                         </div>
                       </td>
                     </tr>
-                    <tr>
-                      <td className="border border-slate-300 px-4 py-2.5 bg-slate-50">
+                    <tr className="bg-yellow-50/30">
+                      <td className="border border-slate-300 px-4 py-3 bg-yellow-100/50 text-yellow-900">
                         待銷毀產品總量
                       </td>
-                      <td className="border border-slate-300 px-2 py-1.5 text-center">
+                      <td className="border border-slate-300 px-3 py-2 text-center">
                         <input
                           type="number"
                           min="0"
@@ -756,10 +1576,10 @@ const TracePage = () => {
                               destroyAmount: e.target.value,
                             })
                           }
-                          className="w-full max-w-[120px] px-2 py-1 border border-slate-300 rounded font-mono text-sm text-center focus:outline-none focus:border-blue-500 disabled:bg-slate-100"
+                          className="w-full max-w-[140px] px-3 py-2 border-2 border-slate-300 rounded-md font-mono text-base font-black text-center focus:outline-none focus:border-red-500 disabled:bg-slate-100 disabled:opacity-50 transition-colors"
                         />
                       </td>
-                      <td className="border border-slate-300 px-4 py-2.5 text-xs font-normal">
+                      <td className="border border-slate-300 px-4 py-3 text-xs font-normal text-slate-500">
                         最終處置方式為「銷毀」之重量
                       </td>
                     </tr>
@@ -767,13 +1587,12 @@ const TracePage = () => {
                 </table>
               </div>
 
-              {/* 預覽按鈕固定於右下角 */}
-              <div className="absolute bottom-4 right-4">
+              <div className="absolute bottom-5 right-5">
                 <button
-                  onClick={() => setIsPreviewModalOpen(true)}
-                  className="px-6 py-2.5 bg-[#1f4e78] hover:bg-blue-900 text-white rounded-lg shadow-md transition-all text-sm font-bold flex items-center gap-2 hover:scale-105"
+                  onClick={() => setViewMode("preview")}
+                  className="px-8 py-3 bg-[#1f4e78] hover:bg-blue-900 text-white rounded-lg shadow-xl transition-all text-base font-bold tracking-wider flex items-center gap-3 hover:-translate-y-1"
                 >
-                  <FileText size={16} /> 預覽與列印計畫書
+                  <FileText size={20} /> 展開預覽全卷計畫書
                 </button>
               </div>
             </div>
@@ -782,35 +1601,47 @@ const TracePage = () => {
 
         {/* 2. 受影響生產單明細 */}
         {reportData && (
-          <div className="mb-8">
-            <h3 className="text-xl font-bold text-slate-800 mb-4">
-              2. 受影響生產單明細
+          <div className="mb-12 animate-in fade-in slide-in-from-bottom-8 duration-700">
+            <h3 className="text-xl font-bold text-slate-800 mb-4 flex items-center gap-2">
+              <span className="bg-[#1f4e78] text-white w-6 h-6 rounded-full flex items-center justify-center text-sm">
+                2
+              </span>{" "}
+              受影響生產單明細
             </h3>
-            <div className="bg-white rounded-xl shadow-md border border-blue-100 overflow-hidden min-h-[300px]">
+            <div className="bg-white rounded-xl shadow-lg border border-blue-200 overflow-hidden min-h-[300px]">
               <div className="overflow-x-auto">
                 <table className="w-full text-left border-collapse">
                   <thead>
-                    <tr className="bg-blue-50/50 border-b border-blue-100 text-sm text-blue-950">
-                      <th className="p-4 whitespace-nowrap">庫存批號</th>
-                      <th className="p-4 whitespace-nowrap">物料品號</th>
-                      <th className="p-4 whitespace-nowrap">物料名稱</th>
-                      <th className="p-4 whitespace-nowrap">剩餘庫存</th>
-                      <th className="p-4 whitespace-nowrap">入庫日期</th>
-                      <th className="p-4 whitespace-nowrap">有效期限</th>
-                      <th className="p-4 text-center whitespace-nowrap">
+                    <tr className="bg-blue-50/80 border-b-2 border-blue-200 text-sm text-blue-900">
+                      <th className="p-4 whitespace-nowrap font-bold">
+                        庫存批號
+                      </th>
+                      <th className="p-4 whitespace-nowrap font-bold">
+                        物料品號
+                      </th>
+                      <th className="p-4 whitespace-nowrap font-bold">
+                        物料名稱
+                      </th>
+                      <th className="p-4 whitespace-nowrap font-bold">
+                        剩餘庫存
+                      </th>
+                      <th className="p-4 whitespace-nowrap font-bold">
+                        入庫日期
+                      </th>
+                      <th className="p-4 whitespace-nowrap font-bold text-center">
                         操作
                       </th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-blue-50 text-sm">
+                  <tbody className="divide-y divide-blue-50 text-sm font-bold text-slate-800">
                     {loading ? (
                       <tr>
                         <td
                           colSpan="7"
-                          className="p-12 text-center text-blue-600"
+                          className="p-16 text-center text-blue-600"
                         >
                           <div className="text-lg font-bold animate-pulse">
-                            追溯中...
+                            深度追溯中...
                           </div>
                         </td>
                       </tr>
@@ -823,39 +1654,32 @@ const TracePage = () => {
                         return (
                           <React.Fragment key={batch.batch_id}>
                             <tr
-                              className={`transition-colors ${isExpanded ? "bg-blue-50/60" : "hover:bg-blue-50/20"}`}
+                              className={`transition-colors ${isExpanded ? "bg-blue-50/40" : "hover:bg-blue-50/20"}`}
                             >
-                              <td className="p-4 font-mono text-sm text-black">
+                              <td className="p-4 font-mono text-base">
                                 {batch.batch_number}
                               </td>
-                              <td className="p-4 font-mono text-sm text-black">
+                              <td className="p-4 font-mono">
                                 {batch.material_code}
                               </td>
-                              <td className="p-4 text-black font-sm">
+                              <td className="p-4 text-blue-900">
                                 {batch.material_name}
                               </td>
-                              <td className="p-4 font-mono text-sm text-black">
+                              <td className="p-4 font-mono text-red-600 text-base">
                                 {batch.remaining_qty}
                               </td>
-                              <td className="p-4 font-mono text-sm text-black">
+                              <td className="p-4 font-mono">
                                 {batch.received_date}
-                              </td>
-                              <td className="p-4 font-mono text-sm text-black">
-                                {batch.expiration_date}
                               </td>
                               <td className="p-4 text-center whitespace-nowrap">
                                 <button
                                   type="button"
                                   onClick={() => toggleExpand(batch.batch_id)}
-                                  className={`px-4 py-1.5 text-xs rounded-md border transition-all shadow-sm ${
-                                    isExpanded
-                                      ? "bg-blue-600 text-white border-blue-600"
-                                      : "bg-white text-blue-600 border-blue-200 hover:bg-blue-600 hover:text-white"
-                                  }`}
+                                  className={`px-5 py-2 text-xs rounded-lg border-2 transition-all shadow-sm font-bold tracking-wider ${isExpanded ? "bg-blue-600 text-white border-blue-600" : "bg-white text-blue-700 border-blue-200 hover:bg-blue-50"}`}
                                 >
                                   {isExpanded
-                                    ? "收起"
-                                    : `展開 (${ordersList.length + mrpsList.length})`}
+                                    ? "收起明細"
+                                    : `展開關聯 (${ordersList.length + mrpsList.length})`}
                                 </button>
                               </td>
                             </tr>
@@ -864,108 +1688,98 @@ const TracePage = () => {
                               <tr>
                                 <td
                                   colSpan="7"
-                                  className="bg-indigo-50/30 p-6 border-b border-t border-blue-100"
+                                  className="bg-slate-100/50 p-6 lg:p-8 border-b-4 border-blue-200 shadow-inner"
                                 >
-                                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
-                                    {/* 欄位一 */}
-                                    <div className="bg-white border border-blue-100 rounded-xl p-4 shadow-sm flex flex-col h-full">
-                                      <div className="text-xs font-bold text-blue-600 uppercase tracking-wider mb-3">
+                                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
+                                    <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-col h-full hover:shadow-md transition-shadow">
+                                      <div className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+                                        <div className="w-2 h-2 bg-emerald-400 rounded-full"></div>{" "}
                                         1. 現存庫存
                                       </div>
-                                      <div className="text-base font-black text-black mb-2">
+                                      <div className="text-lg font-black text-slate-800 mb-3">
                                         {batch.material_name}
                                       </div>
-                                      <div className="space-y-1.5 text-xs font-mono text-slate-700 bg-blue-50/30 p-3 rounded-lg border border-blue-100 flex-1">
-                                        <div>批號: {batch.batch_number}</div>
-                                        <div>
-                                          入庫日期: {batch.received_date}
+                                      <div className="space-y-2 text-sm font-mono text-slate-700 bg-slate-50 p-4 rounded-xl border border-slate-100 flex-1">
+                                        <div className="flex justify-between">
+                                          <span>批號:</span>{" "}
+                                          <span className="font-bold">
+                                            {batch.batch_number}
+                                          </span>
                                         </div>
-                                        <div>
-                                          有效期限: {batch.expiration_date}
+                                        <div className="flex justify-between">
+                                          <span>入庫:</span>{" "}
+                                          <span>{batch.received_date}</span>
                                         </div>
                                       </div>
                                     </div>
-                                    {/* 欄位二 */}
-                                    <div className="bg-white border border-blue-100 rounded-xl p-4 shadow-sm flex flex-col h-full">
-                                      <div className="text-xs font-bold text-blue-600 uppercase tracking-wider mb-3">
+                                    <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-col h-full hover:shadow-md transition-shadow">
+                                      <div className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+                                        <div className="w-2 h-2 bg-blue-500 rounded-full"></div>{" "}
                                         2. 生產單 ({ordersList.length})
                                       </div>
-                                      <div className="space-y-3 flex-1 overflow-y-auto max-h-[300px] pr-1">
+                                      <div className="space-y-3 flex-1 overflow-y-auto max-h-[300px] pr-2 custom-scrollbar">
                                         {ordersList.length > 0 ? (
                                           ordersList.map((po, idx) => (
                                             <div
                                               key={idx}
-                                              className="border border-blue-50 bg-white shadow-sm p-3 rounded-lg hover:border-blue-200 transition-colors"
+                                              className="border border-slate-100 bg-slate-50/50 p-4 rounded-xl hover:border-blue-200 transition-colors"
                                             >
-                                              <div className="flex justify-between font-mono text-xs mb-1">
-                                                <span className="font-bold text-black">
+                                              <div className="flex justify-between font-mono text-sm mb-2">
+                                                <span className="font-black text-blue-700">
                                                   {po.order_number}
                                                 </span>
-                                                <span className="text-slate-400">
-                                                  {po.created_at?.split(" ")[0]}
+                                                <span className="text-slate-400 text-xs">
+                                                  {po.order_created_at || "-"}
                                                 </span>
                                               </div>
-                                              <div className="text-xs font-bold text-slate-800 mb-2">
-                                                產出產品: {po.product_name}
+                                              <div className="text-sm font-bold text-slate-800 mb-3">
+                                                產出: {po.product_name}
                                               </div>
-                                              <div className="flex justify-between items-center text-[11px] border-t border-dashed border-slate-100 pt-1.5 text-slate-500 font-mono">
+                                              <div className="flex justify-between items-center text-xs border-t border-dashed border-slate-200 pt-2 text-slate-500 font-mono mb-2">
                                                 <span>
-                                                  投入用量:{" "}
-                                                  <strong className="text-black font-bold">
+                                                  異常原料投入:{" "}
+                                                  <strong className="text-red-600 font-black text-sm ml-1">
                                                     {po.used_qty}
                                                   </strong>{" "}
                                                   {po.unit}
                                                 </span>
                                               </div>
-                                              {po.vendor_info && (
-                                                <div className="mt-2 text-[11px] bg-blue-50/20 p-2 rounded border border-blue-50 text-slate-700 space-y-0.5">
-                                                  <div className="font-bold text-black">
-                                                    廠商名稱:{" "}
-                                                    {po.vendor_info.name}
-                                                  </div>
-                                                  <div>
-                                                    電話:{" "}
-                                                    {po.vendor_info.phone ||
-                                                      "-"}
-                                                  </div>
-                                                  <div>
-                                                    出貨日期:{" "}
-                                                    {po.vendor_info
-                                                      .shipping_date ||
-                                                      "-"}{" "}
-                                                    (
-                                                    {po.vendor_info.logistics ||
-                                                      "未定"}
-                                                    )
-                                                  </div>
+                                              {(po.delivery_notes || [])
+                                                .length > 0 && (
+                                                <div className="text-xs bg-blue-100/50 text-blue-800 px-3 py-2 rounded-lg font-bold flex items-center justify-between">
+                                                  <span>附屬銷貨單:</span>{" "}
+                                                  <span className="font-black text-sm">
+                                                    {po.delivery_notes.length}{" "}
+                                                    筆
+                                                  </span>
                                                 </div>
                                               )}
                                             </div>
                                           ))
                                         ) : (
-                                          <div className="text-xs text-slate-400 text-center py-8 font-medium">
+                                          <div className="text-sm text-slate-400 text-center py-10 font-medium">
                                             無資料
                                           </div>
                                         )}
                                       </div>
                                     </div>
-                                    {/* 欄位三 */}
-                                    <div className="bg-white border border-blue-100 rounded-xl p-4 shadow-sm flex flex-col h-full">
-                                      <div className="text-xs font-bold text-blue-600 uppercase tracking-wider mb-3">
-                                        3. 物料需求單 ({mrpsList.length})
+                                    <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-col h-full hover:shadow-md transition-shadow">
+                                      <div className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+                                        <div className="w-2 h-2 bg-amber-400 rounded-full"></div>{" "}
+                                        3. 尚未生產 ({mrpsList.length})
                                       </div>
-                                      <div className="space-y-3 flex-1 overflow-y-auto max-h-[300px] pr-1">
+                                      <div className="space-y-3 flex-1 overflow-y-auto max-h-[300px] pr-2 custom-scrollbar">
                                         {mrpsList.length > 0 ? (
                                           mrpsList.map((mrp, idx) => (
                                             <div
                                               key={idx}
-                                              className="border border-blue-50 bg-white shadow-sm p-3 rounded-lg"
+                                              className="border border-slate-100 bg-slate-50/50 p-4 rounded-xl"
                                             >
-                                              <div className="flex justify-between font-mono text-xs mb-1">
-                                                <span className="font-black text-blue-600">
+                                              <div className="flex justify-between font-mono text-sm mb-2">
+                                                <span className="font-black text-amber-600">
                                                   {mrp.mrp_id}
                                                 </span>
-                                                <span className="text-slate-400">
+                                                <span className="text-slate-400 text-xs">
                                                   {
                                                     mrp.created_at?.split(
                                                       " ",
@@ -973,15 +1787,15 @@ const TracePage = () => {
                                                   }
                                                 </span>
                                               </div>
-                                              <div className="text-xs font-semibold text-slate-700">
+                                              <div className="text-sm font-bold text-slate-700">
                                                 預計用量:{" "}
-                                                <span className="font-mono font-bold text-black">
+                                                <span className="font-mono font-black text-red-600 text-base ml-1">
                                                   {mrp.used_qty}
                                                 </span>{" "}
                                                 {mrp.unit}
                                               </div>
                                               {mrp.vendor_info?.name && (
-                                                <div className="text-[11px] text-slate-500 mt-1 font-sans font-medium">
+                                                <div className="text-xs text-slate-500 mt-2 pt-2 border-t border-slate-200 font-medium truncate">
                                                   對應廠商:{" "}
                                                   {mrp.vendor_info.name}
                                                 </div>
@@ -989,7 +1803,7 @@ const TracePage = () => {
                                             </div>
                                           ))
                                         ) : (
-                                          <div className="text-xs text-slate-400 text-center py-8 font-medium">
+                                          <div className="text-sm text-slate-400 text-center py-10 font-medium">
                                             無資料
                                           </div>
                                         )}
@@ -1006,7 +1820,7 @@ const TracePage = () => {
                       <tr>
                         <td
                           colSpan="7"
-                          className="p-12 text-center text-slate-500 font-medium"
+                          className="p-16 text-center text-slate-500 text-lg font-medium"
                         >
                           {selectedMaterial
                             ? "找不到符合條件的追溯紀錄"
@@ -1016,54 +1830,6 @@ const TracePage = () => {
                     )}
                   </tbody>
                 </table>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* 列印預覽 Modal */}
-        {isPreviewModalOpen && reportData && (
-          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-            <div className="bg-slate-100 max-w-4xl w-full max-h-[90vh] rounded-xl shadow-2xl flex flex-col overflow-hidden">
-              <div className="bg-white border-b border-slate-200 p-4 flex justify-between items-center z-10 shrink-0">
-                <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
-                  <FileText className="text-[#1f4e78]" /> 計畫書預覽
-                </h3>
-                <button
-                  onClick={() => setIsPreviewModalOpen(false)}
-                  className="text-slate-400 hover:text-red-500 text-2xl leading-none"
-                >
-                  &times;
-                </button>
-              </div>
-
-              <div className="overflow-y-auto p-4 md:p-8 flex-1 bg-slate-200/50">
-                <div
-                  className="bg-white shadow-xl mx-auto ring-1 ring-black/5"
-                  style={{ minWidth: "210mm", minHeight: "297mm" }}
-                >
-                  <RecallReportPrintTemplate
-                    reportData={reportData}
-                    formData={formData}
-                    recoveryRate={recoveryRate}
-                    className="p-8"
-                  />
-                </div>
-              </div>
-
-              <div className="bg-white border-t border-slate-200 p-4 flex justify-end gap-3 shrink-0">
-                <button
-                  onClick={() => setIsPreviewModalOpen(false)}
-                  className="px-5 py-2 bg-white text-slate-700 font-bold border border-slate-300 rounded-md hover:bg-slate-50 transition-colors"
-                >
-                  關閉
-                </button>
-                <button
-                  onClick={handlePrintAction}
-                  className="px-6 py-2 bg-[#1f4e78] text-white font-bold rounded-md hover:bg-blue-900 shadow-sm transition-colors flex items-center gap-2"
-                >
-                  <Printer size={16} /> 確認列印
-                </button>
               </div>
             </div>
           </div>
@@ -1079,16 +1845,6 @@ const TracePage = () => {
           onConfirm={dialog.onConfirm}
         />
       </div>
-
-      {/* 隱藏的實際列印區塊 (移出 print:hidden 之外，以確保能成功列印) */}
-      {reportData && (
-        <RecallReportPrintTemplate
-          reportData={reportData}
-          formData={formData}
-          recoveryRate={recoveryRate}
-          className="hidden print:block print:p-8"
-        />
-      )}
     </>
   );
 };

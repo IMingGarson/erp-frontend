@@ -633,6 +633,10 @@ const RequirementOrderPage = () => {
   };
 
   const handleSelectProduct = (rowId, product) => {
+    const profile =
+      product.product_profiles && product.product_profiles.length > 0
+        ? product.product_profiles[0]
+        : {};
     setFormItems((prev) =>
       prev.map((item) =>
         item.id === rowId
@@ -644,6 +648,8 @@ const RequirementOrderPage = () => {
               spec: product.product_profile?.spec || "",
               unit: product.product_profile?.sales_unit || product.unit || "",
               unit_price: product.product_profile?.sales_price || "",
+              sales_unit_quantity: profile.sales_unit_quantity || 1,
+              sales_pack_quantity: profile.sales_pack_quantity || 1,
             }
           : item,
       ),
@@ -663,7 +669,14 @@ const RequirementOrderPage = () => {
       );
       if (!product) return;
 
-      const qty = Number(fItem.quantity);
+      // 抓取 BOM 換算比例
+      const orderQty = Number(fItem.quantity) || 0;
+      const unitQty = Number(fItem.sales_unit_quantity) || 1;
+      const packQty = Number(fItem.sales_pack_quantity) || 1;
+
+      // 目標數量 = 訂單數量 × (包數 / 箱數)
+      const qty = orderQty * (packQty / unitQty);
+
       const motherId = fItem.id;
       const generatedItems = [];
 

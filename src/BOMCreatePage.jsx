@@ -17,10 +17,17 @@ import CustomDialog from "./components/customDialog";
 import { fetchWithAuth } from "./utils/fetchWithAuth";
 import { useAuthStore } from "./store/authStore";
 
-// 🌟 實用工具：格式化數字，移除不必要的結尾 0
+// 格式化數字，移除不必要的結尾 0
 const formatNum = (num, maxDecimals = 4) => {
   if (num === null || num === undefined || isNaN(num) || num === "") return "0";
   return parseFloat(Number(num).toFixed(maxDecimals)).toString();
+};
+
+// 解決 JS IEEE 754 浮點數精準度問題的運算器
+const precise = {
+  add: (a, b) => parseFloat((Number(a) + Number(b)).toPrecision(12)),
+  mul: (a, b) => parseFloat((Number(a) * Number(b)).toPrecision(12)),
+  div: (a, b) => parseFloat((Number(a) / Number(b)).toPrecision(12)),
 };
 
 // 格式化金額，帶千分位且移除結尾 0
@@ -98,7 +105,7 @@ const BOMCreatePage = () => {
   };
 
   // ==========================================
-  // 🌟 核心邏輯：遞迴攤平半成品內的添加物
+  // 遞迴攤平半成品內的添加物
   // ==========================================
   const fetchContainedAdditives = async (parentCode, allMats) => {
     let additivesMap = {};
@@ -115,8 +122,9 @@ const BOMCreatePage = () => {
         for (const bom of boms) {
           const childCode = bom.child?.code || bom.child;
           const childQty = parseFloat(bom.quantity_required) || 0;
-          const childRatio = childQty / baseQty;
-          const actualRatio = currentRatio * childRatio;
+
+          const childRatio = precise.div(childQty, baseQty);
+          const actualRatio = precise.mul(currentRatio, childRatio);
 
           const fullMat = allMats.find((m) => m.code === childCode);
 
@@ -129,7 +137,10 @@ const BOMCreatePage = () => {
                 ratio: 0,
               };
             }
-            additivesMap[childCode].ratio += actualRatio;
+            additivesMap[childCode].ratio = precise.add(
+              additivesMap[childCode].ratio,
+              actualRatio,
+            );
           } else if (fullMat?.type === "SEMI") {
             await traverse(childCode, actualRatio);
           }
@@ -139,6 +150,7 @@ const BOMCreatePage = () => {
       }
     };
 
+    // 初始 ratio 傳入 1.0
     await traverse(parentCode, 1.0);
     return Object.values(additivesMap);
   };
@@ -233,6 +245,13 @@ const BOMCreatePage = () => {
         setOriginalMaterialId(null);
         setOriginalBomIds([]);
         setSortConfig({ key: "quantity", direction: "desc" });
+        setFormData({
+          code: "",
+          name: "",
+          type: "PRODUCT",
+          base_quantity: 10,
+          items: [],
+        });
       }
     } catch (err) {
       showAlert("載入失敗", err.message, "error");
@@ -328,15 +347,17 @@ const BOMCreatePage = () => {
   }, [formData.items, formData.base_quantity]);
 
   // ==========================================
-  // 🌟 全局添加物法規驗算 (分組紀錄來源貢獻)
+  // 添加物法規驗算 (分組紀錄來源)
   // ==========================================
   const additiveCalculations = useMemo(() => {
     const baseQty = parseFloat(formData.base_quantity) || 1;
-    const summary = {}; // { [code]: { name, limit, totalQty, sources: [] } }
+    const summary = {}; // { [code]: { name, limit, ratio, totalQty, sources: [] } }
 
     formData.items.forEach((item) => {
       const itemQty = parseFloat(item.quantity) || 0;
       if (itemQty <= 0) return;
+
+      const currentItemRatio = precise.div(itemQty, baseQty);
 
       // 1. 直加的添加物
       if (item.is_additive && item.legal_limit_percent) {
@@ -345,11 +366,15 @@ const BOMCreatePage = () => {
             code: item.material_code,
             name: item.material_name,
             limit: item.legal_limit_percent,
-            totalQty: 0,
+            ratio: 0,
             sources: [],
           };
         }
-        summary[item.material_code].totalQty += itemQty;
+        // 累加比例
+        summary[item.material_code].ratio = precise.add(
+          summary[item.material_code].ratio,
+          currentItemRatio,
+        );
         summary[item.material_code].sources.push({
           type: "DIRECT",
           name: item.material_name,
@@ -365,12 +390,17 @@ const BOMCreatePage = () => {
               code: add.code,
               name: add.name,
               limit: add.limit,
-              totalQty: 0,
+              ratio: 0,
               sources: [],
             };
           }
-          const contributedQty = itemQty * add.ratio;
-          summary[add.code].totalQty += contributedQty;
+          const contributedRatio = precise.mul(currentItemRatio, add.ratio);
+          const contributedQty = precise.mul(itemQty, add.ratio);
+
+          summary[add.code].ratio = precise.add(
+            summary[add.code].ratio,
+            contributedRatio,
+          );
           summary[add.code].sources.push({
             type: "SEMI",
             name: item.material_name,
@@ -381,16 +411,18 @@ const BOMCreatePage = () => {
     });
 
     const results = Object.values(summary).map((add) => {
-      const usagePercent = (add.totalQty / baseQty) * 100;
+      const usagePercent = precise.mul(add.ratio, 100);
+      const totalQty = precise.mul(add.ratio, baseQty);
+
       return {
         ...add,
+        totalQty,
         usagePercent,
-        isExceeded: usagePercent > add.limit,
+        isExceeded: usagePercent > add.limit, // 比對法規
       };
     });
 
     const hasLimitError = results.some((r) => r.isExceeded);
-    // 取出所有超標的添加物代碼，用來標記有問題的行
     const exceededCodes = results
       .filter((r) => r.isExceeded)
       .map((r) => r.code);
@@ -451,7 +483,7 @@ const BOMCreatePage = () => {
         await Promise.all(deletePromises);
       }
 
-      const bomPromises = formData.items.map((item) => {
+      const bomPromises = formData.items.map(async (item) => {
         const bomPayload = {
           parent_id: currentParentId,
           child_id: item.material_id,
@@ -459,19 +491,21 @@ const BOMCreatePage = () => {
           quantity_required: parseFloat(item.quantity),
         };
 
-        if (isEditMode && item.id) {
-          return fetchWithAuth(`/api/boms/${item.id}`, {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(bomPayload),
-          });
-        } else {
-          return fetchWithAuth("/api/boms", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(bomPayload),
-          });
+        const url =
+          isEditMode && item.id ? `/api/boms/${item.id}` : "/api/boms";
+        const method = isEditMode && item.id ? "PUT" : "POST";
+
+        const res = await fetchWithAuth(url, {
+          method: method,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(bomPayload),
+        });
+
+        if (!res.ok) {
+          throw new Error("儲存明細失敗");
         }
+
+        return res.json();
       });
 
       await Promise.all(bomPromises);

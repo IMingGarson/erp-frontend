@@ -1,19 +1,19 @@
 import React, { useEffect } from "react";
 import { Outlet, Link, useLocation, useNavigate } from "react-router-dom";
 import {
-  Activity,
-  ClipboardList,
-  PackageOpen,
-  Database,
+  Boxes,
+  Package,
+  Waypoints,
+  FlaskConical,
   Building2,
-  LogOut,
-  ShoppingCart,
-  Factory,
-  ShieldAlert,
-  Users,
+  Truck,
+  ClipboardList,
   PackageCheck,
-  FileText,
-  BriefcaseBusiness,
+  Factory,
+  ShoppingCart,
+  Calculator,
+  Users,
+  LogOut,
 } from "lucide-react";
 import { useAuthStore } from "./store/authStore";
 
@@ -21,14 +21,14 @@ const MENU_GROUPS = [
   {
     group: "營運資料",
     items: [
-      { path: "/", label: "庫存監控", icon: Activity },
-      { path: "/materials", label: "產品管理", icon: Database },
-      { path: "/trace", label: "追蹤追溯", icon: ShieldAlert },
+      { path: "/", label: "庫存監控", icon: Boxes },
+      { path: "/materials", label: "產品管理", icon: Package },
+      { path: "/trace", label: "追蹤追溯", icon: Waypoints },
     ],
   },
   {
     group: "研發專區",
-    items: [{ path: "/bom-create", label: "配方研製", icon: ShieldAlert }],
+    items: [{ path: "/bom-create", label: "配方研製", icon: FlaskConical }],
   },
   {
     group: "往來單位",
@@ -37,7 +37,7 @@ const MENU_GROUPS = [
       {
         path: "/material-providers",
         label: "供應商名錄",
-        icon: BriefcaseBusiness,
+        icon: Truck,
       },
     ],
   },
@@ -46,13 +46,13 @@ const MENU_GROUPS = [
     items: [
       { path: "/requirement", label: "訂購單管理", icon: ClipboardList },
       { path: "/delivery-notes", label: "銷貨單管理", icon: PackageCheck },
-      { path: "/production", label: "生產單管理", icon: FileText },
+      { path: "/production", label: "生產單管理", icon: Factory },
       {
         path: "/purchase-requisitions",
         label: "請購單管理",
         icon: ShoppingCart,
       },
-      { path: "/quotations", label: "報價單管理", icon: ShoppingCart },
+      { path: "/quotations", label: "報價單管理", icon: Calculator },
     ],
   },
   {

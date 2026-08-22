@@ -1,9 +1,17 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import { Search, ChevronDown, Trash2 } from "lucide-react";
+import {
+  Search,
+  ChevronDown,
+  Trash2,
+  ChevronLeft,
+  ChevronRight,
+} from "lucide-react";
 import CustomDialog from "./components/customDialog";
 import { fetchWithAuth } from "./utils/fetchWithAuth";
 import { CompanyLogo } from "./components/companyLogo";
 import { useAuthStore } from "./store/authStore";
+
+const ITEMS_PER_PAGE = 10; // 🌟 每頁顯示 10 筆資料
 
 const STATUS_MAP = {
   WAITING: {
@@ -17,7 +25,7 @@ const STATUS_MAP = {
 };
 
 const StatusTag = ({ status }) => {
-  const statusData = STATUS_MAP[status.toUpperCase()] || {
+  const statusData = STATUS_MAP[(status || "").toUpperCase()] || {
     label: status,
     css: "bg-slate-100 text-slate-600 border-slate-200",
   };
@@ -128,7 +136,6 @@ const PurchaseRequisitionPrintTemplate = ({ data }) => {
                   {deliveryStr}
                 </td>
                 <td className="border-r border-black p-1 text-lg">
-                  {/* 使用後端回傳的 provider_name 供列印顯示 */}
                   {item.provider_name || ""}
                 </td>
                 <td className="border-r border-black p-1"></td>
@@ -170,7 +177,6 @@ const RequisitionNode = ({
 
   return (
     <div className="mb-3 overflow-hidden rounded-lg shadow-sm bg-white border border-slate-200 transition-all hover:border-blue-300">
-      {/* 單頭區塊 */}
       <div
         className="p-4 flex flex-col md:flex-row justify-between items-start md:items-center cursor-pointer"
         onClick={() => toggleExpand(req.id)}
@@ -227,7 +233,6 @@ const RequisitionNode = ({
         </div>
       </div>
 
-      {/* 單身區塊 */}
       {isExpanded && (
         <div className="bg-slate-50 p-4 border-t border-slate-200">
           <div className="text-sm font-bold text-slate-500 mb-3 uppercase tracking-wider flex items-center gap-2">
@@ -241,13 +246,11 @@ const RequisitionNode = ({
                   key={item.id || idx}
                   className="bg-white border border-slate-200 rounded-xl shadow-sm hover:shadow-md transition-all flex flex-col overflow-hidden"
                 >
-                  {/* 1. 標題與標籤區 */}
                   <div className="p-4 border-b border-slate-100 flex justify-between items-start gap-3 bg-white">
                     <span className="font-bold text-slate-800 text-base leading-tight">
                       {item.material_name}
                     </span>
                   </div>
-                  {/* 2. 供應商與備註區 */}
                   <div className="p-4 flex-1 flex flex-col gap-2.5 bg-white">
                     <div className="flex text-sm">
                       <span className="text-slate-400 font-bold w-14 shrink-0">
@@ -274,9 +277,7 @@ const RequisitionNode = ({
                     </div>
                   </div>
 
-                  {/* 3. 數量與金額 Footer 區塊 (特別用淺灰底色區隔) */}
                   <div className="bg-slate-50 p-4 border-t border-slate-100 flex justify-between items-center mt-auto">
-                    {/* 計算公式 */}
                     <div className="text-xs text-slate-500 font-mono flex items-center">
                       <span className="font-bold text-slate-700 text-sm">
                         {parseFloat(item.quantity || 0).toLocaleString()}
@@ -293,7 +294,6 @@ const RequisitionNode = ({
                       </span>
                     </div>
 
-                    {/* 總計 */}
                     <div className="flex items-baseline gap-1.5">
                       <span className="text-xs text-slate-400 font-bold">
                         小計
@@ -337,6 +337,9 @@ const PurchaseRequisitionPage = () => {
   const [endDate, setEndDate] = useState("");
   const [searchMaterial, setSearchMaterial] = useState("");
   const [filterStatus, setFilterStatus] = useState("ALL");
+
+  // 🌟 分頁狀態
+  const [currentPage, setCurrentPage] = useState(1);
 
   const [expandedRows, setExpandedRows] = useState([]);
   const [printData, setPrintData] = useState(null);
@@ -391,10 +394,10 @@ const PurchaseRequisitionPage = () => {
   }, []);
 
   useEffect(() => {
-    if (me?.full_name) {
+    if (me?.full_name && !editingRequisition) {
       setFormData((prev) => ({ ...prev, applicant: me.full_name }));
     }
-  }, [me]);
+  }, [me, editingRequisition]);
 
   const fetchRequisitions = async () => {
     setLoading(true);
@@ -410,6 +413,7 @@ const PurchaseRequisitionPage = () => {
       if (!res.ok) throw new Error("無法載入請購單資料");
       const json = await res.json();
       setRequisitions(json.data || []);
+      setCurrentPage(1); // 重新載入時回到第一頁
     } catch (err) {
       setError(err.message);
     } finally {
@@ -441,7 +445,8 @@ const PurchaseRequisitionPage = () => {
     }
   };
 
-  const processedRequisitions = useMemo(() => {
+  // 🌟 1. 篩選後的完整清單
+  const filteredRequisitions = useMemo(() => {
     const list = Array.isArray(requisitions) ? requisitions : [];
     return list.filter((req) => {
       if (filterStatus !== "ALL" && req.status !== filterStatus) return false;
@@ -457,6 +462,21 @@ const PurchaseRequisitionPage = () => {
       return true;
     });
   }, [requisitions, searchMaterial, filterStatus]);
+
+  // 🌟 2. 計算總頁數
+  const totalPages =
+    Math.ceil(filteredRequisitions.length / ITEMS_PER_PAGE) || 1;
+
+  // 🌟 3. 當前頁面實際要顯示的 10 筆資料
+  const paginatedRequisitions = useMemo(() => {
+    const start = (currentPage - 1) * ITEMS_PER_PAGE;
+    return filteredRequisitions.slice(start, start + ITEMS_PER_PAGE);
+  }, [filteredRequisitions, currentPage]);
+
+  // 當搜尋條件改變時，自動將頁碼重置為 1
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchMaterial, filterStatus]);
 
   const toggleRowExpand = (id) => {
     setExpandedRows((prev) =>
@@ -500,7 +520,7 @@ const PurchaseRequisitionPage = () => {
       setFormData({
         request_date: requisition.request_date || "",
         applicant: requisition.applicant || "",
-        status: requisition.status || "WAITING",
+        status: (requisition.status || "WAITING").toUpperCase(),
         items: JSON.parse(JSON.stringify(requisition.items)),
       });
     } else {
@@ -578,7 +598,7 @@ const PurchaseRequisitionPage = () => {
           unit: "Kg",
           purchased_price: "",
           expected_delivery_date: null,
-          material_provider_id: null, // 🌟 綁定為 ID
+          material_provider_id: null,
           remark: null,
         },
       ],
@@ -714,7 +734,6 @@ const PurchaseRequisitionPage = () => {
     );
   };
 
-  // 🌟 修改：SupplierSelect 接收 valueId，並回傳 id 給 onChange
   const SupplierSelect = ({ valueId, onChange, options }) => {
     const [isOpen, setIsOpen] = useState(false);
     const [searchTerm, setSearchTerm] = useState("");
@@ -825,7 +844,7 @@ const PurchaseRequisitionPage = () => {
                       <div
                         key={m.id}
                         onClick={() => {
-                          onChange(m.id); // 🌟 傳遞 ID
+                          onChange(m.id);
                           setIsOpen(false);
                           setSearchTerm("");
                         }}
@@ -973,25 +992,66 @@ const PurchaseRequisitionPage = () => {
           </div>
         </div>
 
-        <div className="bg-slate-50/50 p-4 sm:p-6 rounded-xl shadow-sm border border-slate-200 min-h-[500px]">
-          {processedRequisitions.length > 0 ? (
-            <div>
-              {processedRequisitions.map((req) => (
-                <RequisitionNode
-                  key={req.id}
-                  req={req}
-                  isExpanded={expandedRows.includes(req.id)}
-                  toggleExpand={toggleRowExpand}
-                  onEdit={openModal}
-                  onDelete={handleDelete}
-                  onPrint={handlePrint}
-                />
-              ))}
-            </div>
-          ) : (
-            <div className="py-16 text-center text-slate-400 border-2 border-dashed border-slate-200 rounded-lg bg-white/50">
-              <span className="text-3xl mb-2 block">📄</span>
-              找不到符合條件的請購單資料。
+        <div className="bg-slate-50/50 p-4 sm:p-6 rounded-xl shadow-sm border border-slate-200 min-h-[500px] flex flex-col justify-between">
+          <div>
+            {paginatedRequisitions.length > 0 ? (
+              <div>
+                {paginatedRequisitions.map((req) => (
+                  <RequisitionNode
+                    key={req.id}
+                    req={req}
+                    isExpanded={expandedRows.includes(req.id)}
+                    toggleExpand={toggleRowExpand}
+                    onEdit={openModal}
+                    onDelete={handleDelete}
+                    onPrint={handlePrint}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="py-16 text-center text-slate-400 border-2 border-dashed border-slate-200 rounded-lg bg-white/50">
+                <span className="text-3xl mb-2 block">📄</span>
+                找不到符合條件的請購單資料。
+              </div>
+            )}
+          </div>
+
+          {/* 🌟 分頁控制元件 */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between border-t border-slate-200 pt-4 mt-6 px-2">
+              <div className="text-xs text-slate-500 font-medium">
+                顯示第 {(currentPage - 1) * ITEMS_PER_PAGE + 1} 到{" "}
+                {Math.min(
+                  currentPage * ITEMS_PER_PAGE,
+                  filteredRequisitions.length,
+                )}{" "}
+                筆， 共 {filteredRequisitions.length} 筆資料
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() =>
+                    setCurrentPage((prev) => Math.max(prev - 1, 1))
+                  }
+                  disabled={currentPage === 1}
+                  className="p-2 border border-slate-300 rounded-lg bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed shadow-sm transition-colors"
+                  title="上一頁"
+                >
+                  <ChevronLeft size={16} />
+                </button>
+                <span className="text-sm font-bold text-slate-700 px-2">
+                  {currentPage} / {totalPages}
+                </span>
+                <button
+                  onClick={() =>
+                    setCurrentPage((prev) => Math.min(prev + 1, totalPages))
+                  }
+                  disabled={currentPage === totalPages}
+                  className="p-2 border border-slate-300 rounded-lg bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed shadow-sm transition-colors"
+                  title="下一頁"
+                >
+                  <ChevronRight size={16} />
+                </button>
+              </div>
             </div>
           )}
         </div>
@@ -1019,7 +1079,6 @@ const PurchaseRequisitionPage = () => {
                 className="flex flex-col overflow-hidden flex-1"
               >
                 <div className="p-6 overflow-y-auto flex-1 bg-slate-50/50">
-                  {/* 單頭區塊 */}
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
                     <div>
                       <label className="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider">
@@ -1078,7 +1137,6 @@ const PurchaseRequisitionPage = () => {
                     </button>
                   </div>
 
-                  {/* 卡片式由上至下設計 */}
                   <div className="space-y-4">
                     {formData.items.length === 0 ? (
                       <div className="p-12 text-center border-2 border-dashed border-slate-300 rounded-xl text-slate-500 bg-white text-sm font-medium">
@@ -1090,7 +1148,6 @@ const PurchaseRequisitionPage = () => {
                           key={index}
                           className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm relative transition-all hover:border-blue-300 hover:shadow-md group"
                         >
-                          {/* 卡片標題與刪除 */}
                           <div className="flex justify-between items-center mb-4 pb-3 border-b border-slate-100">
                             <h5 className="font-bold text-slate-700 flex items-center gap-2 text-sm">
                               <span className="bg-slate-100 text-slate-600 w-6 h-6 flex items-center justify-center rounded-full text-xs border border-slate-200">
@@ -1107,9 +1164,7 @@ const PurchaseRequisitionPage = () => {
                             </button>
                           </div>
 
-                          {/* 網格排版 (3欄) */}
                           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-                            {/* 第一列 */}
                             <div>
                               <label className="block text-xs font-bold text-slate-500 mb-1">
                                 原物料名稱{" "}
@@ -1211,12 +1266,10 @@ const PurchaseRequisitionPage = () => {
                               </div>
                             </div>
 
-                            {/* 第二列 */}
                             <div>
                               <label className="block text-xs font-bold text-slate-500 mb-1">
                                 供應商
                               </label>
-                              {/* 🌟 傳入 ID，且欄位改為 material_provider_id */}
                               <SupplierSelect
                                 valueId={item.material_provider_id}
                                 options={materialProviders}
@@ -1273,7 +1326,6 @@ const PurchaseRequisitionPage = () => {
                   </div>
                 </div>
 
-                {/* Footer 按鈕 */}
                 <div className="p-4 border-t border-slate-200 flex justify-end gap-3 bg-white shrink-0 z-10 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
                   <button
                     type="button"

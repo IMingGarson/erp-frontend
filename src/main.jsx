@@ -81,7 +81,7 @@ const router = createBrowserRouter([
                 element: <QuotationListPage />,
               },
               {
-                path: "quotation-create",
+                path: "quotation",
                 element: <QuotationCreatePage />,
               },
               {

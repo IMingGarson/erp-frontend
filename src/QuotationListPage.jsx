@@ -606,7 +606,7 @@ const QuotationListPage = () => {
           </div>
 
           <button
-            onClick={() => navigate("/quotation-create")}
+            onClick={() => navigate("/quotation")}
             className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-md shadow-sm transition-colors text-sm font-bold flex items-center gap-2 w-full md:w-auto justify-center"
           >
             <Plus size={16} /> 建立報價單

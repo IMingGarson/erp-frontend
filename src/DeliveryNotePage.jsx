@@ -1,14 +1,34 @@
 import React, { useState, useEffect, useMemo } from "react";
 import CustomDialog from "./components/customDialog";
 import { fetchWithAuth } from "./utils/fetchWithAuth";
-import { ReceiptText, Printer, Trash2 } from "lucide-react"; // 新增 Trash2 圖示
+import { ReceiptText, Printer, Trash2, PackageCheck } from "lucide-react";
+
+// ==========================================
+// 輔助函數：將浮點數轉字串並移除結尾的 0 與小數點
+// ==========================================
+const formatDisplayNum = (val) => {
+  if (val === null || val === undefined || isNaN(parseFloat(val))) return "";
+  return parseFloat(val).toString();
+};
 
 const DeliveryNoteTemplate = ({ note }) => {
   if (!note) return null;
   const customer = note.customer_info || {};
-  const qtyStr = Number(note.quantity).toLocaleString(undefined, {
-    minimumFractionDigits: 2,
-  });
+
+  // 取得轉換係數
+  const profile = note.production_order_detail?.product_profile || {};
+  const unitQty = parseFloat(profile.sales_unit_quantity) || 1;
+  const packQty = parseFloat(profile.sales_pack_quantity) || 1;
+
+  // 從規格字串 (spec) 自動萃取每包/桶的淨重 KG (例如 "1KG*25包/箱" 或是 "10KG/桶")
+  const specString = note.spec || profile.spec || "";
+  const specMatch = specString.match(/([\d.]+)\s*KG/i);
+  const weightPerPack = specMatch ? parseFloat(specMatch[1]) : 1;
+
+  // 總出貨包數
+  const totalPacks = parseFloat(note.quantity) * (packQty / unitQty);
+  // 總出貨重量
+  const estimatedWeight = totalPacks * weightPerPack;
 
   return (
     <div className="bg-white font-sans text-black relative p-4 print:p-0">
@@ -56,12 +76,7 @@ const DeliveryNoteTemplate = ({ note }) => {
             <td className="border border-black px-2 py-1 align-top">
               客戶電話：{customer.phone || ""}
             </td>
-            <td className="border border-black px-2 py-1 align-top">
-              發票號碼：
-            </td>
-          </tr>
-          <tr>
-            <td className="border border-black px-2 py-1 align-top" colSpan="3">
+            <td className="border border-black px-2 py-1 align-top" colSpan="2">
               送貨地址：{customer.address || ""}
             </td>
           </tr>
@@ -70,7 +85,7 @@ const DeliveryNoteTemplate = ({ note }) => {
 
       <table className="w-full border-collapse border border-black text-center text-[14px]">
         <thead>
-          <tr className="font-normal">
+          <tr className="font-normal bg-slate-50/80">
             <th className="border border-black px-1 py-1.5 w-[5%] font-normal">
               序
             </th>
@@ -83,23 +98,23 @@ const DeliveryNoteTemplate = ({ note }) => {
             <th className="border border-black px-1 py-1.5 w-[15%] font-normal">
               規格
             </th>
-            <th className="border border-black px-1 py-1.5 w-[10%] font-normal">
+            <th className="border border-black px-1 py-1.5 w-[8%] font-normal">
               數量
             </th>
             <th className="border border-black px-1 py-1.5 w-[5%] font-normal">
               單位
             </th>
             <th className="border border-black px-1 py-1.5 w-[8%] font-normal">
+              出貨重(KG)
+            </th>
+            <th className="border border-black px-1 py-1.5 w-[8%] font-normal">
               單價
             </th>
             <th className="border border-black px-1 py-1.5 w-[10%] font-normal">
-              銷貨小計
-            </th>
-            <th className="border border-black px-1 py-1.5 w-[5%] font-normal">
-              附註
+              小計
             </th>
             <th className="border border-black px-1 py-1.5 w-[7%] font-normal">
-              批號編號
+              生產批號
             </th>
           </tr>
         </thead>
@@ -107,61 +122,49 @@ const DeliveryNoteTemplate = ({ note }) => {
           <tr>
             <td className="border border-black px-1 py-1.5">1</td>
             <td className="border border-black px-1 py-1.5 text-left">
-              {note.production_order_detail?.product_profile?.code || ""}
+              {profile?.code || ""}
             </td>
             <td className="border border-black px-1 py-1.5 text-left">
-              {note.production_order_detail?.product_profile?.name || ""}
+              {profile?.name || ""}
             </td>
             <td className="border border-black px-1 py-1.5">
               {note.spec || ""}
             </td>
-            <td className="border border-black px-1 py-1.5 text-right">
-              {qtyStr}
+            <td className="border border-black px-1 py-1.5 text-right font-bold font-mono">
+              {formatDisplayNum(note.quantity)}
             </td>
             <td className="border border-black px-1 py-1.5">
-              {note.unit || "KG"}
+              {note.unit || "箱"}
             </td>
-            <td className="border border-black px-1 py-1.5">
-              {note.sales_price || ""}
+            <td className="border border-black px-1 py-1.5 text-right font-mono">
+              {formatDisplayNum(estimatedWeight)}
             </td>
-            <td className="border border-black px-1 py-1.5">
-              {note.subtotal || ""}
+            <td className="border border-black px-1 py-1.5 text-right font-mono">
+              {formatDisplayNum(note.sales_price)}
             </td>
-            <td className="border border-black px-1 py-1.5">
-              {note.note || ""}
+            <td className="border border-black px-1 py-1.5 text-right font-mono font-bold">
+              {formatDisplayNum(note.total_amount)}
             </td>
-            <td className="border border-black px-1 py-1.5">
+            <td className="border border-black px-1 py-1.5 text-[10px] tracking-tighter">
               {note.production_order_detail?.used_batch_number || ""}
             </td>
           </tr>
-          <tr>
-            <td className="border border-black px-1 py-1.5 text-transparent">
-              .
-            </td>
-            <td className="border border-black px-1 py-1.5"></td>
-            <td className="border border-black px-1 py-1.5"></td>
-            <td className="border border-black px-1 py-1.5"></td>
-            <td className="border border-black px-1 py-1.5"></td>
-            <td className="border border-black px-1 py-1.5"></td>
-            <td className="border border-black px-1 py-1.5"></td>
-            <td className="border border-black px-1 py-1.5"></td>
-            <td className="border border-black px-1 py-1.5"></td>
-            <td className="border border-black px-1 py-1.5"></td>
-          </tr>
-          <tr>
-            <td className="border border-black px-1 py-1.5 text-transparent">
-              .
-            </td>
-            <td className="border border-black px-1 py-1.5"></td>
-            <td className="border border-black px-1 py-1.5"></td>
-            <td className="border border-black px-1 py-1.5"></td>
-            <td className="border border-black px-1 py-1.5"></td>
-            <td className="border border-black px-1 py-1.5"></td>
-            <td className="border border-black px-1 py-1.5"></td>
-            <td className="border border-black px-1 py-1.5"></td>
-            <td className="border border-black px-1 py-1.5"></td>
-            <td className="border border-black px-1 py-1.5"></td>
-          </tr>
+          {[...Array(2)].map((_, i) => (
+            <tr key={i}>
+              <td className="border border-black px-1 py-1.5 text-transparent">
+                .
+              </td>
+              <td className="border border-black px-1 py-1.5"></td>
+              <td className="border border-black px-1 py-1.5"></td>
+              <td className="border border-black px-1 py-1.5"></td>
+              <td className="border border-black px-1 py-1.5"></td>
+              <td className="border border-black px-1 py-1.5"></td>
+              <td className="border border-black px-1 py-1.5"></td>
+              <td className="border border-black px-1 py-1.5"></td>
+              <td className="border border-black px-1 py-1.5"></td>
+              <td className="border border-black px-1 py-1.5"></td>
+            </tr>
+          ))}
         </tbody>
       </table>
 
@@ -170,33 +173,49 @@ const DeliveryNoteTemplate = ({ note }) => {
         <tbody>
           <tr>
             <td className="border-r border-b border-black px-2 py-1 align-top w-1/3">
-              合計金額：{note.total_amount || ""}
+              合計金額：
+              <span className="font-mono">
+                {formatDisplayNum(note.total_amount)}
+              </span>
             </td>
             <td className="border-r border-b border-black px-2 py-1 align-top w-1/3 text-center">
-              營業稅：{note.tax_amount || ""}
+              營業稅：
+              <span className="font-mono">
+                {formatDisplayNum(note.tax_amount)}
+              </span>
             </td>
-            <td className="border-b border-black px-2 py-1 align-top w-1/3">
-              銷貨總額：{note.grand_total || ""}
+            <td className="border-b border-black px-2 py-1 align-top w-1/3 text-right">
+              銷貨總額：
+              <span className="font-mono font-bold text-lg">
+                {formatDisplayNum(note.grand_total)}
+              </span>
             </td>
           </tr>
           <tr>
             <td className="px-2 py-1 align-top" colSpan="3">
               <div className="flex justify-between mb-1">
-                <div>單據備註：{note.document_note || ""}</div>
-                <div>
-                  車輛是否清潔：
-                  <span className="inline-block w-3 h-3 border border-black relative top-[2px] ml-[2px]"></span>
+                <div className="w-[50%]">
+                  單據備註：{note.document_note || ""}
                 </div>
-                <div>
+                <div className="w-[25%] flex items-center">
+                  車輛是否清潔：
+                  <span className="inline-block w-4 h-4 border border-black relative ml-[4px]"></span>
+                </div>
+                <div className="w-[25%] flex items-center">
                   車輛是否上鎖：
-                  <span className="inline-block w-3 h-3 border border-black relative top-[2px] ml-[2px]"></span>
+                  <span className="inline-block w-4 h-4 border border-black relative ml-[4px]"></span>
                 </div>
               </div>
               <div className="flex justify-between">
-                <div>
-                  車輛溫度：________°C 冷藏：凍結點～7°C ，冷凍-12°C以下
+                <div className="w-[65%]">
+                  車輛溫度：
+                  <span className="inline-block w-16 border-b border-black"></span>
+                  °C 冷藏：凍結點～7°C ，冷凍-12°C以下
                 </div>
-                <div>運輸方式：___________________</div>
+                <div className="w-[35%]">
+                  運輸方式：
+                  <span className="inline-block w-32 border-b border-black"></span>
+                </div>
               </div>
             </td>
           </tr>
@@ -252,16 +271,21 @@ const DeliveryNotePage = () => {
     note_date: new Date().toISOString().split("T")[0],
     customer_name: "",
     customer_tax_id: "",
+    customer_code: "",
+    contact: "",
     phone: "",
     address: "",
     product_name: "",
     product_code: "",
     spec: "",
     quantity: "",
-    unit: "KG",
+    unit: "箱",
+    sales_unit: "箱",
+    sales_pack_unit: "包",
+    sales_unit_quantity: 1,
+    sales_pack_quantity: 1,
     sales_price: "",
     used_batch_number: "",
-    note: "",
     total_amount: "",
     tax_amount: "",
     grand_total: "",
@@ -288,7 +312,6 @@ const DeliveryNotePage = () => {
       onConfirm: null,
     });
   };
-
   const closeDialog = () => setDialog((prev) => ({ ...prev, isOpen: false }));
 
   useEffect(() => {
@@ -333,10 +356,13 @@ const DeliveryNotePage = () => {
       product_code: "",
       spec: "",
       quantity: "",
-      unit: "KG",
+      unit: "箱",
+      sales_unit: "箱",
+      sales_pack_unit: "包",
+      sales_unit_quantity: 1,
+      sales_pack_quantity: 1,
       sales_price: "",
       used_batch_number: "",
-      note: "",
       total_amount: "",
       tax_amount: "",
       grand_total: "",
@@ -361,6 +387,7 @@ const DeliveryNotePage = () => {
       const poJson = await res.json();
       const data = poJson.data || poJson;
       const vendor = data.vendor_info || {};
+      const profile = data.product_profile || {};
 
       let vendor_detail = {};
       if (vendor?.code) {
@@ -379,12 +406,17 @@ const DeliveryNotePage = () => {
         contact: vendor.contact_person || vendor_detail.contact_person || "",
         phone: vendor.phone || vendor_detail.phone || "",
         address: vendor.address || vendor_detail.address || "",
-        product_name: data.product_profile?.name || "",
-        product_code: data.product_profile?.code || "",
-        spec: data.product_profile?.spec || "",
-        unit: data.product_profile?.unit || "KG",
-        sales_price: data.product_profile?.sales_price || 0,
-        quantity: data.remaining_qty || data.target_qty || "",
+        product_name: profile.name || "",
+        product_code: profile.code || "",
+        spec: profile.spec || "",
+        unit: profile.sales_unit || "箱",
+        sales_unit: profile.sales_unit || "箱",
+        sales_pack_unit: profile.sales_pack_unit || "包",
+        sales_unit_quantity: parseFloat(profile.sales_unit_quantity) || 1,
+        sales_pack_quantity: parseFloat(profile.sales_pack_quantity) || 1,
+        sales_price: profile.sales_price || 0,
+        quantity:
+          data.remaining_qty > 0 ? formatDisplayNum(data.remaining_qty) : 1,
       }));
     } catch (error) {
       console.error("載入生產單與客戶資料失敗", error);
@@ -401,18 +433,45 @@ const DeliveryNotePage = () => {
   useEffect(() => {
     const qty = parseFloat(formData.quantity) || 0;
     const price = parseFloat(formData.sales_price) || 0;
-    if (qty > 0 && price > 0) {
+    if (qty > 0 && price >= 0) {
       const total = Math.round(qty * price);
       const tax = Math.round(total * 0.05);
       setFormData((prev) => ({
         ...prev,
-        sales_price: price,
         total_amount: total,
         tax_amount: tax,
         grand_total: total + tax,
       }));
+    } else {
+      setFormData((prev) => ({
+        ...prev,
+        total_amount: "",
+        tax_amount: "",
+        grand_total: "",
+      }));
     }
   }, [formData.quantity, formData.sales_price]);
+
+  // 動態計算 Modal 內的出貨重量提示
+  const { estimatedModalWeight, weightPerPack } = useMemo(() => {
+    const q = parseFloat(formData.quantity) || 0;
+    const packQty = parseFloat(formData.sales_pack_quantity) || 1;
+    const unitQty = parseFloat(formData.sales_unit_quantity) || 1;
+
+    const specMatch = (formData.spec || "").match(/([\d.]+)\s*KG/i);
+    const wPerPack = specMatch ? parseFloat(specMatch[1]) : 1;
+
+    const totalPacks = q * (packQty / unitQty);
+    return {
+      estimatedModalWeight: totalPacks * wPerPack,
+      weightPerPack: wPerPack,
+    };
+  }, [
+    formData.quantity,
+    formData.sales_pack_quantity,
+    formData.sales_unit_quantity,
+    formData.spec,
+  ]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -420,13 +479,12 @@ const DeliveryNotePage = () => {
 
     const payload = {
       production_order: parseInt(formData.production_order, 10),
-      note: formData.note,
       note_date: formData.note_date,
       quantity: formData.quantity,
       unit: formData.unit,
       spec: formData.spec,
       sales_price: formData.sales_price || null,
-      batch_number: formData.batch_number,
+      batch_number: formData.used_batch_number, // 把批號送出但隱藏於介面
       total_amount: formData.total_amount || null,
       tax_amount: formData.tax_amount || null,
       grand_total: formData.grand_total || null,
@@ -459,7 +517,6 @@ const DeliveryNotePage = () => {
     }
   };
 
-  // 展開縮放邏輯
   const handleToggleExpand = (noteId) => {
     if (expandedNoteIds.includes(noteId)) {
       setExpandedNoteIds((prev) => prev.filter((id) => id !== noteId));
@@ -479,17 +536,14 @@ const DeliveryNotePage = () => {
     }, 150);
   };
 
-  // --- 刪除銷貨單邏輯 ---
   const handleDeleteNote = (e, note) => {
     if (e) e.stopPropagation();
-
-    // 彈出確認對話框
     setDialog({
       isOpen: true,
       type: "confirm",
       status: "warning",
       title: "確認刪除",
-      message: `您確定要刪除銷貨單「${note.note_number}」嗎？此操作會標記為作廢。`,
+      message: `您確定要刪除銷貨單「${note.note_number}」嗎？此操作會標記為作廢並歸還生產單剩餘產量。`,
       onConfirm: async () => {
         closeDialog();
         try {
@@ -499,10 +553,11 @@ const DeliveryNotePage = () => {
           if (!res.ok) throw new Error("刪除失敗");
           showAlert(
             "刪除成功",
-            `銷貨單 ${note.note_number} 已成功停用。`,
+            `銷貨單 ${note.note_number} 已作廢。`,
             "success",
           );
-          fetchDeliveryNotes(); // 重新載入列表
+          fetchDeliveryNotes();
+          fetchProductionOrders();
         } catch (error) {
           showAlert("刪除錯誤", error.message, "error");
         }
@@ -626,7 +681,7 @@ const DeliveryNotePage = () => {
                             {note.customer_info?.name || "-"}
                           </td>
                           <td className="p-4 text-slate-800 font-mono font-bold text-right text-sm">
-                            {Number(note.quantity).toLocaleString()} {note.unit}
+                            {formatDisplayNum(note.quantity)} {note.unit}
                           </td>
                           <td className="p-4 text-center whitespace-nowrap">
                             <div className="flex items-center justify-center gap-2">
@@ -636,8 +691,6 @@ const DeliveryNotePage = () => {
                               >
                                 <Printer size={14} /> 列印
                               </button>
-
-                              {/* 刪除按鈕 */}
                               <button
                                 onClick={(e) => handleDeleteNote(e, note)}
                                 className="px-3 py-1.5 bg-red-50 text-red-600 border border-red-200 rounded-md hover:bg-red-600 hover:text-white transition-all duration-200 text-xs font-bold inline-flex items-center gap-1 shadow-sm"
@@ -649,7 +702,6 @@ const DeliveryNotePage = () => {
                           </td>
                         </tr>
 
-                        {/* 展開的單據預覽區塊 */}
                         {isExpanded && (
                           <tr>
                             <td
@@ -679,37 +731,41 @@ const DeliveryNotePage = () => {
           </div>
         </div>
 
-        {/* Modal 表單區塊 */}
+        {/* ========================================== */}
+        {/* 開立銷貨單 Modal (Apple UI/UX 升級版) */}
+        {/* ========================================== */}
         {isModalOpen && (
-          <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-40 p-4">
-            <div className="bg-white max-w-4xl w-full max-h-[90vh] overflow-y-auto rounded-xl shadow-xl">
-              <div className="sticky top-0 bg-white border-b border-slate-200 p-4 flex justify-between items-center z-10">
-                <h3 className="text-xl font-bold text-slate-800 tracking-wider">
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-40 p-4">
+            <div className="bg-slate-50 max-w-5xl w-full max-h-[90vh] overflow-y-auto rounded-2xl shadow-2xl">
+              <div className="sticky top-0 bg-white/80 backdrop-blur-md border-b border-slate-200 p-5 flex justify-between items-center z-10">
+                <h3 className="text-xl font-extrabold text-slate-800 flex items-center gap-2">
+                  <ReceiptText className="text-blue-600" />
                   開立銷貨單
                 </h3>
                 <button
                   onClick={closeModal}
-                  className="text-slate-500 hover:text-slate-800 text-2xl leading-none"
+                  className="text-slate-400 hover:text-slate-700 text-3xl leading-none transition-colors"
                 >
                   &times;
                 </button>
               </div>
 
-              <form onSubmit={handleSubmit} className="p-8 font-sans">
-                <div className="flex justify-between items-end border-b-2 border-slate-800 pb-4 mb-6">
-                  <div>
-                    <label className="block text-sm font-bold text-slate-700 mb-1">
-                      連動生產單
+              <form onSubmit={handleSubmit} className="p-6 md:p-8 font-sans">
+                {/* 頂部：連動生產單與日期 */}
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-end pb-5 mb-6 gap-4 border-b border-slate-200">
+                  <div className="w-full md:w-auto">
+                    <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2">
+                      連動生產單 <span className="text-red-500">*</span>
                     </label>
                     <select
                       name="production_order"
                       value={formData.production_order}
                       onChange={handleProductionOrderChange}
                       required
-                      className="border border-slate-300 rounded text-blue-800 px-3 py-2 w-72 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="border border-blue-300 rounded-xl text-blue-900 bg-white px-4 py-2.5 w-full md:w-80 focus:outline-none focus:ring-4 focus:ring-blue-500/10 font-bold shadow-sm cursor-pointer transition-all"
                     >
                       <option value="" disabled>
-                        -- 請先選擇生產單 --
+                        -- 請下拉選擇生產單 --
                       </option>
                       {productionOrders.map((po) => (
                         <option
@@ -717,20 +773,20 @@ const DeliveryNotePage = () => {
                           value={po.id}
                           disabled={po.is_fully_delivered}
                         >
-                          {po.order_number} {po.product_profile?.name || ""}{" "}
-                          {po.is_fully_delivered ? "(已銷貨完畢)" : ""}
+                          [{po.order_number}] {po.product_profile?.name || ""}{" "}
+                          {po.is_fully_delivered ? " (已出清)" : ""}
                         </option>
                       ))}
                     </select>
                     {isFetchingPO && (
-                      <span className="ml-2 text-blue-500 text-xs">
-                        載入中...
+                      <span className="ml-3 text-blue-500 text-xs font-bold animate-pulse">
+                        資料載入中...
                       </span>
                     )}
                   </div>
-                  <div>
-                    <label className="block text-sm font-bold text-slate-700 mb-1 text-right">
-                      單據日期
+                  <div className="w-full md:w-auto">
+                    <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2 md:text-right">
+                      單據日期 <span className="text-red-500">*</span>
                     </label>
                     <input
                       type="date"
@@ -738,14 +794,15 @@ const DeliveryNotePage = () => {
                       value={formData.note_date}
                       onChange={handleFormChange}
                       required
-                      className="border border-slate-300 rounded px-3 py-2 focus:outline-none"
+                      className="border border-slate-300 rounded-xl px-4 py-2.5 bg-white focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 shadow-sm w-full md:w-48 font-mono text-sm font-bold text-slate-700 transition-all"
                     />
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4 mb-6 bg-slate-50 p-4 rounded-md border border-slate-200 text-sm">
-                  <div className="flex border-b border-slate-200 pb-1">
-                    <span className="w-20 font-bold text-slate-700">
+                {/* 客戶資訊表單 */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                  <div className="flex flex-col border-b border-slate-100 pb-2">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
                       客戶名稱
                     </span>
                     <input
@@ -753,12 +810,12 @@ const DeliveryNotePage = () => {
                       name="customer_name"
                       value={formData.customer_name}
                       onChange={handleFormChange}
-                      className="flex-1 bg-transparent focus:outline-none"
+                      className="w-full bg-transparent focus:outline-none text-slate-800 font-bold text-sm"
                       required
                     />
                   </div>
-                  <div className="flex border-b border-slate-200 pb-1">
-                    <span className="w-20 font-bold text-slate-700">
+                  <div className="flex flex-col border-b border-slate-100 pb-2">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
                       統一編號
                     </span>
                     <input
@@ -766,21 +823,23 @@ const DeliveryNotePage = () => {
                       name="customer_tax_id"
                       value={formData.customer_tax_id}
                       onChange={handleFormChange}
-                      className="flex-1 bg-transparent focus:outline-none"
+                      className="w-full bg-transparent focus:outline-none text-slate-700 font-mono text-sm"
                     />
                   </div>
-                  <div className="flex border-b border-slate-200 pb-1">
-                    <span className="w-20 font-bold text-slate-700">電話</span>
+                  <div className="flex flex-col border-b border-slate-100 pb-2">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                      聯絡電話
+                    </span>
                     <input
                       type="text"
                       name="phone"
                       value={formData.phone}
                       onChange={handleFormChange}
-                      className="flex-1 bg-transparent focus:outline-none"
+                      className="w-full bg-transparent focus:outline-none text-slate-700 font-mono text-sm"
                     />
                   </div>
-                  <div className="flex border-b border-slate-200 pb-1">
-                    <span className="w-20 font-bold text-slate-700">
+                  <div className="flex flex-col border-b border-slate-100 pb-2">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
                       聯絡人
                     </span>
                     <input
@@ -788,11 +847,11 @@ const DeliveryNotePage = () => {
                       name="contact"
                       value={formData.contact}
                       onChange={handleFormChange}
-                      className="flex-1 bg-transparent focus:outline-none"
+                      className="w-full bg-transparent focus:outline-none text-slate-700 text-sm"
                     />
                   </div>
-                  <div className="flex border-b border-slate-200 pb-1">
-                    <span className="w-20 font-bold text-slate-700">
+                  <div className="flex flex-col md:col-span-2 pt-1">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
                       送貨地址
                     </span>
                     <input
@@ -800,151 +859,211 @@ const DeliveryNotePage = () => {
                       name="address"
                       value={formData.address}
                       onChange={handleFormChange}
-                      className="flex-1 bg-transparent focus:outline-none"
+                      className="w-full bg-transparent focus:outline-none text-slate-700 text-sm"
                     />
                   </div>
                 </div>
 
-                <div className="border border-slate-300 rounded-md overflow-hidden mb-6">
-                  <table className="w-full text-sm text-left bg-white">
-                    <thead className="bg-slate-100 border-b border-slate-300">
-                      <tr>
-                        <th className="p-2 font-bold w-1/4">貨品編號</th>
-                        <th className="p-2 font-bold w-1/4">規格</th>
-                        <th className="p-2 font-bold w-24">數量</th>
-                        <th className="p-2 font-bold w-16">單位</th>
-                        <th className="p-2 font-bold w-24">單價</th>
-                        <th className="p-2 font-bold w-32">批號編號</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr>
-                        <td className="p-2">
-                          <input
-                            type="text"
-                            name="product_code"
-                            value={formData.product_code}
-                            onChange={handleFormChange}
-                            className="w-full border-b focus:outline-none"
-                          />
-                        </td>
-                        <td className="p-2">
-                          <input
-                            type="text"
-                            name="spec"
-                            value={formData.spec}
-                            onChange={handleFormChange}
-                            className="w-full border-b focus:outline-none"
-                          />
-                        </td>
-                        <td className="p-2">
-                          <input
-                            type="number"
-                            step="0.0001"
-                            name="quantity"
-                            value={formData.quantity}
-                            onChange={handleFormChange}
-                            required
-                            className="w-full border-b focus:outline-none font-bold text-blue-700"
-                          />
-                        </td>
-                        <td className="p-2">
-                          <input
-                            type="text"
-                            name="unit"
-                            value={formData.unit}
-                            onChange={handleFormChange}
-                            className="w-full border-b focus:outline-none"
-                          />
-                        </td>
-                        <td className="p-2">
-                          <input
-                            type="number"
-                            name="sales_price"
-                            value={formData.sales_price}
-                            onChange={handleFormChange}
-                            className="w-full border-b focus:outline-none"
-                          />
-                        </td>
-                        <td className="p-2">
-                          <input
-                            type="text"
-                            name="used_batch_number"
-                            value={formData.used_batch_number}
-                            onChange={handleFormChange}
-                            className="w-full border-b focus:outline-none"
-                          />
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
+                {/* 卡片式的出貨明細設定 (Apple Style) */}
+                <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden mb-8 shadow-sm">
+                  <div className="bg-slate-50/80 border-b border-slate-200 px-5 py-3.5 flex items-center gap-2">
+                    <PackageCheck size={18} className="text-slate-700" />
+                    <span className="font-bold text-slate-700 text-sm">
+                      出貨明細設定
+                    </span>
+                  </div>
+                  <div className="p-6 grid grid-cols-1 lg:grid-cols-3 gap-8">
+                    {/* 區塊 1: 產品資訊 */}
+                    <div className="flex flex-col gap-4">
+                      <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                        產品資訊
+                      </label>
+                      <div className="flex flex-col gap-3">
+                        <div className="bg-slate-50 rounded-xl p-4 border border-slate-100 flex flex-col justify-center min-h-[4.5rem]">
+                          <span className="text-[10px] font-bold text-slate-400 mb-1 font-mono tracking-wider">
+                            {formData.product_code || "-"}
+                          </span>
+                          <span className="font-extrabold text-slate-800 text-[15px] leading-tight truncate">
+                            {formData.product_name || "-"}
+                          </span>
+                        </div>
+                        <div className="bg-slate-50 rounded-xl p-4 border border-slate-100 flex items-center justify-between min-h-[3.5rem]">
+                          <span className="text-xs font-bold text-slate-500">
+                            包裝規格
+                          </span>
+                          <span className="text-sm font-bold text-slate-700 font-mono">
+                            {formData.spec || "-"}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
 
-                <div className="grid grid-cols-2 gap-6 bg-slate-50 p-4 rounded-md border border-slate-200 text-sm">
-                  <div className="space-y-3 font-mono">
-                    <div className="flex justify-between">
-                      <span className="font-bold">合計金額：</span>
-                      <input
-                        type="number"
-                        name="total_amount"
-                        value={formData.total_amount}
-                        onChange={handleFormChange}
-                        className="text-right border-b bg-transparent"
-                      />
+                    {/* 區塊 2: 數量與重量換算 */}
+                    <div className="flex flex-col gap-4">
+                      <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                        出貨數量與重量估算
+                      </label>
+                      <div className="flex flex-col gap-3 h-full">
+                        {/* 輸入框 */}
+                        <div className="flex items-center justify-between bg-white border border-slate-200 rounded-xl p-3 focus-within:border-blue-500 focus-within:ring-4 focus-within:ring-blue-500/10 transition-all">
+                          <span className="text-sm font-bold text-slate-700">
+                            出貨量 <span className="text-red-500">*</span>
+                          </span>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="text"
+                              name="quantity"
+                              value={formData.quantity}
+                              onChange={handleFormChange}
+                              required
+                              className="w-20 text-right font-black text-blue-600 text-lg focus:outline-none bg-transparent"
+                              placeholder="0"
+                            />
+                            <span className="font-bold text-slate-500 text-sm">
+                              {formData.sales_unit}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* 換算公式面板 */}
+                        <div className="bg-slate-50 rounded-xl p-4 border border-slate-100 flex-1 flex flex-col justify-center gap-2">
+                          {formData.sales_pack_unit !== formData.sales_unit && (
+                            <div className="flex justify-between items-center text-xs font-bold text-slate-500 font-mono">
+                              <span>包材結構</span>
+                              <span className="text-slate-700">
+                                1 {formData.sales_unit} ={" "}
+                                {formData.sales_pack_quantity}{" "}
+                                {formData.sales_pack_unit}
+                              </span>
+                            </div>
+                          )}
+                          <div className="flex justify-between items-center text-xs font-bold text-slate-500 font-mono pb-2 border-b border-slate-200/60">
+                            <span>包材重量</span>
+                            <span className="text-slate-700">
+                              1 {formData.sales_pack_unit} ={" "}
+                              {formatDisplayNum(weightPerPack)} KG
+                            </span>
+                          </div>
+                          <div className="flex justify-between items-end pt-1">
+                            <span className="text-sm font-bold text-slate-700">
+                              總出貨重
+                            </span>
+                            <div className="flex items-baseline gap-1">
+                              <span className="text-xl font-black text-slate-700 font-mono tracking-tight">
+                                {formatDisplayNum(estimatedModalWeight)}
+                              </span>
+                              <span className="text-xs font-bold text-slate-700">
+                                KG
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
                     </div>
-                    <div className="flex justify-between">
-                      <span className="font-bold">營業稅：</span>
-                      <input
-                        type="number"
-                        name="tax_amount"
-                        value={formData.tax_amount}
-                        onChange={handleFormChange}
-                        className="text-right border-b bg-transparent"
-                      />
-                    </div>
-                    <div className="flex justify-between text-blue-800 font-bold">
-                      <span className="text-base">銷貨總額：</span>
-                      <input
-                        type="number"
-                        name="grand_total"
-                        value={formData.grand_total}
-                        onChange={handleFormChange}
-                        className="text-right border-b-2 border-blue-400 bg-transparent text-base"
-                      />
+
+                    {/* 區塊 3: 銷售金額 */}
+                    <div className="flex flex-col gap-4">
+                      <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                        銷售金額 (未稅)
+                      </label>
+                      <div className="flex flex-col gap-3 h-full">
+                        <div className="flex items-center justify-between bg-white border border-slate-200 rounded-xl p-3 focus-within:border-blue-500 focus-within:ring-4 focus-within:ring-blue-500/10 transition-all">
+                          <span className="text-sm font-bold text-slate-700">
+                            單價
+                          </span>
+                          <div className="flex items-center gap-1">
+                            <span className="text-slate-400 font-mono font-bold">
+                              $
+                            </span>
+                            <input
+                              type="number"
+                              name="sales_price"
+                              value={formData.sales_price}
+                              onChange={handleFormChange}
+                              className="w-24 text-right font-bold text-slate-800 text-base focus:outline-none bg-transparent"
+                              placeholder="0"
+                            />
+                          </div>
+                        </div>
+                        <div className="bg-slate-50 border border-slate-100 rounded-xl p-4 flex-1 flex flex-col justify-end items-end">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                            小計金額
+                          </span>
+                          <div className="flex items-baseline gap-1">
+                            <span className="text-sm text-slate-500 font-mono font-bold">
+                              $
+                            </span>
+                            <span className="text-3xl font-black font-mono text-slate-800 tracking-tight">
+                              {formatDisplayNum(
+                                parseFloat(formData.quantity || 0) *
+                                  parseFloat(formData.sales_price || 0),
+                              )}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
                     </div>
                   </div>
-                  <div>
-                    <label className="block font-bold text-slate-700 mb-1">
-                      單據備註
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm text-sm">
+                  <div className="space-y-4 font-mono bg-slate-50 p-5 rounded-xl border border-slate-100">
+                    <div className="flex justify-between items-center border-b border-slate-200 pb-2">
+                      <span className="font-bold text-slate-500 font-sans">
+                        合計金額 (未稅)
+                      </span>
+                      <span className="font-bold text-slate-700">
+                        $ {formatDisplayNum(formData.total_amount)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center border-b border-slate-200 pb-2">
+                      <span className="font-bold text-slate-500 font-sans">
+                        營業稅 (5%)
+                      </span>
+                      <span className="font-bold text-slate-700">
+                        $ {formatDisplayNum(formData.tax_amount)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center pt-2">
+                      <span className="text-base font-extrabold text-[#1f4e78] font-sans">
+                        銷貨總額
+                      </span>
+                      <span className="text-3xl font-black text-blue-600 tracking-tight">
+                        $ {formatDisplayNum(formData.grand_total)}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex flex-col h-full">
+                    <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">
+                      單據備註事項
                     </label>
                     <textarea
                       name="document_note"
                       value={formData.document_note}
                       onChange={handleFormChange}
-                      className="w-full border border-slate-300 rounded p-2 focus:outline-none"
-                      rows="3"
+                      className="w-full flex-1 border border-slate-200 rounded-xl p-4 focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-400 bg-slate-50 focus:bg-white transition-all resize-none text-slate-700 text-sm"
+                      placeholder="請輸入欲顯示於銷貨單上的備註事項..."
                     ></textarea>
-                    <p className="text-xs text-slate-500 mt-2">
-                      *
-                      註：車輛溫度、運輸方式等物流資訊，請於列印後交由人員現場手寫填入。
+                    <p className="text-[10px] font-bold text-slate-400 mt-2 text-right">
+                      * 註：物流車輛溫度等資訊，請於列印單據後手寫。
                     </p>
                   </div>
                 </div>
 
-                <div className="flex justify-end gap-3 mt-6 pt-4 border-t">
+                <div className="flex justify-end gap-3 mt-8">
                   <button
                     type="button"
                     onClick={closeModal}
-                    className="px-5 py-2 bg-slate-100 text-slate-700 font-bold rounded-md"
+                    className="px-6 py-2.5 bg-white border border-slate-200 text-slate-600 font-bold rounded-xl hover:bg-slate-50 transition-colors shadow-sm"
                   >
                     取消
                   </button>
                   <button
                     type="submit"
                     disabled={isSubmitting || !formData.production_order}
-                    className="px-6 py-2 bg-blue-600 text-white font-bold rounded-md disabled:opacity-50"
+                    className="px-8 py-2.5 bg-[#1f4e78] text-white font-bold rounded-xl disabled:opacity-50 hover:bg-blue-900 shadow-md transition-all hover:-translate-y-0.5"
                   >
-                    {isSubmitting ? "處理中..." : "儲存並產生單據號碼"}
+                    {isSubmitting ? "處理中..." : "儲存並產生單據"}
                   </button>
                 </div>
               </form>
@@ -959,7 +1078,7 @@ const DeliveryNotePage = () => {
         />
       </div>
 
-      {/* 隱藏的列印區塊 (透過 @media print 呼叫) */}
+      {/* 隱藏的列印區塊 */}
       {printData && <DeliveryNotePrintTemplate data={printData} />}
     </>
   );

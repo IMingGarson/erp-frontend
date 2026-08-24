@@ -13,8 +13,24 @@ import {
 // 輔助函數：將浮點數轉字串並移除結尾的 0 與小數點
 // ==========================================
 const formatDisplayNum = (val) => {
-  if (val === null || val === undefined || isNaN(parseFloat(val))) return "";
-  return parseFloat(val).toString();
+  if (val === null || val === undefined || val === "") return "";
+  const num = parseFloat(val);
+  if (isNaN(num)) return "";
+  return parseFloat(num.toFixed(5)).toString();
+};
+
+// ==========================================
+// 輔助函數：從規格字串萃取單位重量 (KG/單位)
+// 支援格式："1KG*25包/箱", "10KG/桶", "0.5KG*10袋"
+// ==========================================
+const getProductWeightRatio = (spec) => {
+  if (!spec) return 1;
+  const match = spec.match(/([\d.]+)\s*KG/i);
+  const packMatch = spec.match(/\*\s*([\d.]+)\s*[包袋罐瓶]/i);
+
+  const w = match ? parseFloat(match[1]) : 1;
+  const p = packMatch ? parseFloat(packMatch[1]) : 1;
+  return w * p;
 };
 
 // ==========================================
@@ -31,42 +47,62 @@ const RecallReportPrintTemplate = ({
 }) => {
   if (!reportData) return null;
 
-  // 1. 扁平化所有生產單，並帶上所屬批號與有效期限
-  const allOrders = (traceResults || []).flatMap((b) =>
-    (b.trace_details?.orders || []).map((o) => ({
-      ...o,
-      batch_number: b.batch_number,
-      expiration_date: b.expiration_date,
-    })),
-  );
+  // 1. 扁平化並「去重」所有生產單 (避免同一張單用兩批異常原料而重複出現)
+  const uniqueOrdersMap = new Map();
+  (traceResults || []).forEach((b) => {
+    (b.trace_details?.orders || []).forEach((o) => {
+      if (!uniqueOrdersMap.has(o.order_number)) {
+        uniqueOrdersMap.set(o.order_number, {
+          ...o,
+          batch_numbers: [b.batch_number],
+          expiration_dates: [b.expiration_date],
+          used_qty_total: parseFloat(o.used_qty || 0),
+        });
+      } else {
+        const existing = uniqueOrdersMap.get(o.order_number);
+        if (!existing.batch_numbers.includes(b.batch_number)) {
+          existing.batch_numbers.push(b.batch_number);
+          existing.expiration_dates.push(b.expiration_date);
+        }
+        existing.used_qty_total += parseFloat(o.used_qty || 0);
+      }
+    });
+  });
+  const uniqueOrders = Array.from(uniqueOrdersMap.values());
 
   // 2. 扁平化下游銷貨單
-  const downstreamShipments = allOrders.flatMap((o) =>
+  const downstreamShipments = uniqueOrders.flatMap((o) =>
     (o.delivery_notes || []).map((dn) => ({
       ...dn,
       product_code: o.product_code,
       product_name: o.product_name,
+      spec: o.product_spec,
       target_qty: o.target_qty,
       actual_qty: o.actual_qty,
       order_created_at: o.order_created_at,
-      expiration_date: o.expiration_date,
-      vendor_address: o.po_vendor_info?.address || "",
-      vendor_phone: o.po_vendor_info?.phone || "",
+      expiration_date: o.expiration_dates[0],
+      customer_code: dn.customer_info?.code || o.po_vendor_info?.code || "",
+      customer_name: dn.customer_info?.name || o.po_vendor_info?.name || "",
+      vendor_address:
+        dn.customer_info?.address || o.po_vendor_info?.address || "",
+      vendor_phone: dn.customer_info?.phone || o.po_vendor_info?.phone || "",
     })),
   );
 
   // 3. 取得不重複的下游廠商清單
   const uniqueVendors = Array.from(
     new Map(
-      downstreamShipments.map((s) => [
-        s.customer_code,
-        {
-          code: s.customer_code,
-          name: s.customer_name,
-          address: s.vendor_address,
-          phone: s.vendor_phone,
-        },
-      ]),
+      downstreamShipments
+        .filter((s) => s.customer_code)
+        .map((s) => [
+          s.customer_code,
+          {
+            code: s.customer_code,
+            name: s.customer_name,
+            address: s.vendor_address,
+            phone: s.vendor_phone,
+          },
+        ]),
     ).values(),
   );
 
@@ -362,46 +398,45 @@ const RecallReportPrintTemplate = ({
         <table className="w-full border-collapse border border-black text-xs text-center">
           <thead className="bg-[#1f4e78] text-white">
             <tr>
-              <th className="border border-black px-1 py-1.5 font-bold w-[8%]">
-                配方編號
-              </th>
               <th className="border border-black px-1 py-1.5 font-bold w-[9%]">
                 產品編號
               </th>
               <th className="border border-black px-1 py-1.5 font-bold w-[20%]">
                 回收產品名稱
               </th>
-              <th className="border border-black px-1 py-1.5 font-bold w-[15%]">
+              <th className="border border-black px-1 py-1.5 font-bold w-[16%]">
                 包裝規格
               </th>
               <th className="border border-black px-1 py-1.5 font-bold w-[9%]">
-                批號編號
+                生產批號
               </th>
               <th className="border border-black px-1 py-1.5 font-bold w-[10%]">
-                銷貨單編號
+                銷貨單號
               </th>
               <th className="border border-black px-0.5 py-1.5 font-bold w-[4%] leading-tight">
                 數量
                 <br />
-                (包)
+                (單位)
               </th>
-              <th className="border border-black px-0.5 py-1.5 font-bold w-[4%] leading-tight">
-                KG
+              <th className="border border-black px-0.5 py-1.5 font-bold w-[5%]">
+                出貨量
+                <br />
+                (kg)
               </th>
               <th className="border border-black px-1 py-1.5 font-bold w-[9%]">
                 製令單號
               </th>
-              <th className="border border-black px-0.5 py-1.5 font-bold w-[4%] leading-tight">
-                產品數量
+              <th className="border border-black px-0.5 py-1.5 font-bold w-[5%]">
+                生產量
                 <br />
                 (kg)
               </th>
-              <th className="border border-black px-0.5 py-1.5 font-bold w-[4%] leading-tight">
+              <th className="border border-black px-0.5 py-1.5 font-bold w-[5%] leading-tight">
                 原料用量
                 <br />
                 (kg)
               </th>
-              <th className="border border-black px-0.5 py-1.5 font-bold w-[4%] leading-tight relative">
+              <th className="border border-black px-0.5 py-1.5 font-bold w-[5%] leading-tight relative">
                 誤差量
                 <br />
                 (kg)
@@ -411,80 +446,93 @@ const RecallReportPrintTemplate = ({
               </th>
             </tr>
           </thead>
-          <tbody className="font-bold text-red-600">
+          <tbody className="font-bold text-slate-800">
             {(() => {
               const flattenedRows = [];
-              let totalBags = 0;
-              let totalProduced = 0;
-              let totalUsed = 0;
+              let sumDnUnits = 0;
+              let sumDnKg = 0;
+              let sumProducedKg = 0;
+              let sumUsedKg = 0;
 
-              allOrders.forEach((po) => {
-                const batches =
-                  po.used_batch_numbers && po.used_batch_numbers.length > 0
-                    ? po.used_batch_numbers
-                    : ["-"];
+              uniqueOrders.forEach((po) => {
+                const weightRatio = getProductWeightRatio(po.product_spec);
+                const producedQtyUnits = parseFloat(
+                  po.actual_qty || po.target_qty || 0,
+                );
+                const producedKg = producedQtyUnits * weightRatio;
+                const usedKg = po.used_qty_total;
+
+                sumProducedKg += producedKg;
+                sumUsedKg += usedKg;
+
                 const deliveries =
                   po.delivery_notes && po.delivery_notes.length > 0
                     ? po.delivery_notes
                     : [null];
-                const producedQty = parseFloat(
-                  po.actual_qty || po.target_qty || 0,
-                );
 
-                totalProduced += producedQty;
-                totalUsed += parseFloat(po.used_qty || 0);
+                let poDnUnits = 0;
+                deliveries.forEach((dn) => {
+                  if (dn) poDnUnits += parseFloat(dn.quantity || 0);
+                });
+                const poDnKg = poDnUnits * weightRatio;
+                const errorKg = producedKg - poDnKg;
 
-                batches.forEach((batchNum) => {
-                  deliveries.forEach((dn) => {
-                    if (dn) totalBags += parseFloat(dn.quantity || 0);
+                deliveries.forEach((dn, dnIdx) => {
+                  const dnUnits = dn ? parseFloat(dn.quantity || 0) : 0;
+                  const dnKg = dnUnits * weightRatio;
 
-                    flattenedRows.push(
-                      <tr
-                        key={`${po.order_number}-${batchNum}-${dn?.note_number || "none"}`}
-                        className="h-8"
-                      >
-                        <td className="border border-slate-300 px-1">
-                          {po.product_code || "-"}
-                        </td>
-                        <td className="border border-slate-300 px-1">
-                          {po.product_code || "-"}
-                        </td>
-                        <td className="border border-slate-300 px-1 text-left break-all">
-                          {po.product_name || "-"}
-                        </td>
-                        <td className="border border-slate-300 px-1 text-left break-all">
-                          {po.product_spec || "-"}
-                        </td>
-                        <td className="border border-slate-300 px-1">
-                          {batchNum}
-                        </td>
-                        <td className="border border-slate-300 px-1">
-                          {dn ? dn.note_number : "-"}
-                        </td>
-                        <td className="border border-slate-300 px-1">
-                          {dn ? formatDisplayNum(dn.quantity) : "-"}
-                        </td>
-                        <td className="border border-slate-300 px-1">-</td>
-                        <td className="border border-slate-300 px-1">
-                          {po.order_number || "-"}
-                        </td>
-                        <td className="border border-slate-300 px-1">
-                          {formatDisplayNum(producedQty)}
-                        </td>
-                        <td className="border border-slate-300 px-1">
-                          {po.used_qty ? formatDisplayNum(po.used_qty) : "-"}
-                        </td>
-                        <td className="border border-slate-300 px-1">-</td>
-                      </tr>,
-                    );
-                  });
+                  if (dn) {
+                    sumDnUnits += dnUnits;
+                    sumDnKg += dnKg;
+                  }
+
+                  flattenedRows.push(
+                    <tr
+                      key={`${po.order_number}-${dn?.note_number || "none"}-${dnIdx}`}
+                      className="h-8"
+                    >
+                      <td className="border border-slate-300 px-1">
+                        {po.product_code || "-"}
+                      </td>
+                      <td className="border border-slate-300 px-1 text-left break-all">
+                        {po.product_name || "-"}
+                      </td>
+                      <td className="border border-slate-300 px-1 text-left break-all text-[10px]">
+                        {po.product_spec || "-"}
+                      </td>
+                      <td className="border border-slate-300 px-1 text-[10px]">
+                        {po.batch_numbers.join(", ")}
+                      </td>
+                      <td className="border border-slate-300 px-1 font-mono">
+                        {dn ? dn.note_number : "-"}
+                      </td>
+                      <td className="border border-slate-300 px-1 font-mono">
+                        {dn ? formatDisplayNum(dnUnits) : "-"}
+                      </td>
+                      <td className="border border-slate-300 px-1 font-mono">
+                        {dn ? formatDisplayNum(dnKg) : "-"}
+                      </td>
+                      <td className="border border-slate-300 px-1 font-mono">
+                        {po.order_number || "-"}
+                      </td>
+                      <td className="border border-slate-300 px-1 font-mono">
+                        {dnIdx === 0 ? formatDisplayNum(producedKg) : ""}
+                      </td>
+                      <td className="border border-slate-300 px-1 font-mono">
+                        {dnIdx === 0 ? formatDisplayNum(usedKg) : ""}
+                      </td>
+                      <td className="border border-slate-300 px-1 font-mono text-red-600">
+                        {dnIdx === 0 ? formatDisplayNum(errorKg) : ""}
+                      </td>
+                    </tr>,
+                  );
                 });
               });
 
               if (flattenedRows.length === 0) {
                 flattenedRows.push(
                   <tr key="empty" className="h-8 text-slate-500">
-                    <td colSpan="12" className="border border-slate-300 py-4">
+                    <td colSpan="11" className="border border-slate-300 py-4">
                       無生產/出貨資料
                     </td>
                   </tr>,
@@ -495,18 +543,12 @@ const RecallReportPrintTemplate = ({
               for (let i = 0; i < padCount; i++) {
                 flattenedRows.push(
                   <tr key={`pad-${i}`} className="h-8">
-                    <td className="border border-slate-300 px-1"></td>
-                    <td className="border border-slate-300 px-1"></td>
-                    <td className="border border-slate-300 px-1"></td>
-                    <td className="border border-slate-300 px-1"></td>
-                    <td className="border border-slate-300 px-1"></td>
-                    <td className="border border-slate-300 px-1"></td>
-                    <td className="border border-slate-300 px-1"></td>
-                    <td className="border border-slate-300 px-1"></td>
-                    <td className="border border-slate-300 px-1"></td>
-                    <td className="border border-slate-300 px-1"></td>
-                    <td className="border border-slate-300 px-1"></td>
-                    <td className="border border-slate-300 px-1"></td>
+                    {[...Array(11)].map((_, col) => (
+                      <td
+                        key={col}
+                        className="border border-slate-300 px-1"
+                      ></td>
+                    ))}
                   </tr>,
                 );
               }
@@ -517,25 +559,25 @@ const RecallReportPrintTemplate = ({
                   className="bg-[#1f4e78] text-white font-bold h-8"
                 >
                   <td
-                    colSpan="6"
+                    colSpan="5"
                     className="border border-black text-center tracking-widest"
                   >
                     合 計
                   </td>
-                  <td className="border border-black bg-white text-red-600">
-                    {totalBags ? formatDisplayNum(totalBags) : "-"}
+                  <td className="border border-black">
+                    {sumDnUnits ? formatDisplayNum(sumDnUnits) : "-"}
                   </td>
-                  <td className="border border-black bg-white text-red-600">
-                    -
+                  <td className="border border-black">
+                    {sumDnKg ? formatDisplayNum(sumDnKg) : "-"}
                   </td>
-                  <td className="border border-black bg-white text-red-600 border-t-0"></td>
-                  <td className="border border-black bg-white text-red-600">
-                    {formatDisplayNum(totalProduced)}
+                  <td className="border border-black border-t-0"></td>
+                  <td className="border border-black">
+                    {formatDisplayNum(sumProducedKg)}
                   </td>
-                  <td className="border border-black bg-white text-red-600">
-                    {formatDisplayNum(totalUsed)}
+                  <td className="border border-black">
+                    {formatDisplayNum(sumUsedKg)}
                   </td>
-                  <td className="border border-black bg-white text-red-600"></td>
+                  <td className="border border-black"></td>
                 </tr>,
               );
 
@@ -636,7 +678,7 @@ const RecallReportPrintTemplate = ({
               <th className="border border-black px-0 py-1.5 font-bold w-[2%] text-[9px] leading-tight">
                 數量
                 <br />
-                (包)
+                (單位)
               </th>
               <th className="border border-black px-0 py-1.5 font-bold w-[2%] text-[9px] leading-tight">
                 數量
@@ -646,7 +688,7 @@ const RecallReportPrintTemplate = ({
               <th className="border border-black px-0 py-1.5 font-bold w-[2%] text-[9px] leading-tight">
                 數量
                 <br />
-                (包)
+                (單位)
               </th>
               <th className="border border-black px-0 py-1.5 font-bold w-[2%] text-[9px] leading-tight">
                 數量
@@ -656,7 +698,7 @@ const RecallReportPrintTemplate = ({
               <th className="border border-black px-0 py-1.5 font-bold w-[2%] text-[9px] leading-tight">
                 數量
                 <br />
-                (包)
+                (單位)
               </th>
               <th className="border border-black px-0 py-1.5 font-bold w-[2%] text-[9px] leading-tight">
                 數量
@@ -666,7 +708,7 @@ const RecallReportPrintTemplate = ({
               <th className="border border-black px-0 py-1.5 font-bold w-[2%] text-[9px] leading-tight">
                 數量
                 <br />
-                (包)
+                (單位)
               </th>
               <th className="border border-black px-0 py-1.5 font-bold w-[2%] text-[9px] leading-tight">
                 數量
@@ -675,45 +717,53 @@ const RecallReportPrintTemplate = ({
               </th>
             </tr>
           </thead>
-          <tbody className="font-bold text-red-600">
-            {downstreamShipments.map((ship, idx) => (
-              <tr key={idx} className="h-8">
-                <td className="border border-slate-300 px-1">
-                  {ship.customer_code || "-"}
-                </td>
-                <td className="border border-slate-300 px-1 text-left break-words">
-                  {ship.customer_name || "-"}
-                </td>
-                <td className="border border-slate-300 px-1 text-left break-words">
-                  {ship.vendor_address || "-"}
-                </td>
-                <td className="border border-slate-300 px-1">
-                  {ship.vendor_phone || "-"}
-                </td>
-                <td className="border border-slate-300 px-1 font-mono">
-                  {ship.note_date || "-"}
-                </td>
-                <td className="border border-slate-300 px-1 text-left break-words">
-                  {ship.product_name} {ship.spec ? `(${ship.spec})` : ""}
-                </td>
-                <td className="border border-slate-300 px-1 font-mono">
-                  {ship.order_created_at || "-"}
-                </td>
-                <td className="border border-slate-300 px-1 font-mono">
-                  {ship.expiration_date || "-"}
-                </td>
-                <td className="border border-slate-300 px-0 font-mono">
-                  {formatDisplayNum(ship.quantity)}
-                </td>
-                <td className="border border-slate-300 px-0">-</td>
-                <td className="border border-slate-300 px-0">-</td>
-                <td className="border border-slate-300 px-0">-</td>
-                <td className="border border-slate-300 px-0">-</td>
-                <td className="border border-slate-300 px-0">-</td>
-                <td className="border border-slate-300 px-0">-</td>
-                <td className="border border-slate-300 px-0">-</td>
-              </tr>
-            ))}
+          <tbody className="font-bold text-slate-800">
+            {downstreamShipments.map((ship, idx) => {
+              const weightRatio = getProductWeightRatio(ship.spec);
+              const dnUnits = parseFloat(ship.quantity || 0);
+              const dnKg = dnUnits * weightRatio;
+
+              return (
+                <tr key={idx} className="h-8">
+                  <td className="border border-slate-300 px-1">
+                    {ship.customer_code || "-"}
+                  </td>
+                  <td className="border border-slate-300 px-1 text-left break-words">
+                    {ship.customer_name || "-"}
+                  </td>
+                  <td className="border border-slate-300 px-1 text-left break-words">
+                    {ship.vendor_address || "-"}
+                  </td>
+                  <td className="border border-slate-300 px-1">
+                    {ship.vendor_phone || "-"}
+                  </td>
+                  <td className="border border-slate-300 px-1 font-mono">
+                    {ship.note_date || "-"}
+                  </td>
+                  <td className="border border-slate-300 px-1 text-left break-words">
+                    {ship.product_name}
+                  </td>
+                  <td className="border border-slate-300 px-1 font-mono">
+                    {ship.order_created_at?.split(" ")[0] || "-"}
+                  </td>
+                  <td className="border border-slate-300 px-1 font-mono">
+                    {ship.expiration_date || "-"}
+                  </td>
+                  <td className="border border-slate-300 px-0 font-mono">
+                    {formatDisplayNum(dnUnits)}
+                  </td>
+                  <td className="border border-slate-300 px-0 font-mono text-blue-700 bg-slate-50">
+                    {formatDisplayNum(dnKg)}
+                  </td>
+                  <td className="border border-slate-300 px-0"></td>
+                  <td className="border border-slate-300 px-0"></td>
+                  <td className="border border-slate-300 px-0"></td>
+                  <td className="border border-slate-300 px-0"></td>
+                  <td className="border border-slate-300 px-0"></td>
+                  <td className="border border-slate-300 px-0"></td>
+                </tr>
+              );
+            })}
             {[...Array(Math.max(0, 15 - downstreamShipments.length))].map(
               (_, i) => (
                 <tr key={`pad-${i}`} className="h-8">
@@ -731,25 +781,30 @@ const RecallReportPrintTemplate = ({
                 總計
               </td>
               <td className="border border-black bg-white text-red-600">
-                {downstreamShipments.reduce(
-                  (sum, s) => sum + (parseFloat(s.quantity) || 0),
-                  0,
-                )
-                  ? formatDisplayNum(
-                      downstreamShipments.reduce(
-                        (sum, s) => sum + (parseFloat(s.quantity) || 0),
-                        0,
-                      ),
-                    )
-                  : "-"}
+                {formatDisplayNum(
+                  downstreamShipments.reduce(
+                    (sum, s) => sum + (parseFloat(s.quantity) || 0),
+                    0,
+                  ),
+                )}
               </td>
-              <td className="border border-black bg-white text-red-600">-</td>
-              <td className="border border-black bg-white text-red-600">-</td>
-              <td className="border border-black bg-white text-red-600">-</td>
-              <td className="border border-black bg-white text-red-600">-</td>
-              <td className="border border-black bg-white text-red-600">-</td>
-              <td className="border border-black bg-white text-red-600">-</td>
-              <td className="border border-black bg-white text-red-600">-</td>
+              <td className="border border-black bg-white text-red-600">
+                {formatDisplayNum(
+                  downstreamShipments.reduce(
+                    (sum, s) =>
+                      sum +
+                      parseFloat(s.quantity || 0) *
+                        getProductWeightRatio(s.spec),
+                    0,
+                  ),
+                )}
+              </td>
+              <td className="border border-black bg-white text-red-600"></td>
+              <td className="border border-black bg-white text-red-600"></td>
+              <td className="border border-black bg-white text-red-600"></td>
+              <td className="border border-black bg-white text-red-600"></td>
+              <td className="border border-black bg-white text-red-600"></td>
+              <td className="border border-black bg-white text-red-600"></td>
             </tr>
           </tbody>
         </table>
@@ -766,7 +821,6 @@ const RecallReportPrintTemplate = ({
             const vendorShipments = downstreamShipments.filter(
               (s) => s.customer_code === vendor.code,
             );
-
             return (
               <div
                 key={`notice-${vIdx}`}
@@ -856,7 +910,7 @@ const RecallReportPrintTemplate = ({
                         {isSimulation && <div>“廠內模擬回收演練”</div>}
                         <div>
                           供應商通知產品中 {selectedMaterial?.name || "原料"}{" "}
-                          抽驗發現農藥殘留過量，需進行招回。
+                          抽驗發現疑慮，需進行招回。
                         </div>
                       </td>
                     </tr>
@@ -912,26 +966,31 @@ const RecallReportPrintTemplate = ({
                     </tr>
                   </thead>
                   <tbody className="font-bold text-black bg-white">
-                    {vendorShipments.map((vp, pIdx) => (
-                      <tr key={pIdx} className="h-8">
-                        <td className="border border-black">{pIdx + 1}</td>
-                        <td className="border border-black px-1 text-left break-words">
-                          {vp.product_name} {vp.spec ? `(${vp.spec})` : ""}
-                        </td>
-                        <td className="border border-black font-mono">
-                          {vp.order_created_at || "-"}
-                        </td>
-                        <td className="border border-black font-mono">
-                          {vp.expiration_date || "-"}
-                        </td>
-                        <td className="border border-black font-mono">
-                          {formatDisplayNum(vp.quantity)}
-                        </td>
-                        <td className="border border-black bg-slate-100"></td>
-                        <td className="border border-black bg-slate-100"></td>
-                        <td className="border border-black text-xs text-slate-500 bg-slate-100"></td>
-                      </tr>
-                    ))}
+                    {vendorShipments.map((vp, pIdx) => {
+                      const vpKg =
+                        parseFloat(vp.quantity || 0) *
+                        getProductWeightRatio(vp.spec);
+                      return (
+                        <tr key={pIdx} className="h-8">
+                          <td className="border border-black">{pIdx + 1}</td>
+                          <td className="border border-black px-1 text-left break-words">
+                            {vp.product_name}
+                          </td>
+                          <td className="border border-black font-mono">
+                            {vp.order_created_at?.split(" ")[0] || "-"}
+                          </td>
+                          <td className="border border-black font-mono">
+                            {vp.expiration_date || "-"}
+                          </td>
+                          <td className="border border-black font-mono">
+                            {formatDisplayNum(vpKg)}
+                          </td>
+                          <td className="border border-black bg-slate-100"></td>
+                          <td className="border border-black bg-slate-100"></td>
+                          <td className="border border-black text-xs text-slate-500 bg-slate-100"></td>
+                        </tr>
+                      );
+                    })}
                     {[...Array(Math.max(0, 12 - vendorShipments.length))].map(
                       (_, i) => (
                         <tr key={`pad-${i}`} className="h-8">
@@ -953,7 +1012,17 @@ const RecallReportPrintTemplate = ({
                       >
                         合 計
                       </td>
-                      <td className="border border-black px-1 py-1"></td>
+                      <td className="border border-black px-1 py-1">
+                        {formatDisplayNum(
+                          vendorShipments.reduce(
+                            (sum, vp) =>
+                              sum +
+                              parseFloat(vp.quantity || 0) *
+                                getProductWeightRatio(vp.spec),
+                            0,
+                          ),
+                        )}
+                      </td>
                       <td className="border border-black px-1 py-1 bg-slate-100"></td>
                       <td className="border border-black px-1 py-1 bg-slate-100"></td>
                       <td className="border border-black px-1 py-1 bg-slate-100"></td>
@@ -1139,7 +1208,7 @@ const TracePage = () => {
 
       if (!reportRes.ok) throw new Error("無法取得異常追溯指標資料");
       const reportJson = await reportRes.json();
-      setReportData(reportJson.data || reportJson); // 處理回傳結構可能的變動
+      setReportData(reportJson.data || reportJson);
 
       const detailUrl = `/api/batches/trace?q=${encodeURIComponent(selectedMaterial.code)}`;
       const detailRes = await fetchWithAuth(detailUrl, { method: "GET" });
@@ -1423,9 +1492,7 @@ const TracePage = () => {
                         回收原料總量
                       </td>
                       <td className="border border-slate-300 px-4 py-3 text-center font-mono text-lg text-blue-600">
-                        {formatDisplayNum(
-                          parseFloat(reportData.total_raw_recalled),
-                        )}
+                        {formatDisplayNum(reportData.total_raw_recalled)}
                       </td>
                       <td className="border border-slate-300 px-4 py-3 text-xs font-normal text-slate-500">
                         異常原料進貨總量(kg)
@@ -1570,9 +1637,7 @@ const TracePage = () => {
                       </td>
                       <td className="border border-slate-300 px-3 py-2 text-center">
                         <input
-                          type="number"
-                          min="0"
-                          step="0.01"
+                          type="text"
                           placeholder="輸入數量"
                           disabled={formData.disposalMethod !== "DESTROY"}
                           value={formData.destroyAmount}
@@ -1607,46 +1672,53 @@ const TracePage = () => {
 
         {/* 2. 受影響生產單明細 */}
         {reportData && (
-          <div className="mb-12 animate-in fade-in slide-in-from-bottom-8 duration-700">
-            <h3 className="text-xl font-bold text-slate-800 mb-4 flex items-center gap-2">
-              <span className="bg-[#1f4e78] text-white w-6 h-6 rounded-full flex items-center justify-center text-sm">
-                2
-              </span>{" "}
-              受影響生產單明細
-            </h3>
+          <div className="mb-12 animate-in fade-in slide-in-from-bottom-4 duration-500 font-sans">
+            {/* 標題區：與上方元件 1 保持一致的標題排版 */}
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+                <span className="bg-[#1f4e78] text-white w-6 h-6 rounded-full flex items-center justify-center text-sm font-bold shadow-sm">
+                  2
+                </span>
+                受影響生產單明細
+              </h3>
+            </div>
+
+            {/* 主表格容器：統一深藍外框與圓角陰影 */}
             <div className="bg-white rounded-xl shadow-lg border border-blue-200 overflow-hidden min-h-[300px]">
               <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse">
+                <table className="w-full text-left text-sm border-collapse">
                   <thead>
-                    <tr className="bg-blue-50/80 border-b-2 border-blue-200 text-sm text-blue-900">
-                      <th className="p-4 whitespace-nowrap font-bold">
-                        庫存批號
+                    {/* 表頭：統一採用元件 1 的深藍背景 (#1f4e78) */}
+                    <tr className="bg-[#1f4e78] text-white">
+                      <th className="px-4 py-3 font-bold whitespace-nowrap border border-slate-300">
+                        批號 / 物料品號
                       </th>
-                      <th className="p-4 whitespace-nowrap font-bold">
-                        物料品號
-                      </th>
-                      <th className="p-4 whitespace-nowrap font-bold">
+                      <th className="px-4 py-3 font-bold border border-slate-300">
                         物料名稱
                       </th>
-                      <th className="p-4 whitespace-nowrap font-bold">
+                      <th className="px-4 py-3 font-bold whitespace-nowrap text-center border border-slate-300">
                         剩餘庫存
                       </th>
-                      <th className="p-4 whitespace-nowrap font-bold">
+                      <th className="px-4 py-3 font-bold whitespace-nowrap text-center border border-slate-300">
                         入庫日期
                       </th>
-                      <th className="p-4 whitespace-nowrap font-bold text-center">
+                      <th className="px-4 py-3 font-bold whitespace-nowrap border border-slate-300">
+                        流向與用量概要
+                      </th>
+                      <th className="px-4 py-3 font-bold whitespace-nowrap text-center border border-slate-300">
                         操作
                       </th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-blue-50 text-sm font-bold text-slate-800">
+                  <tbody className="divide-y divide-slate-200 font-bold text-slate-800">
                     {loading ? (
                       <tr>
                         <td
-                          colSpan="7"
-                          className="p-16 text-center text-blue-600"
+                          colSpan={6}
+                          className="p-16 text-center text-[#1f4e78] border border-slate-300"
                         >
-                          <div className="text-lg font-bold animate-pulse">
+                          <div className="text-lg font-bold animate-pulse flex items-center justify-center gap-3">
+                            <span className="w-5 h-5 border-2 border-[#1f4e78] border-t-transparent rounded-full animate-spin" />
                             深度追溯中...
                           </div>
                         </td>
@@ -1657,106 +1729,191 @@ const TracePage = () => {
                         const ordersList = batch.trace_details?.orders || [];
                         const mrpsList = batch.trace_details?.mrps || [];
 
+                        // 快速計算已投入與待排產加總
+                        const totalUsedInOrders = ordersList.reduce(
+                          (acc, cur) => acc + (Number(cur.used_qty) || 0),
+                          0,
+                        );
+                        const totalUsedInMrps = mrpsList.reduce(
+                          (acc, cur) => acc + (Number(cur.used_qty) || 0),
+                          0,
+                        );
+
                         return (
                           <React.Fragment key={batch.batch_id}>
+                            {/* 主列表列 */}
                             <tr
-                              className={`transition-colors ${isExpanded ? "bg-blue-50/40" : "hover:bg-blue-50/20"}`}
+                              className={`transition-colors border-b border-slate-300 ${
+                                isExpanded
+                                  ? "bg-blue-50/50"
+                                  : "hover:bg-slate-50"
+                              }`}
                             >
-                              <td className="p-4 font-mono text-base">
-                                {batch.batch_number}
+                              {/* 批號與品號 */}
+                              <td className="px-4 py-3.5 border-r border-slate-300 whitespace-nowrap">
+                                <div className="font-mono text-base font-bold text-[#1f4e78]">
+                                  {batch.batch_number}
+                                </div>
+                                <div className="font-mono text-xs font-normal text-slate-500">
+                                  {batch.material_code}
+                                </div>
                               </td>
-                              <td className="p-4 font-mono">
-                                {batch.material_code}
-                              </td>
-                              <td className="p-4 text-blue-900">
+
+                              {/* 物料名稱 */}
+                              <td className="px-4 py-3.5 border-r border-slate-300 text-slate-900 font-bold">
                                 {batch.material_name}
                               </td>
-                              <td className="p-4 font-mono text-red-600 text-base">
+
+                              {/* 剩餘庫存 */}
+                              <td className="px-4 py-3.5 border-r border-slate-300 text-center font-mono text-lg text-red-600 whitespace-nowrap">
                                 {formatDisplayNum(batch.remaining_qty)}
                               </td>
-                              <td className="p-4 font-mono">
+
+                              {/* 入庫日期 */}
+                              <td className="px-4 py-3.5 border-r border-slate-300 text-center font-mono text-xs font-medium text-slate-600 whitespace-nowrap">
                                 {batch.received_date}
                               </td>
-                              <td className="p-4 text-center whitespace-nowrap">
+
+                              {/* Apple 風格用量膠囊標籤（高對比深色） */}
+                              <td className="px-4 py-3.5 border-r border-slate-300">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-[#1f4e78]/10 text-[#1f4e78] border border-[#1f4e78]/20">
+                                    <span className="w-2 h-2 rounded-full bg-[#1f4e78]" />
+                                    已投入:{" "}
+                                    {formatDisplayNum(totalUsedInOrders)} (
+                                    {ordersList.length}單)
+                                  </span>
+                                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-900 border border-amber-300">
+                                    <span className="w-2 h-2 rounded-full bg-amber-500" />
+                                    待排產: {formatDisplayNum(totalUsedInMrps)}{" "}
+                                    ({mrpsList.length}筆)
+                                  </span>
+                                </div>
+                              </td>
+
+                              {/* 操作按鈕 */}
+                              <td className="px-4 py-3.5 text-center whitespace-nowrap">
                                 <button
                                   type="button"
                                   onClick={() => toggleExpand(batch.batch_id)}
-                                  className={`px-5 py-2 text-xs rounded-lg border-2 transition-all shadow-sm font-bold tracking-wider ${isExpanded ? "bg-blue-600 text-white border-blue-600" : "bg-white text-blue-700 border-blue-200 hover:bg-blue-50"}`}
+                                  className={`px-4 py-1.5 text-xs rounded-lg font-bold transition-all shadow-sm flex items-center justify-center gap-1.5 mx-auto ${
+                                    isExpanded
+                                      ? "bg-[#1f4e78] text-white ring-2 ring-[#1f4e78]/30"
+                                      : "bg-white text-[#1f4e78] border border-[#1f4e78]/40 hover:bg-[#1f4e78] hover:text-white"
+                                  }`}
                                 >
-                                  {isExpanded
-                                    ? "收起明細"
-                                    : `展開關聯 (${ordersList.length + mrpsList.length})`}
+                                  <span>
+                                    {isExpanded ? "收起明細" : "展開關聯"}
+                                  </span>
+                                  <span
+                                    className={`transition-transform duration-200 text-[10px] ${isExpanded ? "rotate-180" : ""}`}
+                                  >
+                                    ▼
+                                  </span>
                                 </button>
                               </td>
                             </tr>
 
+                            {/* 展開詳情區：分組卡片群組 (Apple Grouped Cards) */}
                             {isExpanded && (
                               <tr>
                                 <td
-                                  colSpan="7"
-                                  className="bg-slate-100/50 p-6 lg:p-8 border-b-4 border-blue-200 shadow-inner"
+                                  colSpan={6}
+                                  className="bg-slate-100/70 p-6 border-b-2 border-slate-300 shadow-inner"
                                 >
-                                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
-                                    <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-col h-full hover:shadow-md transition-shadow">
-                                      <div className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
-                                        <div className="w-2 h-2 bg-emerald-400 rounded-full"></div>{" "}
-                                        1. 現存庫存
+                                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 items-start">
+                                    {/* 1. 現存庫存 */}
+                                    <div className="bg-white border border-slate-300 rounded-xl p-4 shadow-sm flex flex-col justify-between h-full">
+                                      <div>
+                                        <div className="text-xs font-black text-slate-500 uppercase tracking-wider mb-3 flex items-center gap-2">
+                                          <span className="w-2 h-2 bg-emerald-500 rounded-full" />
+                                          1. 現存原料來源
+                                        </div>
+                                        <div className="text-base font-bold text-slate-900 mb-1">
+                                          {batch.material_name}
+                                        </div>
+                                        <div className="text-xs font-mono text-slate-500 mb-4">
+                                          原物料代碼: {batch.material_code}
+                                        </div>
                                       </div>
-                                      <div className="text-lg font-black text-slate-800 mb-3">
-                                        {batch.material_name}
-                                      </div>
-                                      <div className="space-y-2 text-sm font-mono text-slate-700 bg-slate-50 p-4 rounded-xl border border-slate-100 flex-1">
+                                      <div className="space-y-2 text-xs font-mono bg-slate-50 p-3 rounded-lg border border-slate-200">
                                         <div className="flex justify-between">
-                                          <span>批號:</span>{" "}
-                                          <span className="font-bold">
+                                          <span className="text-slate-500">
+                                            庫存批號
+                                          </span>
+                                          <span className="font-bold text-slate-900">
                                             {batch.batch_number}
                                           </span>
                                         </div>
                                         <div className="flex justify-between">
-                                          <span>入庫:</span>{" "}
-                                          <span>{batch.received_date}</span>
+                                          <span className="text-slate-500">
+                                            入庫日期
+                                          </span>
+                                          <span className="font-medium text-slate-700">
+                                            {batch.received_date}
+                                          </span>
+                                        </div>
+                                        <div className="flex justify-between pt-1.5 border-t border-slate-200">
+                                          <span className="text-slate-500 font-bold">
+                                            現存量
+                                          </span>
+                                          <span className="font-bold text-red-600 text-sm">
+                                            {formatDisplayNum(
+                                              batch.remaining_qty,
+                                            )}{" "}
+                                            KG
+                                          </span>
                                         </div>
                                       </div>
                                     </div>
-                                    <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-col h-full hover:shadow-md transition-shadow">
-                                      <div className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
-                                        <div className="w-2 h-2 bg-blue-500 rounded-full"></div>{" "}
-                                        2. 生產單 ({ordersList.length})
+
+                                    {/* 2. 已投產生產單 */}
+                                    <div className="bg-white border border-slate-300 rounded-xl p-4 shadow-sm flex flex-col h-full">
+                                      <div className="text-xs font-black text-slate-500 uppercase tracking-wider mb-3 flex items-center justify-between">
+                                        <span className="flex items-center gap-2">
+                                          <span className="w-2 h-2 bg-[#1f4e78] rounded-full" />
+                                          2. 已製作之生產單
+                                        </span>
+                                        <span className="text-[#1f4e78] font-bold text-xs bg-blue-50 px-2 py-0.5 rounded-full border border-blue-200">
+                                          {ordersList.length} 筆
+                                        </span>
                                       </div>
-                                      <div className="space-y-3 flex-1 overflow-y-auto max-h-[300px] pr-2 custom-scrollbar">
+                                      <div className="space-y-3 flex-1 overflow-y-auto max-h-[280px] pr-1">
                                         {ordersList.length > 0 ? (
                                           ordersList.map((po, idx) => (
                                             <div
                                               key={idx}
-                                              className="border border-slate-100 bg-slate-50/50 p-4 rounded-xl hover:border-blue-200 transition-colors"
+                                              className="border border-slate-200 bg-slate-50/70 p-3.5 rounded-lg hover:border-[#1f4e78] transition-colors"
                                             >
-                                              <div className="flex justify-between font-mono text-sm mb-2">
-                                                <span className="font-black text-blue-700">
+                                              <div className="flex justify-between font-mono text-xs mb-1.5">
+                                                <span className="font-bold text-[#1f4e78]">
                                                   {po.order_number}
                                                 </span>
-                                                <span className="text-slate-400 text-xs">
+                                                <span className="text-slate-400 text-[11px]">
                                                   {po.order_created_at || "-"}
                                                 </span>
                                               </div>
-                                              <div className="text-sm font-bold text-slate-800 mb-3">
+                                              <div className="text-xs font-bold text-slate-800 mb-2">
                                                 產出: {po.product_name}
                                               </div>
-                                              <div className="flex justify-between items-center text-xs border-t border-dashed border-slate-200 pt-2 text-slate-500 font-mono mb-2">
-                                                <span>
-                                                  異常原料投入:{" "}
-                                                  <strong className="text-red-600 font-black text-sm ml-1">
-                                                    {formatDisplayNum(
-                                                      po.used_qty,
-                                                    )}
-                                                  </strong>{" "}
-                                                  {po.unit}
+                                              <div className="flex justify-between items-center text-xs border-t border-slate-200 pt-1.5 font-mono">
+                                                <span className="text-slate-500">
+                                                  投入原料量:
+                                                </span>
+                                                <span className="font-black text-red-600 text-sm">
+                                                  {formatDisplayNum(
+                                                    po.used_qty,
+                                                  )}{" "}
+                                                  <span className="text-xs font-normal text-slate-600">
+                                                    {po.unit}
+                                                  </span>
                                                 </span>
                                               </div>
                                               {(po.delivery_notes || [])
                                                 .length > 0 && (
-                                                <div className="text-xs bg-blue-100/50 text-blue-800 px-3 py-2 rounded-lg font-bold flex items-center justify-between">
-                                                  <span>附屬銷貨單:</span>{" "}
-                                                  <span className="font-black text-sm">
+                                                <div className="mt-2 text-xs bg-blue-100/60 text-[#1f4e78] px-2.5 py-1 rounded font-bold flex items-center justify-between border border-blue-200">
+                                                  <span>附屬銷貨單</span>
+                                                  <span className="font-black">
                                                     {po.delivery_notes.length}{" "}
                                                     筆
                                                   </span>
@@ -1765,29 +1922,35 @@ const TracePage = () => {
                                             </div>
                                           ))
                                         ) : (
-                                          <div className="text-sm text-slate-400 text-center py-10 font-medium">
-                                            無資料
+                                          <div className="text-xs text-slate-400 text-center py-10">
+                                            無關聯生產單
                                           </div>
                                         )}
                                       </div>
                                     </div>
-                                    <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-col h-full hover:shadow-md transition-shadow">
-                                      <div className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
-                                        <div className="w-2 h-2 bg-amber-400 rounded-full"></div>{" "}
-                                        3. 尚未生產 ({mrpsList.length})
+
+                                    <div className="bg-white border border-slate-300 rounded-xl p-4 shadow-sm flex flex-col h-full">
+                                      <div className="text-xs font-black text-slate-500 uppercase tracking-wider mb-3 flex items-center justify-between">
+                                        <span className="flex items-center gap-2">
+                                          <span className="w-2 h-2 bg-amber-500 rounded-full" />
+                                          3. 尚未生產之訂購單
+                                        </span>
+                                        <span className="text-amber-800 font-bold text-xs bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
+                                          {mrpsList.length} 筆
+                                        </span>
                                       </div>
-                                      <div className="space-y-3 flex-1 overflow-y-auto max-h-[300px] pr-2 custom-scrollbar">
+                                      <div className="space-y-3 flex-1 overflow-y-auto max-h-[280px] pr-1">
                                         {mrpsList.length > 0 ? (
                                           mrpsList.map((mrp, idx) => (
                                             <div
                                               key={idx}
-                                              className="border border-slate-100 bg-slate-50/50 p-4 rounded-xl"
+                                              className="border border-slate-200 bg-slate-50/70 p-3.5 rounded-lg"
                                             >
-                                              <div className="flex justify-between font-mono text-sm mb-2">
-                                                <span className="font-black text-amber-600">
+                                              <div className="flex justify-between font-mono text-xs mb-1.5">
+                                                <span className="font-bold text-amber-700">
                                                   {mrp.mrp_id}
                                                 </span>
-                                                <span className="text-slate-400 text-xs">
+                                                <span className="text-slate-400 text-[11px]">
                                                   {
                                                     mrp.created_at?.split(
                                                       " ",
@@ -1795,26 +1958,32 @@ const TracePage = () => {
                                                   }
                                                 </span>
                                               </div>
-                                              <div className="text-sm font-bold text-slate-700">
-                                                預計用量:{" "}
-                                                <span className="font-mono font-black text-red-600 text-base ml-1">
+                                              <div className="flex justify-between items-center text-xs font-mono border-t border-slate-200 pt-1.5">
+                                                <span className="text-slate-500">
+                                                  預計用量:
+                                                </span>
+                                                <span className="font-bold text-red-600 text-sm">
                                                   {formatDisplayNum(
                                                     mrp.used_qty,
-                                                  )}
-                                                </span>{" "}
-                                                {mrp.unit}
+                                                  )}{" "}
+                                                  <span className="text-xs font-normal text-slate-600">
+                                                    {mrp.unit}
+                                                  </span>
+                                                </span>
                                               </div>
                                               {mrp.vendor_info?.name && (
-                                                <div className="text-xs text-slate-500 mt-2 pt-2 border-t border-slate-200 font-medium truncate">
+                                                <div className="text-[11px] text-slate-500 mt-2 pt-1.5 border-t border-dashed border-slate-200 truncate font-normal">
                                                   對應廠商:{" "}
-                                                  {mrp.vendor_info.name}
+                                                  <strong className="text-slate-700 font-bold">
+                                                    {mrp.vendor_info.name}
+                                                  </strong>
                                                 </div>
                                               )}
                                             </div>
                                           ))
                                         ) : (
-                                          <div className="text-sm text-slate-400 text-center py-10 font-medium">
-                                            無資料
+                                          <div className="text-xs text-slate-400 text-center py-10">
+                                            無待排產計畫
                                           </div>
                                         )}
                                       </div>
@@ -1829,8 +1998,8 @@ const TracePage = () => {
                     ) : (
                       <tr>
                         <td
-                          colSpan="7"
-                          className="p-16 text-center text-slate-500 text-lg font-medium"
+                          colSpan={6}
+                          className="p-16 text-center text-slate-500 text-base border border-slate-300"
                         >
                           {selectedMaterial
                             ? "找不到符合條件的追溯紀錄"

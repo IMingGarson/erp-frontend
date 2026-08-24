@@ -144,7 +144,7 @@ const TracePrintTemplate = ({ data }) => {
               [待補] {totalProductQty}
             </td>
             <td className="border border-black p-1">
-              {totalMaterialQty.toFixed(4)}
+              {totalMaterialQty.toFixed(5)}
             </td>
           </tr>
         </tbody>

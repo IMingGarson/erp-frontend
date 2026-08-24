@@ -349,7 +349,7 @@ const DocumentPreview = ({ quotation, vendors, allMaterials, boms }) => {
                       <td className="py-1.5 px-1">{b.childName}</td>
                       <td className="py-1.5 px-1 text-center">{b.childUnit}</td>
                       <td className="py-1.5 px-1 text-right">
-                        {b.qty.toFixed(4)}
+                        {b.qty.toFixed(5)}
                       </td>
                       <td className="py-1.5 px-1 text-right">{b.cost}</td>
                       <td className="py-1.5 px-1 text-center"></td>

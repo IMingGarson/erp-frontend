@@ -23,7 +23,7 @@ const getTodayString = (formatted = false) => {
 const formatNum = (num, type) => {
   if (num === null || num === undefined || isNaN(num) || num === "") return "0";
   if (type === "PACK") return Math.ceil(num).toString();
-  return parseFloat(Number(num).toFixed(4)).toString();
+  return parseFloat(Number(num).toFixed(5)).toString();
 };
 
 const TypeTag = ({ type }) => {
@@ -873,7 +873,7 @@ const RequirementOrderPage = () => {
                   ? ""
                   : isPack
                     ? Math.ceil(used).toString()
-                    : parseFloat(used.toFixed(4)).toString(),
+                    : parseFloat(used.toFixed(5)).toString(),
             };
           })
           .filter((b) => b.available > 0);

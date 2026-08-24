@@ -9,8 +9,11 @@ import {
   Plus,
   Trash2,
   PackageCheck,
+  Search,
+  ChevronDown,
 } from "lucide-react";
 import { useAuthStore } from "./store/authStore";
+
 const USEAGE_THRESHOLD = 1.8;
 const getTodayString = (formatted = false) => {
   const d = new Date();
@@ -23,7 +26,7 @@ const getTodayString = (formatted = false) => {
 const formatNum = (num, type) => {
   if (num === null || num === undefined || isNaN(num) || num === "") return "0";
   if (type === "PACK") return Math.ceil(num).toString();
-  return parseFloat(Number(num).toFixed(4)).toString();
+  return parseFloat(Number(num).toFixed(5)).toString();
 };
 
 const TypeTag = ({ type }) => {
@@ -51,50 +54,409 @@ const TypeTag = ({ type }) => {
   };
   return (
     <span
-      className={`inline-block text-center min-w-[56px] px-2 py-0.5 rounded text-xs font-bold border flex-shrink-0 ${typeData.css}`}
+      className={`inline-block text-center min-w-[56px] px-2 py-0.5 rounded-md text-xs font-bold border flex-shrink-0 ${typeData.css}`}
     >
       {typeData.label}
     </span>
   );
 };
 
-// 處理營養標示 JSON 格式轉換的 Helper
-const parseNutrition = (facts) => {
-  if (!facts) return null;
+// ==========================================
+// 共用下拉選單元件 (Apple Style 調整)
+// ==========================================
+const FilterableDropdown = ({
+  value,
+  onChange,
+  options,
+  placeholder,
+  disabled,
+  renderItem,
+}) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+  const dropdownRef = useRef(null);
 
-  if (facts.per_serving || facts.per_100g) {
-    return {
-      info: `每一份量 ${facts.serving_size_g || "-"} 公克，本包裝含 ${facts.servings_per_container || "-"} 份`,
-      perServing: {
-        熱量: `${facts.per_serving?.calories_kcal ?? "-"} 大卡`,
-        蛋白質: `${facts.per_serving?.protein_g ?? "-"} 公克`,
-        脂肪: `${facts.per_serving?.fat_g ?? "-"} 公克`,
-        飽和脂肪: `${facts.per_serving?.saturated_fat_g ?? "-"} 公克`,
-        反式脂肪: `${facts.per_serving?.trans_fat_g ?? "-"} 公克`,
-        碳水化合物: `${facts.per_serving?.carbs_g ?? "-"} 公克`,
-        糖: `${facts.per_serving?.sugar_g ?? "-"} 公克`,
-        鈉: `${facts.per_serving?.sodium_mg ?? "-"} 毫克`,
-      },
-      per100g: {
-        熱量: `${facts.per_100g?.calories_kcal ?? "-"} 大卡`,
-        蛋白質: `${facts.per_100g?.protein_g ?? "-"} 公克`,
-        脂肪: `${facts.per_100g?.fat_g ?? "-"} 公克`,
-        飽和脂肪: `${facts.per_100g?.saturated_fat_g ?? "-"} 公克`,
-        反式脂肪: `${facts.per_100g?.trans_fat_g ?? "-"} 公克`,
-        碳水化合物: `${facts.per_100g?.carbs_g ?? "-"} 公克`,
-        糖: `${facts.per_100g?.sugar_g ?? "-"} 公克`,
-        鈉: `${facts.per_100g?.sodium_mg ?? "-"} 毫克`,
-      },
+  const filteredOptions = options.filter(
+    (opt) =>
+      (opt.name || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (opt.code || "").toLowerCase().includes(searchTerm.toLowerCase()),
+  );
+
+  const selectedOpt = options.find((o) => String(o.id) === String(value));
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+        setIsOpen(false);
+      }
     };
-  }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
-  return {
-    info: facts["份量資訊"] || "",
-    perServing: facts["每份"] || {},
-    per100g: facts["每100公克"] || {},
-  };
+  return (
+    <div className="relative w-full" ref={dropdownRef}>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => setIsOpen(!isOpen)}
+        className={`w-full h-[42px] px-3.5 py-2 rounded-lg text-[14px] flex justify-between items-center transition-all duration-200 ${
+          disabled
+            ? "bg-slate-50 text-slate-400 cursor-not-allowed border border-slate-200"
+            : isOpen
+              ? "border border-blue-500 ring-4 ring-blue-500/10 bg-white"
+              : "bg-white border border-slate-200 hover:border-slate-300 text-slate-800 shadow-sm"
+        }`}
+      >
+        <span className="truncate pr-2 font-medium">
+          {selectedOpt ? (
+            renderItem ? (
+              renderItem(selectedOpt)
+            ) : (
+              selectedOpt.name
+            )
+          ) : (
+            <span className="text-slate-400 font-normal">{placeholder}</span>
+          )}
+        </span>
+        <ChevronDown size={16} className="text-slate-400 flex-shrink-0" />
+      </button>
+
+      {isOpen && !disabled && (
+        <div className="absolute z-50 top-[calc(100%+6px)] left-0 w-full bg-white border border-slate-200 rounded-xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] flex flex-col max-h-72 overflow-hidden animate-in fade-in zoom-in-95 duration-100">
+          <div className="p-2 border-b border-slate-100 bg-slate-50/50 shrink-0">
+            <div className="relative">
+              <Search
+                size={14}
+                className="absolute left-3 top-2.5 text-slate-400"
+              />
+              <input
+                autoFocus
+                className="w-full border-none bg-slate-100 rounded-lg pl-9 pr-3 py-2 text-[14px] focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all"
+                placeholder="搜尋代碼或名稱..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+            </div>
+          </div>
+          <div className="overflow-y-auto flex-1 p-1.5 custom-scrollbar">
+            {filteredOptions.length > 0 ? (
+              filteredOptions.map((opt) => (
+                <div
+                  key={opt.id}
+                  onClick={() => {
+                    onChange(opt.id);
+                    setIsOpen(false);
+                    setSearchTerm("");
+                  }}
+                  className={`px-3 py-2.5 text-[14px] rounded-lg cursor-pointer transition-colors ${
+                    String(value) === String(opt.id)
+                      ? "bg-blue-500 text-white font-medium shadow-sm"
+                      : "text-slate-700 hover:bg-slate-100"
+                  }`}
+                >
+                  {renderItem ? renderItem(opt) : opt.name}
+                </div>
+              ))
+            ) : (
+              <div className="px-3 py-6 text-center text-slate-400 text-[13px]">
+                查無資料
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 };
 
+// ==========================================
+// 批號操作子元件
+// ==========================================
+const BatchRow = ({
+  orderId,
+  matId,
+  batch,
+  matType,
+  unit,
+  onSave,
+  readyOnly = false,
+}) => {
+  const [tempValue, setTempValue] = useState(batch.used);
+  useEffect(() => {
+    setTempValue(batch.used);
+  }, [batch.used]);
+
+  const isModified = tempValue !== batch.used;
+  const handleInternalSave = () => {
+    let val = tempValue;
+    if (val !== "") {
+      let parsedVal = parseFloat(val);
+      if (isNaN(parsedVal) || parsedVal < 0) {
+        setTempValue(batch.used);
+        return;
+      }
+      if (parsedVal > batch.available) {
+        val =
+          matType === "PACK"
+            ? Math.floor(batch.available).toString()
+            : batch.available.toString();
+      }
+    }
+    setTempValue(val);
+    onSave(orderId, matId, batch.id, val);
+  };
+
+  const totalCapacity = parseFloat(batch.available) || 0;
+  const usedQty = parseFloat(tempValue) || 0;
+  const remainingQty = Math.max(0, totalCapacity - usedQty);
+  const usagePercent =
+    totalCapacity > 0 ? Math.min(100, (usedQty / totalCapacity) * 100) : 0;
+  const isFullyUsed = usagePercent >= 100;
+
+  return (
+    <div
+      className={`relative flex flex-col bg-white border p-4 rounded-xl transition-all duration-300 w-full min-h-[110px] ${isModified ? "border-amber-400 ring-2 ring-amber-50 shadow-md" : "border-slate-200 hover:border-blue-300 hover:shadow-md shadow-sm"}`}
+    >
+      <div className="flex justify-between items-start mb-4 gap-4">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 mb-1">
+            <span
+              className={`w-2 h-2 rounded-full shrink-0 ${usedQty > 0 ? (isFullyUsed ? "bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.6)]" : "bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.6)]") : "bg-slate-300"}`}
+            ></span>
+            <h4
+              className="text-[13px] font-black text-slate-800 truncate tracking-wider"
+              title={batch.batch_number}
+            >
+              {batch.batch_number}
+            </h4>
+          </div>
+          {batch.received_date && (
+            <div className="text-[10px] text-slate-400 ml-4">
+              保存期限: {new Date(batch.received_date).toLocaleDateString()}
+            </div>
+          )}
+        </div>
+        <div className="flex flex-col items-end shrink-0">
+          {!readyOnly ? (
+            <div className="flex items-center gap-2">
+              <div className="relative">
+                <input
+                  type="number"
+                  step={matType === "PACK" ? "1" : "0.01"}
+                  min={0}
+                  value={tempValue}
+                  onChange={(e) => setTempValue(e.target.value)}
+                  placeholder="0"
+                  className={`w-24 px-2 py-1.5 text-right text-[13px] font-bold border rounded-md transition-all duration-200 focus:outline-none ${isModified ? "bg-amber-50 border-amber-400 text-amber-900 focus:ring-2 focus:ring-amber-200" : usedQty > 0 ? "border-blue-300 bg-blue-50 text-blue-700 focus:ring-2 focus:ring-blue-200" : "border-slate-200 text-slate-600 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-blue-100"}`}
+                />
+                <span className="absolute -top-1 -right-1 flex h-2.5 w-2.5">
+                  {isModified && (
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                  )}
+                  <span
+                    className={`relative inline-flex rounded-full h-2.5 w-2.5 ${isModified ? "bg-amber-500" : "hidden"}`}
+                  ></span>
+                </span>
+              </div>
+              <div
+                className={`overflow-hidden transition-all duration-300 ease-in-out max-w-[60px] opacity-100`}
+              >
+                <button
+                  onClick={handleInternalSave}
+                  className="px-2.5 py-1.5 bg-amber-500 text-white text-[12px] font-bold rounded-md hover:bg-amber-600 active:scale-95 shadow-md whitespace-nowrap"
+                >
+                  儲存
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="bg-slate-50 px-3 py-1.5 rounded-md border border-slate-200 text-center shadow-inner min-w-[60px]">
+              <span
+                className={`text-[13px] font-bold ${usedQty > 0 ? "text-blue-600" : "text-slate-400"}`}
+              >
+                {tempValue || "0"}
+              </span>
+            </div>
+          )}
+        </div>
+      </div>
+      <div className="mt-auto">
+        <div className="flex justify-between items-end mb-1.5 text-[10px] font-bold text-slate-500">
+          <span>
+            本次分配:{" "}
+            <span
+              className={`text-[11px] ${usedQty > 0 ? "text-blue-600" : ""}`}
+            >
+              {formatNum(usedQty, matType)}
+            </span>{" "}
+            {unit}
+          </span>
+          <span>
+            庫存剩餘:{" "}
+            <span className="text-[11px] text-slate-700">
+              {formatNum(remainingQty, matType)}
+            </span>{" "}
+            {unit}
+          </span>
+        </div>
+        <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden border border-slate-200/50 shadow-inner">
+          <div
+            className={`h-full rounded-full transition-all duration-500 ease-out relative ${isFullyUsed ? "bg-amber-400" : usedQty > 0 ? "bg-blue-500" : "bg-transparent"}`}
+            style={{ width: `${usagePercent}%` }}
+          >
+            {usedQty > 0 && !isFullyUsed && (
+              <div className="absolute top-0 right-0 bottom-0 w-8 bg-gradient-to-r from-transparent to-white/30"></div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ==========================================
+// 庫存分配列表 Component
+// ==========================================
+const MaterialAllocationList = ({
+  itemId,
+  readyOnly = false,
+  allocations,
+  expandedMaterials,
+  toggleMaterialExpanded,
+  handleBatchUsageSave,
+}) => {
+  const itemAlloc = allocations[itemId];
+  if (!itemAlloc)
+    return (
+      <div className="p-4 text-slate-400 text-[13px]">尚未分配物料...</div>
+    );
+
+  const sortedMaterials = Object.entries(itemAlloc)
+    .filter(([k]) => k !== "_base_qty" && k !== "_productId")
+    .sort(([idA, matA], [idB, matB]) => {
+      const typePriority = { SEMI: 1, RAW: 2, PACK: 3, PRODUCT: 4 };
+      const pA = typePriority[matA.type?.toUpperCase()] || 99;
+      const pB = typePriority[matB.type?.toUpperCase()] || 99;
+
+      if (pA !== pB) return pA - pB;
+      return matB.requiredQty - matA.requiredQty;
+    });
+
+  if (sortedMaterials.length === 0) {
+    return (
+      <div className="p-6 text-center text-slate-400 border border-dashed rounded-lg bg-slate-50/50 text-[13px]">
+        此項目無須分配底層物料庫存，子單據已負責其原料。
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3 w-full min-w-0">
+      {sortedMaterials.map(([matId, mat]) => {
+        const totalAllocated = mat.batches.reduce(
+          (sum, b) => sum + (parseFloat(b.used) || 0),
+          0,
+        );
+        const isUnder = totalAllocated < mat.requiredQty - 0.0001;
+        const isOver = totalAllocated > mat.maxQty + 0.0001;
+        const expandedKey = `${itemId}-${matId}`;
+        const isExpanded = expandedMaterials.includes(expandedKey);
+
+        const borderColor = isUnder
+          ? "border-red-300"
+          : isOver
+            ? "border-amber-300"
+            : "border-slate-200";
+        const bgColor = isUnder
+          ? "bg-red-50/30"
+          : isOver
+            ? "bg-amber-50/20"
+            : "bg-white";
+
+        const sortedBatches = [...mat.batches].sort((a, b) => {
+          const usedA = parseFloat(a.used) || 0;
+          const usedB = parseFloat(b.used) || 0;
+          return usedB - usedA;
+        });
+
+        return (
+          <div
+            key={matId}
+            className={`border rounded-lg overflow-hidden transition-colors ${borderColor}`}
+          >
+            <div
+              className={`p-3 flex flex-col md:flex-row justify-between items-start md:items-center cursor-pointer hover:bg-slate-50 ${bgColor}`}
+              onClick={() => toggleMaterialExpanded(expandedKey)}
+            >
+              <div className="flex items-center gap-3 flex-1 min-w-0">
+                <span className="text-slate-400 text-[10px] w-4 flex-shrink-0">
+                  {isExpanded ? "▼" : "▶"}
+                </span>
+                <TypeTag type={mat.type} />
+                <span className="font-bold text-slate-700 truncate text-[13px]">
+                  {mat.materialName}
+                </span>
+              </div>
+              <div className="flex items-center gap-4 text-[12px] w-full md:w-auto justify-end">
+                {isUnder ? (
+                  <span className="font-bold text-red-600 animate-pulse">
+                    庫存不足！缺少{" "}
+                    {formatNum(mat.requiredQty - totalAllocated, mat.type)}{" "}
+                    {mat.unit}
+                  </span>
+                ) : (
+                  <span
+                    className={`font-bold ${isOver ? "text-amber-600" : "text-emerald-600"}`}
+                  >
+                    已分配 {formatNum(totalAllocated, mat.type)} {mat.unit}
+                  </span>
+                )}
+              </div>
+            </div>
+            {isExpanded && (
+              <div className="bg-slate-50 p-3 border-t border-slate-200 w-full min-w-0">
+                <div className="mb-2 flex flex-col md:flex-row justify-between items-start md:items-center border-b border-slate-200 pb-2 gap-2">
+                  <span className="text-xs font-bold text-slate-500">
+                    批號分配
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] bg-white px-2 py-1 rounded border border-slate-200 text-slate-500">
+                      需求: <b>{formatNum(mat.requiredQty, mat.type)}</b>{" "}
+                      {mat.unit}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex overflow-x-auto gap-4 pb-4 pt-1 snap-x custom-scrollbar w-full min-w-0">
+                  {sortedBatches.map((b) => (
+                    <div
+                      key={b.id}
+                      className="w-[85vw] sm:w-[360px] flex-shrink-0 snap-start"
+                    >
+                      <BatchRow
+                        orderId={itemId}
+                        matId={matId}
+                        batch={b}
+                        matType={mat.type}
+                        unit={mat.unit}
+                        onSave={handleBatchUsageSave}
+                        readyOnly={readyOnly}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
+// ==========================================
+// BOM 結構樹 Component
+// ==========================================
 const BomNode = ({ node, level = 0 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
 
@@ -127,7 +489,7 @@ const BomNode = ({ node, level = 0 }) => {
 
   return (
     <div
-      className={`mb-3 overflow-hidden rounded-lg shadow-sm bg-white border border-slate-200 ${level > 0 ? "ml-4 md:ml-8 border-l-4 border-l-blue-400" : ""}`}
+      className={`mb-3 overflow-hidden rounded-xl shadow-sm bg-white border border-slate-200 ${level > 0 ? "ml-4 md:ml-8 border-l-4 border-l-blue-400" : ""}`}
     >
       <div
         className={`p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center transition-colors ${isExpandable ? "cursor-pointer hover:bg-slate-50" : ""}`}
@@ -141,7 +503,7 @@ const BomNode = ({ node, level = 0 }) => {
           </span>
           <TypeTag type={node.type} />
           <span
-            className="font-bold text-slate-800 text-lg truncate"
+            className="font-bold text-slate-800 text-[15px] truncate"
             title={node.name}
           >
             {node.name}
@@ -149,13 +511,13 @@ const BomNode = ({ node, level = 0 }) => {
 
           <div className="ml-auto flex items-center gap-2 pr-4 sm:pr-0">
             {node.qtyRequired && (
-              <span className="flex-shrink-0 text-sm text-blue-700 font-medium bg-blue-50 px-2.5 py-0.5 rounded border border-blue-200 shadow-sm">
+              <span className="flex-shrink-0 text-xs text-blue-700 font-medium bg-blue-50 px-2.5 py-1 rounded-md border border-blue-200">
                 用量: {parseFloat(node.qtyRequired).toString()} {node.unit}
               </span>
             )}
 
             {isLowStock && (
-              <span className="flex-shrink-0 px-2 py-0.5 bg-red-100 text-red-700 text-xs font-bold rounded border border-red-200 shadow-sm">
+              <span className="flex-shrink-0 px-2 py-1 bg-red-50 text-red-600 text-xs font-bold rounded-md border border-red-200">
                 ⚠️ 低水位
               </span>
             )}
@@ -164,15 +526,15 @@ const BomNode = ({ node, level = 0 }) => {
 
         {node.type !== "SEMI" && (
           <div className="mt-2 sm:mt-0 flex-shrink-0 flex items-baseline w-full sm:w-auto pl-7 sm:pl-0">
-            <span className="text-slate-500 text-sm font-medium w-24 sm:text-right">
+            <span className="text-slate-500 text-[13px] font-medium w-24 sm:text-right">
               現有庫存：
             </span>
             <span
-              className={`text-xl font-black w-24 text-right tracking-tight ${isLowStock ? "text-red-600" : "text-slate-800"}`}
+              className={`text-lg font-black w-24 text-right tracking-tight ${isLowStock ? "text-red-600" : "text-slate-800"}`}
             >
               {(node.totalInventory || 0).toFixed(2)}
             </span>
-            <span className="text-sm font-normal text-slate-500 w-12 text-left ml-2">
+            <span className="text-xs font-normal text-slate-500 w-12 text-left ml-2">
               {node.unit}
             </span>
           </div>
@@ -180,11 +542,11 @@ const BomNode = ({ node, level = 0 }) => {
       </div>
 
       {isExpanded && (
-        <div className="bg-slate-50 p-4 border-t border-slate-200">
+        <div className="bg-slate-50/50 p-4 border-t border-slate-100">
           {hasChildren && (
             <div className="mb-5">
-              <div className="text-sm font-bold text-slate-500 mb-3 uppercase tracking-wider flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-blue-400"></span>
+              <div className="text-[12px] font-bold text-slate-500 mb-3 uppercase tracking-wider flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-blue-400"></span>
                 配方組成
               </div>
               {recipeChildren.map((child) => (
@@ -194,9 +556,9 @@ const BomNode = ({ node, level = 0 }) => {
           )}
 
           {hasPacks && (
-            <div className="mb-5 bg-amber-50/50 p-3 rounded-lg border border-amber-100">
-              <div className="text-sm font-bold text-amber-700 mb-3 uppercase tracking-wider flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+            <div className="mb-5 bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
+              <div className="text-[12px] font-bold text-slate-500 mb-3 uppercase tracking-wider flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
                 包裝耗材
               </div>
               {packChildren.map((child) => (
@@ -207,8 +569,8 @@ const BomNode = ({ node, level = 0 }) => {
 
           {hasBatches && (
             <div>
-              <div className="text-sm font-bold text-slate-500 mb-3 uppercase tracking-wider flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+              <div className="text-[12px] font-bold text-slate-500 mb-3 uppercase tracking-wider flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
                 可用批號明細
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -219,24 +581,24 @@ const BomNode = ({ node, level = 0 }) => {
                   return (
                     <div
                       key={b.id}
-                      className={`bg-white border p-3 rounded-md shadow-sm ${batchLow ? "border-red-200 bg-red-50/30" : "border-slate-200"}`}
+                      className={`bg-white border p-3 rounded-lg shadow-sm ${batchLow ? "border-red-200 bg-red-50" : "border-slate-200"}`}
                     >
-                      <div className="flex justify-between items-center mb-2">
-                        <span className="font-mono text-sm font-bold text-slate-700">
+                      <div className="flex justify-between items-center mb-1">
+                        <span className="font-mono text-[13px] font-bold text-slate-700">
                           {b.batch_number}
                         </span>
-                        <span className="text-xs text-slate-400 font-medium">
+                        <span className="text-[11px] text-slate-400 font-medium">
                           {b.received_date}
                         </span>
                       </div>
-                      <div className="text-right text-sm border-t border-slate-100 pt-2 mt-1">
+                      <div className="text-right text-[13px] pt-1">
                         剩餘：
                         <span
                           className={`font-black ml-1 ${batchLow ? "text-red-600" : "text-emerald-600"}`}
                         >
                           {parseFloat(b.remaining_qty).toFixed(2)}
                         </span>{" "}
-                        <span className="text-xs text-slate-500">
+                        <span className="text-[11px] text-slate-500">
                           {node.unit}
                         </span>
                       </div>
@@ -248,7 +610,7 @@ const BomNode = ({ node, level = 0 }) => {
           )}
 
           {!hasChildren && !hasPacks && !hasBatches && (
-            <div className="text-sm text-slate-400 italic py-3 text-center border border-dashed border-slate-200 rounded bg-slate-50/50">
+            <div className="text-[13px] text-slate-400 italic py-3 text-center border border-dashed border-slate-200 rounded-lg bg-white">
               目前無可用庫存或配方資料。
             </div>
           )}
@@ -258,6 +620,9 @@ const BomNode = ({ node, level = 0 }) => {
   );
 };
 
+// ==========================================
+// Main Page Component
+// ==========================================
 const RequirementOrderPage = () => {
   const isAdmin = useAuthStore((state) => state.isAdmin());
   const [materials, setMaterials] = useState([]);
@@ -285,8 +650,6 @@ const RequirementOrderPage = () => {
     logisticsProvider: "",
     notes: "",
   });
-  const [vendorSearch, setVendorSearch] = useState("");
-  const [isVendorDropdownOpen, setIsVendorDropdownOpen] = useState(false);
 
   const createEmptyRow = (seq = 1) => ({
     id: `P${getTodayString()}${String(seq).padStart(3, "0")}`,
@@ -296,9 +659,10 @@ const RequirementOrderPage = () => {
     spec: "",
     quantity: "",
     unit: "",
+    sales_unit_quantity: 1,
+    sales_pack_unit: "",
+    sales_pack_quantity: 1,
     unit_price: "",
-    used_batch_number: "",
-    note: "",
   });
 
   const [formItems, setFormItems] = useState([createEmptyRow()]);
@@ -319,13 +683,8 @@ const RequirementOrderPage = () => {
     };
   }, [formItems]);
 
-  const [activeDropdownRow, setActiveDropdownRow] = useState(null);
-  const [productSearchTerm, setProductSearchTerm] = useState("");
-  const [productDropdownStyle, setProductDropdownStyle] = useState({});
-
   const [orderItems, setOrderItems] = useState([]);
   const [activeTabIds, setActiveTabIds] = useState({});
-
   const [allocations, setAllocations] = useState({});
   const [expandedMaterials, setExpandedMaterials] = useState([]);
   const [expandedMrpIds, setExpandedMrpIds] = useState([]);
@@ -505,20 +864,13 @@ const RequirementOrderPage = () => {
       setLoading(false);
     }
   };
-
-  const producsAndSemis = useMemo(() => {
-    return materials.filter((m) => m.type === "PRODUCT" || m.type === "SEMI");
+  // TODO: comment for dev
+  const readyProducts = useMemo(() => {
+    // return materials.filter(
+    //   (m) => m.type === "PRODUCT" && m.phase === "IN_PROD",
+    // );
+    return materials.filter((m) => m.type === "PRODUCT");
   }, [materials]);
-
-  const filteredProducts = useMemo(() => {
-    const term = productSearchTerm.toLowerCase();
-    return producsAndSemis.filter(
-      (m) =>
-        (m.name && m.name.toLowerCase().includes(term)) ||
-        (m.code && m.code.toLowerCase().includes(term)) ||
-        (m.type && m.type.toLowerCase().includes(term)),
-    );
-  }, [producsAndSemis, productSearchTerm]);
 
   const handleDeleteDraft = (id) => {
     showConfirm("確認刪除", "確定刪除此單項嗎？", async () => {
@@ -545,16 +897,6 @@ const RequirementOrderPage = () => {
     });
   };
 
-  const filteredVendors = useMemo(() => {
-    if (!vendorSearch) return vendors;
-    const term = vendorSearch.toLowerCase();
-    return vendors.filter((v) => {
-      const matchName = (v.name || "").toLowerCase().includes(term);
-      const matchCode = (v.code || "").toLowerCase().includes(term);
-      return matchName || matchCode;
-    });
-  }, [vendors, vendorSearch]);
-
   const handleSelectVendor = (v) => {
     setVendorData({
       ...vendorData,
@@ -567,25 +909,6 @@ const RequirementOrderPage = () => {
       address: v.address || "",
       contact: v.contact_person || "",
     });
-    setVendorSearch(v.name);
-    setIsVendorDropdownOpen(false);
-  };
-
-  const handleVendorSearchChange = (e) => {
-    setVendorSearch(e.target.value);
-    setIsVendorDropdownOpen(true);
-    if (!e.target.value) {
-      setVendorData((prev) => ({
-        ...prev,
-        id: "",
-        name: "",
-        tax_id: "",
-        phone: "",
-        fax: "",
-        address: "",
-        contact: "",
-      }));
-    }
   };
 
   const handleAddRow = () => {
@@ -604,39 +927,12 @@ const RequirementOrderPage = () => {
     );
   };
 
-  const handleToggleProductDropdown = (e, rowId) => {
-    if (activeDropdownRow !== rowId) {
-      const rect = e.currentTarget.getBoundingClientRect();
-      const viewportHeight = window.innerHeight;
-
-      const dropdownEstimatedHeight = 260;
-      const spaceBelow = viewportHeight - rect.bottom;
-      const spaceAbove = rect.top;
-
-      let dynamicStyle = {
-        left: `${rect.left}px`,
-        width: `${rect.width}px`,
-      };
-
-      if (spaceBelow < dropdownEstimatedHeight && spaceAbove > spaceBelow) {
-        dynamicStyle.bottom = `${viewportHeight - rect.top + 4}px`;
-      } else {
-        dynamicStyle.top = `${rect.bottom + 4}px`;
-      }
-
-      setProductDropdownStyle(dynamicStyle);
-      setActiveDropdownRow(rowId);
-      setProductSearchTerm("");
-    } else {
-      setActiveDropdownRow(null);
-    }
-  };
-
   const handleSelectProduct = (rowId, product) => {
     const profile =
       product.product_profiles && product.product_profiles.length > 0
         ? product.product_profiles[0]
         : {};
+
     setFormItems((prev) =>
       prev.map((item) =>
         item.id === rowId
@@ -645,37 +941,72 @@ const RequirementOrderPage = () => {
               product_id: product.id,
               product_code: product.code || "",
               product_name: product.name || "",
-              spec: product.product_profile?.spec || "",
-              unit: product.product_profile?.sales_unit || product.unit || "",
-              unit_price: product.product_profile?.sales_price || "",
+              spec: profile.spec || "",
+              unit: profile.sales_unit || product.unit || "",
+              unit_price: profile.sales_price || "",
               sales_unit_quantity: profile.sales_unit_quantity || 1,
+              sales_pack_unit: profile.sales_pack_unit || "",
               sales_pack_quantity: profile.sales_pack_quantity || 1,
             }
           : item,
       ),
     );
-    setActiveDropdownRow(null);
   };
 
   useEffect(() => {
     let newOrderItems = [];
     const newActiveTabIds = {};
+    let hasCapacityError = false;
 
-    formItems.forEach((fItem) => {
-      if (!fItem.product_id || Number(fItem.quantity) <= 0) return;
+    for (const fItem of formItems) {
+      if (!fItem.product_id || Number(fItem.quantity) <= 0) continue;
 
       const product = materials.find(
         (m) => String(m.id) === String(fItem.product_id),
       );
-      if (!product) return;
+      if (!product) continue;
 
-      // 抓取 BOM 換算比例
       const orderQty = Number(fItem.quantity) || 0;
       const unitQty = Number(fItem.sales_unit_quantity) || 1;
       const packQty = Number(fItem.sales_pack_quantity) || 1;
 
-      // 目標數量 = 訂單數量 × (包數 / 箱數)
-      const qty = orderQty * (packQty / unitQty);
+      // ==========================================
+      // 1. 從 BOM 與 Material 中擷取每包/桶的淨重 (pack_capacity)
+      // ==========================================
+      const packMaterials = boms.filter(
+        (b) =>
+          String(b.parent?.id) === String(fItem.product_id) &&
+          b.child &&
+          b.child.type === "PACK",
+      );
+
+      let capacityPerPack = null;
+      for (const pm of packMaterials) {
+        if (pm.child && pm.child.pack_capacity) {
+          capacityPerPack = parseFloat(pm.child.pack_capacity);
+        }
+      }
+
+      // ==========================================
+      // 2. 嚴格防呆：如果沒有抓到容量，直接阻斷並報錯
+      // ==========================================
+      if (!capacityPerPack) {
+        hasCapacityError = true;
+        setTimeout(() => {
+          showAlert(
+            "包材容量資料有誤",
+            `無法計算產品「${product.name}」的實際重量！請確認該成品的 BOM 表中是否已加入包材，且該包材的「包材容量/淨重」欄位已有設定數值。`,
+            "error",
+          );
+        }, 0);
+        break;
+      }
+
+      // ==========================================
+      // 3. 計算真正的「製令總重量 (KG)」
+      // 總重量 = 訂購數量(箱/桶) × (包裝數 / 銷售數) × 淨重
+      // ==========================================
+      const totalWeightKG = orderQty * (packQty / unitQty) * capacityPerPack;
 
       const motherId = fItem.id;
       const generatedItems = [];
@@ -688,6 +1019,7 @@ const RequirementOrderPage = () => {
         const children = boms.filter(
           (b) => String(b.parent?.id) === String(matId),
         );
+
         children.forEach((c) => {
           const childMat = c.child;
           if (
@@ -707,20 +1039,28 @@ const RequirementOrderPage = () => {
           productId: mat.id,
           name: mat.name,
           type: mat.type,
-          qty: parseFloat(Number(currentQty).toFixed(2)),
-          unit: mat.unit,
+          qty: parseFloat(Number(currentQty).toFixed(5)),
+          unit: "KG", // 強制設為 KG
           productCode: mat.code,
         });
       };
 
-      buildDrafts(fItem.product_id, qty, motherId);
+      buildDrafts(fItem.product_id, totalWeightKG, motherId);
+
       generatedItems.reverse();
       newOrderItems = [...newOrderItems, ...generatedItems];
 
       if (generatedItems.length > 0) {
         newActiveTabIds[fItem.id] = generatedItems[0].id;
       }
-    });
+    }
+
+    if (hasCapacityError) {
+      // 只要有一筆資料出錯，就清空下方展開的配方庫存區塊，避免顯示錯誤的運算結果
+      setOrderItems([]);
+      setActiveTabIds({});
+      return;
+    }
 
     setOrderItems(newOrderItems);
 
@@ -886,7 +1226,7 @@ const RequirementOrderPage = () => {
                   ? ""
                   : isPack
                     ? Math.ceil(used).toString()
-                    : parseFloat(used.toFixed(4)).toString(),
+                    : parseFloat(used.toFixed(5)).toString(),
             };
           })
           .filter((b) => b.available > 0);
@@ -1102,8 +1442,6 @@ const RequirementOrderPage = () => {
             notes: vendorData.notes,
             batch_id: submissionBatchId,
           },
-          note: item.note,
-          used_batch_number: item.used_batch_number,
         };
         const coRes = await fetchWithAuth("/api/customer_orders", {
           method: "POST",
@@ -1135,7 +1473,6 @@ const RequirementOrderPage = () => {
         notes: "",
       });
       setActiveTabIds({});
-      setVendorSearch("");
       fetchData();
     } catch (err) {
       showAlert("暫存失敗", err.message, "error");
@@ -1144,14 +1481,12 @@ const RequirementOrderPage = () => {
     }
   };
 
-  // 預覽單項單據 (只針對被點擊的這個 d)
   const handlePreviewOrder = (order, e) => {
     if (e) e.stopPropagation();
     setPreviewData(order);
     setIsPreviewModalOpen(true);
   };
 
-  // 預覽合併單據 (針對整個 group)
   const handlePreviewBatch = (group, e) => {
     if (e) e.stopPropagation();
     const combinedCmoArray = group.plans.flatMap((p) => {
@@ -1172,7 +1507,6 @@ const RequirementOrderPage = () => {
     setIsPreviewModalOpen(true);
   };
 
-  // 列印單項單據 (只針對被點擊的這個 d)
   const handlePrintOrder = (order, e) => {
     if (e) e.stopPropagation();
     setPrintData(order);
@@ -1189,7 +1523,6 @@ const RequirementOrderPage = () => {
     }, 150);
   };
 
-  // 列印合併單據 (針對整個 group)
   const handlePrintBatch = (group, e) => {
     if (e) e.stopPropagation();
 
@@ -1216,7 +1549,6 @@ const RequirementOrderPage = () => {
     }, 150);
   };
 
-  // 在預覽 Modal 裡點擊列印
   const handlePrintPreview = () => {
     if (previewData) {
       setPrintData(previewData);
@@ -1260,7 +1592,6 @@ const RequirementOrderPage = () => {
     );
   };
 
-  // ======= 批量轉生產單 (Promise.all) =======
   const handleBatchConvertToProduction = (group, e) => {
     if (e) e.stopPropagation();
     showConfirm(
@@ -1273,27 +1604,24 @@ const RequirementOrderPage = () => {
           const promises = group.plans
             .filter((d) => d.status.toUpperCase() === "PENDING")
             .map(async (d) => {
-              console.log("mrp_id", d.id);
-              return null;
+              const res = await fetchWithAuth(
+                "/api/mrp/convert_to_production",
+                {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ mrp_id: d.id }),
+                },
+              );
 
-              // const res = await fetchWithAuth(
-              //   "/api/mrp/convert_to_production",
-              //   {
-              //     method: "POST",
-              //     headers: { "Content-Type": "application/json" },
-              //     body: JSON.stringify({ mrp_id: d.id }),
-              //   },
-              // );
+              const json = await res.json();
 
-              // const json = await res.json();
+              if (!res.ok) {
+                throw new Error(
+                  json.error || `單據 ${d.product_name} 轉換失敗`,
+                );
+              }
 
-              // if (!res.ok) {
-              //   throw new Error(
-              //     json.error || `單據 ${d.product_name} 轉換失敗`,
-              //   );
-              // }
-
-              // return json;
+              return json;
             });
 
           await Promise.all(promises);
@@ -1371,8 +1699,6 @@ const RequirementOrderPage = () => {
         subtotal: Math.round(
           Number(item.quantity || 0) * Number(item.unit_price || 0),
         ),
-        note: item.note,
-        used_batch_number: item.used_batch_number,
       }));
     } else {
       const cmoArray =
@@ -1417,8 +1743,6 @@ const RequirementOrderPage = () => {
         unit: co.unit || order.unit,
         unit_price: co.unit_price || order.unit_price,
         subtotal: co.total_amount || order.total_amount,
-        note: co.note || order.note,
-        used_batch_number: co.used_batch_number || order.used_batch_number,
       }));
     }
 
@@ -1523,11 +1847,8 @@ const RequirementOrderPage = () => {
               <th className="border border-black px-1 py-1 w-[10%] font-normal">
                 小計
               </th>
-              <th className="border border-black px-1 py-1 w-[5%] font-normal">
-                附註
-              </th>
-              <th className="border border-black px-1 py-1 w-[7%] font-normal">
-                批號編號
+              <th className="border border-black px-1 py-1 w-[12%] font-normal">
+                備註
               </th>
             </tr>
           </thead>
@@ -1578,14 +1899,7 @@ const RequirementOrderPage = () => {
                 </td>
                 <td
                   className={`border border-black px-1 py-1 ${item ? "text-left" : ""}`}
-                >
-                  {item ? item.note : ""}
-                </td>
-                <td
-                  className={`border border-black px-1 py-1 ${item ? "text-left" : ""}`}
-                >
-                  {item ? item.used_batch_number : ""}
-                </td>
+                ></td>
               </tr>
             ))}
           </tbody>
@@ -1680,14 +1994,14 @@ const RequirementOrderPage = () => {
           </div>
         </div>
 
-        <div className="bg-blue-50 text-blue-800 text-sm p-4 rounded-lg mb-6 border border-blue-100">
-          <p className="flex items-center gap-2 font-medium mb-1">
+        <div className="bg-blue-50 text-blue-800 text-[13px] p-4 rounded-xl mb-6 border border-blue-100 shadow-[0_2px_10px_rgba(0,0,0,0.02)]">
+          <p className="flex items-center gap-2 font-bold mb-1">
             <span className="text-lg">💡</span> 系統功能說明
           </p>
           <ul className="list-disc list-inside space-y-1 ml-6 text-slate-700">
             <li>
-              系統會依據您輸入的數量<strong>「自動即時計算」</strong>需求單
-              的物料需求及庫存分配。支援點擊下方按鈕加入多筆明細。
+              系統會依據您輸入的數量<strong>「自動即時計算」</strong>
+              需求單的物料需求及庫存分配。
             </li>
             <li>
               單據明細中的單價皆為未稅，系統將自動計算
@@ -1703,13 +2017,13 @@ const RequirementOrderPage = () => {
         <div className="flex space-x-1 bg-slate-200/50 p-1 rounded-lg mb-6 w-fit">
           <button
             onClick={() => setActiveMainTab("create")}
-            className={`px-6 py-2 rounded-md text-sm font-medium transition-all ${activeMainTab === "create" ? "bg-white text-blue-700 shadow-sm" : "text-slate-600 hover:bg-slate-200"}`}
+            className={`px-6 py-2 rounded-md text-[13px] font-bold transition-all ${activeMainTab === "create" ? "bg-white text-blue-700 shadow-sm" : "text-slate-600 hover:bg-slate-200"}`}
           >
             新增訂購單
           </button>
           <button
             onClick={() => setActiveMainTab("view")}
-            className={`px-6 py-2 rounded-md text-sm font-medium transition-all ${activeMainTab === "view" ? "bg-white text-blue-700 shadow-sm" : "text-slate-600 hover:bg-slate-200"}`}
+            className={`px-6 py-2 rounded-md text-[13px] font-bold transition-all ${activeMainTab === "view" ? "bg-white text-blue-700 shadow-sm" : "text-slate-600 hover:bg-slate-200"}`}
           >
             查看線上單據 (
             {mrpPlans.filter((mrp) => mrp.parent_id === null).length})
@@ -1718,51 +2032,30 @@ const RequirementOrderPage = () => {
 
         {activeMainTab === "create" ? (
           <div>
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200 mb-8 overflow-hidden">
-              <div className="p-6 bg-slate-50/50 border-b border-slate-200">
-                <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
-                  <FileText className="text-blue-600" size={20} />
+            <div className="bg-white rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-200 mb-8 overflow-hidden">
+              <div className="p-6 bg-slate-50/50 border-b border-slate-100">
+                <h3 className="text-[15px] font-bold text-slate-800 mb-5 flex items-center gap-2">
+                  <FileText className="text-blue-500" size={20} />
                   1. 客戶訂單與出貨資訊
                 </h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                   <div className="relative lg:col-span-1">
-                    <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">
-                      搜尋客戶名稱或代碼 <span className="text-red-500">*</span>
+                    <label className="block text-[12px] font-bold text-slate-500 mb-1.5 uppercase">
+                      指定客戶 <span className="text-red-500">*</span>
                     </label>
-                    <input
-                      type="text"
-                      value={vendorSearch}
-                      onChange={handleVendorSearchChange}
-                      onFocus={() => setIsVendorDropdownOpen(true)}
-                      onBlur={() =>
-                        setTimeout(() => setIsVendorDropdownOpen(false), 200)
-                      }
-                      placeholder="輸入名稱或代碼搜尋自動帶入"
-                      className="w-full px-3 py-2 border border-slate-300 rounded focus:ring-2 focus:ring-blue-500 focus:outline-none shadow-sm"
+                    <FilterableDropdown
+                      value={vendorData.id}
+                      onChange={(valId) => {
+                        const v = vendors.find((ven) => ven.id === valId);
+                        if (v) handleSelectVendor(v);
+                      }}
+                      options={vendors}
+                      placeholder="-- 請搜尋並選擇客戶 --"
+                      renderItem={(v) => `[${v.code || "無代碼"}] ${v.name}`}
                     />
-                    {isVendorDropdownOpen && vendorSearch && (
-                      <div className="absolute z-10 w-full mt-1 bg-white border border-slate-200 rounded shadow-lg max-h-48 overflow-y-auto">
-                        {filteredVendors.map((v) => (
-                          <div
-                            key={v.id}
-                            onClick={() => handleSelectVendor(v)}
-                            className="group flex items-center p-3 cursor-pointer border-b border-slate-50 hover:bg-blue-50 transition-all duration-200"
-                          >
-                            {v.code && (
-                              <div className="text-xs font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 shadow-sm group-hover:bg-white group-hover:text-blue-600 transition-colors">
-                                {v.code}
-                              </div>
-                            )}
-                            <div className="px-5 font-bold text-slate-700 group-hover:text-blue-700 transition-colors">
-                              {v.name}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
                   </div>
                   <div className="lg:col-span-1">
-                    <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">
+                    <label className="block text-[12px] font-bold text-slate-500 mb-1.5 uppercase">
                       客戶統編
                     </label>
                     <input
@@ -1771,12 +2064,12 @@ const RequirementOrderPage = () => {
                       onChange={(e) =>
                         setVendorData({ ...vendorData, tax_id: e.target.value })
                       }
-                      className="w-full px-3 py-2 bg-slate-100 border border-slate-300 rounded focus:outline-none text-slate-600"
+                      className="w-full h-[42px] px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:bg-white text-slate-700 text-[13px] transition-all"
                       placeholder="統編"
                     />
                   </div>
                   <div className="lg:col-span-1">
-                    <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">
+                    <label className="block text-[12px] font-bold text-slate-500 mb-1.5 uppercase">
                       預計出貨日期 <span className="text-red-500">*</span>
                     </label>
                     <input
@@ -1788,12 +2081,12 @@ const RequirementOrderPage = () => {
                           shippingDate: e.target.value,
                         })
                       }
-                      className="w-full px-3 py-2 border border-slate-300 rounded focus:ring-2 focus:ring-blue-500 focus:outline-none shadow-sm"
+                      className="w-full h-[42px] px-3 py-2 border border-slate-200 rounded-lg focus:ring-4 focus:ring-blue-500/10 focus:border-blue-400 outline-none text-[13px] transition-all"
                     />
                   </div>
 
                   <div className="lg:col-span-2">
-                    <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">
+                    <label className="block text-[12px] font-bold text-slate-500 mb-1.5 uppercase">
                       出貨地址
                     </label>
                     <input
@@ -1805,13 +2098,13 @@ const RequirementOrderPage = () => {
                           address: e.target.value,
                         })
                       }
-                      className="w-full px-3 py-2 border border-slate-300 rounded focus:ring-2 focus:ring-blue-500 focus:outline-none shadow-sm"
+                      className="w-full h-[42px] px-3 py-2 border border-slate-200 rounded-lg focus:ring-4 focus:ring-blue-500/10 focus:border-blue-400 outline-none text-[13px] transition-all"
                       placeholder="出貨地址"
                     />
                   </div>
 
                   <div className="lg:col-span-1">
-                    <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">
+                    <label className="block text-[12px] font-bold text-slate-500 mb-1.5 uppercase">
                       物流商選擇 <span className="text-red-500">*</span>
                     </label>
                     <select
@@ -1822,7 +2115,7 @@ const RequirementOrderPage = () => {
                           logisticsProvider: e.target.value,
                         })
                       }
-                      className="w-full bg-white border border-slate-300 rounded px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none shadow-sm"
+                      className="w-full h-[42px] bg-white border border-slate-200 rounded-lg px-3 py-2 text-[13px] focus:ring-4 focus:ring-blue-500/10 focus:border-blue-400 outline-none transition-all"
                     >
                       <option value="">-- 請選擇物流商 --</option>
                       {logisticsOptions.map((option) => (
@@ -1832,303 +2125,219 @@ const RequirementOrderPage = () => {
                       ))}
                     </select>
                   </div>
-                  <div className="lg:col-span-1">
-                    <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">
-                      備註
-                    </label>
-                    <input
-                      type="text"
-                      value={vendorData.notes}
-                      onChange={(e) =>
-                        setVendorData({
-                          ...vendorData,
-                          notes: e.target.value,
-                        })
-                      }
-                      className="w-full px-3 py-2 border border-slate-300 rounded focus:ring-2 focus:ring-blue-500 focus:outline-none shadow-sm"
-                    />
-                  </div>
                 </div>
               </div>
 
               {/* --- 表單 Body: 訂單明細與產品項目 --- */}
               <div className="p-6">
-                <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
-                  <ReceiptText className="text-blue-600" size={20} />
-                  2. 填寫訂單明細
-                </h3>
-                <div className="border border-slate-300 rounded-lg overflow-visible shadow-sm">
-                  <table className="w-full text-sm text-left bg-white border-collapse">
-                    <thead className="bg-slate-100 border-b border-slate-300 text-slate-700">
-                      <tr>
-                        <th className="p-3 font-bold w-[25%]">
-                          貨品編號 / 搜尋產品
-                        </th>
-                        <th className="p-3 font-bold w-[15%]">規格</th>
-                        <th className="p-3 font-bold w-20">數量</th>
-                        <th className="p-3 font-bold w-16">單位</th>
-                        <th className="p-3 font-bold w-24">未稅單價</th>
-                        <th className="p-3 font-bold w-[12%]">附註</th>
-                        <th className="p-3 font-bold w-[12%]">批號編號</th>
-                        <th className="p-3 font-bold w-12 text-center">操作</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {formItems.map((item) => (
-                        <tr
-                          key={item.id}
-                          className="hover:bg-slate-50 transition-colors"
-                        >
-                          <td className="p-3 relative">
-                            <button
-                              type="button"
-                              onClick={(e) =>
-                                handleToggleProductDropdown(e, item.id)
-                              }
-                              className="w-full text-left bg-transparent border-b border-dashed border-slate-300 focus:border-blue-500 focus:outline-none px-1 py-1 flex justify-between items-center"
-                            >
-                              <span
-                                className={
-                                  item.product_id
-                                    ? "text-blue-700 font-bold truncate"
-                                    : "text-slate-400 truncate"
-                                }
-                              >
-                                {item.product_id
-                                  ? `[${item.product_code || "無編號"}] ${item.product_name}`
-                                  : "選擇產品..."}
-                              </span>
-                              <span className="text-slate-400 text-xs shrink-0 ml-1">
-                                ▼
-                              </span>
-                            </button>
+                <div className="flex justify-between items-center mb-5">
+                  <h3 className="text-[15px] font-bold text-slate-800 flex items-center gap-2">
+                    <ReceiptText className="text-blue-500" size={20} />
+                    2. 填寫訂單明細
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={handleAddRow}
+                    className="text-[13px] bg-slate-100 text-slate-700 px-3 py-2 rounded-lg hover:bg-slate-200 font-bold transition-colors shadow-sm flex items-center gap-1.5 border border-slate-200"
+                  >
+                    <Plus size={16} /> 新增明細
+                  </button>
+                </div>
 
-                            {activeDropdownRow === item.id && (
-                              <>
-                                <div
-                                  className="fixed inset-0 z-[9998]"
-                                  onClick={() => setActiveDropdownRow(null)}
-                                ></div>
-                                <div
-                                  className="fixed z-[9999] bg-white border border-gray-200 rounded-md shadow-2xl flex flex-col max-h-60 overflow-hidden"
-                                  style={productDropdownStyle}
-                                >
-                                  <div className="p-2 border-b border-gray-100 bg-gray-50 shrink-0">
+                <div className="space-y-4">
+                  {formItems.map((item, index) => {
+                    const subtotal = Math.round(
+                      (Number(item.quantity) || 0) *
+                        (Number(item.unit_price) || 0),
+                    );
+                    return (
+                      <div
+                        key={item.id}
+                        className="bg-white border border-slate-200 rounded-2xl shadow-sm relative group transition-all hover:border-blue-300 hover:shadow-md"
+                      >
+                        <div className="p-5 grid grid-cols-1 lg:grid-cols-12 gap-6 relative">
+                          {/* Col 1: Product & Spec */}
+                          <div className="lg:col-span-5 flex flex-col gap-2 border-b lg:border-b-0 lg:border-r border-slate-100 pb-5 lg:pb-0 lg:pr-6">
+                            <div className="flex justify-between items-center mb-1">
+                              <label className="block text-[12px] font-bold text-slate-400 uppercase tracking-wider ml-1">
+                                產品資訊 <span className="text-red-500">*</span>
+                              </label>
+                            </div>
+
+                            <div className="flex flex-col bg-white rounded-xl border border-slate-200 shadow-sm overflow-visible">
+                              <div className="p-1 border-b border-slate-100">
+                                <FilterableDropdown
+                                  value={item.product_id}
+                                  onChange={(valId) => {
+                                    const prod = readyProducts.find(
+                                      (m) => String(m.id) === String(valId),
+                                    );
+                                    if (prod)
+                                      handleSelectProduct(item.id, prod);
+                                  }}
+                                  options={readyProducts}
+                                  placeholder="搜尋成品"
+                                  renderItem={(m) => (
+                                    <div className="flex justify-between items-center w-full">
+                                      <span className="text-[13px] text-slate-400 shrink-0">
+                                        [{m.code}]
+                                      </span>
+                                      <span className="text-[13px] text-slate-800 ml-2">
+                                        {m.name}
+                                      </span>
+                                    </div>
+                                  )}
+                                />
+                              </div>
+                              <div className="flex justify-between items-center p-3 bg-slate-50/50 rounded-b-xl">
+                                <span className="text-[12px] text-slate-500 font-medium">
+                                  包裝規格
+                                </span>
+                                <span className="text-[13px] font-medium text-slate-700">
+                                  {item.spec || "-"}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Col 2: Qty & Units */}
+                          <div className="lg:col-span-4 flex flex-col gap-2 border-b lg:border-b-0 lg:border-r border-slate-100 pb-5 lg:pb-0 lg:pr-6">
+                            <label className="block text-[12px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                              數量配置
+                            </label>
+                            <div className="flex flex-col bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                              <div className="flex justify-between items-center p-3 border-b border-slate-100 bg-white">
+                                <span className="text-[13px] font-medium text-slate-600">
+                                  訂購數量{" "}
+                                  <span className="text-red-500">*</span>
+                                </span>
+                                <div className="flex items-center gap-2">
+                                  <input
+                                    type="text"
+                                    required
+                                    value={item.quantity}
+                                    onChange={(e) =>
+                                      handleItemChange(
+                                        item.id,
+                                        "quantity",
+                                        e.target.value,
+                                      )
+                                    }
+                                    className="w-24 text-right bg-slate-100 hover:bg-slate-200/70 border-transparent rounded-lg px-3 py-1.5 focus:bg-white focus:border-blue-400 focus:ring-4 focus:ring-blue-500/10 outline-none text-[14px] font-mono font-medium transition-all"
+                                    placeholder="0"
+                                  />
+                                  <span className="text-[13px] text-slate-500 w-8">
+                                    {item.unit || "-"}
+                                  </span>
+                                </div>
+                              </div>
+                              {item.sales_pack_unit !== item.unit && (
+                                <div className="flex justify-between items-center p-3 bg-slate-50/50">
+                                  <span className="text-[13px] font-medium text-slate-600">
+                                    每{item.unit}包含
+                                  </span>
+                                  <div className="flex items-center gap-2">
                                     <input
                                       type="text"
-                                      placeholder="搜尋產品名稱或代碼..."
-                                      value={productSearchTerm}
-                                      onChange={(e) =>
-                                        setProductSearchTerm(e.target.value)
-                                      }
-                                      className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                                      autoFocus
+                                      readOnly
+                                      value={item.sales_pack_quantity}
+                                      className="w-24 text-right bg-transparent border-transparent rounded-md px-3 py-1.5 outline-none text-[14px] font-mono font-medium text-slate-500 cursor-not-allowed"
+                                      placeholder="1"
                                     />
+                                    <span className="text-[13px] text-slate-500 w-8">
+                                      {item.sales_pack_unit || "-"}
+                                    </span>
                                   </div>
-                                  <ul className="overflow-y-auto p-1 flex-1">
-                                    {filteredProducts.length > 0 ? (
-                                      filteredProducts.map((m) => (
-                                        <li
-                                          key={m.id}
-                                          onClick={() =>
-                                            handleSelectProduct(item.id, m)
-                                          }
-                                          className={`px-3 py-2 text-sm rounded cursor-pointer transition-colors ${
-                                            item.product_id === m.id
-                                              ? "bg-blue-50 text-blue-700 font-bold"
-                                              : "text-gray-700 hover:bg-gray-100"
-                                          }`}
-                                        >
-                                          [{m.code || "無編號"}] {m.name}
-                                        </li>
-                                      ))
-                                    ) : (
-                                      <li className="px-3 py-4 text-sm text-center text-gray-400">
-                                        查無符合的產品
-                                      </li>
-                                    )}
-                                  </ul>
                                 </div>
-                              </>
-                            )}
-                          </td>
-                          <td className="p-3">
-                            <input
-                              type="text"
-                              value={item.spec}
-                              onChange={(e) =>
-                                handleItemChange(
-                                  item.id,
-                                  "spec",
-                                  e.target.value,
-                                )
-                              }
-                              placeholder="如: 500g/包"
-                              className="w-full bg-transparent border-b border-dashed border-slate-300 focus:border-blue-500 focus:outline-none px-1 py-1"
-                            />
-                          </td>
-                          <td className="p-3">
-                            <input
-                              type="text"
-                              value={item.quantity}
-                              onChange={(e) =>
-                                handleItemChange(
-                                  item.id,
-                                  "quantity",
-                                  e.target.value,
-                                )
-                              }
-                              required
-                              placeholder="0"
-                              className="w-full bg-transparent border-b border-dashed border-slate-300 focus:border-blue-500 focus:outline-none px-1 py-1 font-bold text-blue-700 text-right"
-                            />
-                          </td>
-                          <td className="p-3">
-                            <input
-                              type="text"
-                              value={item.unit}
-                              onChange={(e) =>
-                                handleItemChange(
-                                  item.id,
-                                  "unit",
-                                  e.target.value,
-                                )
-                              }
-                              placeholder="KG"
-                              className="w-full bg-transparent border-b border-dashed border-slate-300 focus:border-blue-500 focus:outline-none px-1 py-1 text-center"
-                            />
-                          </td>
-                          <td className="p-3">
-                            <input
-                              type="text"
-                              value={item.unit_price}
-                              onChange={(e) =>
-                                handleItemChange(
-                                  item.id,
-                                  "unit_price",
-                                  e.target.value,
-                                )
-                              }
-                              placeholder="0"
-                              className="w-full bg-transparent border-b border-dashed border-slate-300 focus:border-blue-500 focus:outline-none px-1 py-1 text-right"
-                            />
-                          </td>
-                          <td className="p-3">
-                            <input
-                              type="text"
-                              value={item.note}
-                              onChange={(e) =>
-                                handleItemChange(
-                                  item.id,
-                                  "note",
-                                  e.target.value,
-                                )
-                              }
-                              placeholder="選填"
-                              className="w-full bg-transparent border-b border-dashed border-slate-300 focus:border-blue-500 focus:outline-none px-1 py-1 text-slate-500"
-                            />
-                          </td>
-                          <td className="p-3">
-                            <input
-                              type="text"
-                              value={item.used_batch_number}
-                              onChange={(e) =>
-                                handleItemChange(
-                                  item.id,
-                                  "used_batch_number",
-                                  e.target.value,
-                                )
-                              }
-                              placeholder="選填"
-                              className="w-full bg-transparent border-b border-dashed border-slate-300 focus:border-blue-500 focus:outline-none px-1 py-1 text-slate-500"
-                            />
-                          </td>
-                          <td className="p-3 text-center">
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Col 3: Price & Total */}
+                          <div className="lg:col-span-3 flex flex-col gap-2 relative">
+                            {/* 移除按鈕放右上角 */}
                             {formItems.length > 1 && (
                               <button
                                 type="button"
                                 onClick={() => handleRemoveRow(item.id)}
-                                className="text-red-400 hover:text-red-600 transition-colors p-1"
-                                title="刪除此列"
+                                className="absolute -top-1 -right-1 w-8 h-8 flex items-center justify-center bg-white text-slate-300 hover:text-white hover:bg-red-500 rounded-full border border-slate-200 transition-all shadow-sm z-10"
+                                title="移除此品項"
                               >
-                                <Trash2 size={18} />
+                                <Trash2 size={14} />
                               </button>
                             )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  <div className="bg-slate-50 border-t border-slate-200 p-2 text-center">
-                    <button
-                      type="button"
-                      onClick={handleAddRow}
-                      className="text-blue-600 hover:text-blue-800 font-bold text-sm flex items-center justify-center w-full py-1.5 rounded transition-colors hover:bg-blue-100"
-                    >
-                      <Plus size={16} className="mr-1" /> 新增一筆明細
-                    </button>
-                  </div>
+                            <label className="block text-[12px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                              金額估算
+                            </label>
+                            <div className="flex flex-col bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden h-full">
+                              <div className="flex justify-between items-center p-3 border-b border-slate-100 bg-white">
+                                <span className="text-[13px] font-medium text-slate-600">
+                                  單價 (未稅)
+                                </span>
+                                <span className="text-[14px] font-mono text-slate-500 font-medium">
+                                  $
+                                  {item.unit_price
+                                    ? Number(item.unit_price).toLocaleString()
+                                    : "0"}
+                                </span>
+                              </div>
+                              <div className="flex flex-col justify-center items-end p-4 bg-gradient-to-br from-blue-50/50 to-blue-100/30 flex-1">
+                                <span className="text-[11px] font-bold text-blue-500/80 mb-1 uppercase tracking-wider">
+                                  小計 (未稅)
+                                </span>
+                                <span className="text-2xl font-black font-mono text-blue-600 tracking-tight">
+                                  ${subtotal.toLocaleString()}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
 
                 {/* 表單 Footer: 金額小計與備註 */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 bg-slate-50 p-6 rounded-lg border border-slate-200 mt-6">
-                  <div className="flex flex-col h-full justify-between">
-                    <div>
-                      <label className="block font-bold text-slate-700 mb-2">
-                        單據備註事項
-                      </label>
-                      <textarea
-                        value={documentNote}
-                        onChange={(e) => setDocumentNote(e.target.value)}
-                        className="w-full border border-slate-300 rounded p-3 focus:ring-2 focus:ring-blue-500 focus:outline-none shadow-sm resize-none"
-                        rows="3"
-                        placeholder="請輸入給物流或內部的備註資訊..."
-                      ></textarea>
-                      <p className="text-xs text-slate-500 mt-2 flex items-center gap-1">
-                        <span className="text-blue-500">*</span>
-                        註：車輛溫度、運輸方式等資訊，請於列印後交由人員現場手寫填入。
-                      </p>
-                    </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
+                  {/* Left: Notes */}
+                  <div className="bg-white rounded-2xl border border-slate-200 shadow-[0_8px_30px_rgb(0,0,0,0.04)] p-6 flex flex-col h-full">
+                    <label className="block text-[14px] font-bold text-slate-800 mb-3">
+                      單據備註事項
+                    </label>
+                    <textarea
+                      value={documentNote}
+                      onChange={(e) => setDocumentNote(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 focus:bg-white focus:border-blue-400 focus:ring-4 focus:ring-blue-500/10 outline-none resize-none text-[13px] transition-all flex-1"
+                      placeholder="請輸入給物流或內部的備註資訊..."
+                    ></textarea>
                   </div>
 
-                  <div className="space-y-4 flex flex-col justify-end bg-white p-5 rounded-lg border border-slate-200 shadow-sm">
-                    <div className="flex justify-between items-center text-slate-600">
-                      <span className="font-bold">未稅小計：</span>
-                      <div className="flex items-center">
-                        <span className="mr-2 text-slate-400">NT$</span>
-                        <input
-                          type="number"
-                          value={calculatedTotals.total_amount}
-                          readOnly
-                          placeholder="0"
-                          className="w-32 text-right border-b border-slate-200 bg-transparent focus:outline-none cursor-not-allowed"
-                        />
+                  {/* Right: Totals */}
+                  <div className="flex flex-col justify-end bg-white rounded-2xl border border-slate-200 shadow-[0_8px_30px_rgb(0,0,0,0.04)] p-6">
+                    <div className="space-y-3">
+                      <div className="flex justify-between items-center">
+                        <span className="text-[14px] text-slate-500 font-medium">
+                          未稅小計
+                        </span>
+                        <span className="text-[16px] font-mono text-slate-700">
+                          NT$ {calculatedTotals.total_amount.toLocaleString()}
+                        </span>
                       </div>
-                    </div>
-                    <div className="flex justify-between items-center text-slate-600">
-                      <span className="font-bold">營業稅 (5%)：</span>
-                      <div className="flex items-center">
-                        <span className="mr-2 text-slate-400">NT$</span>
-                        <input
-                          type="number"
-                          value={calculatedTotals.tax_amount}
-                          readOnly
-                          placeholder="0"
-                          className="w-32 text-right border-b border-slate-200 bg-slate-50 text-slate-500 focus:outline-none cursor-not-allowed"
-                        />
+                      <div className="flex justify-between items-center">
+                        <span className="text-[14px] text-slate-500 font-medium">
+                          營業稅 (5%)
+                        </span>
+                        <span className="text-[16px] font-mono text-slate-700">
+                          NT$ {calculatedTotals.tax_amount.toLocaleString()}
+                        </span>
                       </div>
-                    </div>
-                    <div className="flex justify-between items-center text-blue-800 font-bold border-t border-slate-200 pt-3 mt-2">
-                      <span className="text-lg">含稅總額：</span>
-                      <div className="flex items-center">
-                        <span className="mr-2">NT$</span>
-                        <input
-                          type="number"
-                          value={calculatedTotals.grand_total}
-                          readOnly
-                          placeholder="0"
-                          className="w-32 text-right border-b-2 border-blue-500 bg-slate-50 text-xl focus:outline-none cursor-not-allowed"
-                        />
+                      <div className="pt-4 mt-2 border-t border-slate-100 flex justify-between items-end">
+                        <span className="text-[16px] font-bold text-slate-800">
+                          含稅總額
+                        </span>
+                        <span className="text-3xl font-black font-mono text-blue-600 tracking-tight">
+                          NT$ {calculatedTotals.grand_total.toLocaleString()}
+                        </span>
                       </div>
                     </div>
                   </div>
@@ -2137,8 +2346,8 @@ const RequirementOrderPage = () => {
             </div>
 
             {orderItems.length > 0 && (
-              <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 mb-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                <h3 className="text-lg font-bold text-slate-800 mb-4 border-b border-slate-100 pb-2">
+              <div className="bg-white p-6 rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-200 mb-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                <h3 className="text-lg font-bold text-slate-800 mb-4 border-b border-slate-100 pb-3">
                   3. 底層物料庫存分配
                 </h3>
 
@@ -2156,17 +2365,17 @@ const RequirementOrderPage = () => {
                   return (
                     <div
                       key={fItem.id}
-                      className="mb-6 border border-slate-200 rounded-lg overflow-hidden shadow-sm"
+                      className="mb-6 border border-slate-200 rounded-xl overflow-hidden shadow-sm"
                     >
-                      <div className="bg-slate-50 px-4 py-2 border-b border-slate-200 flex items-center gap-2">
-                        <span className="bg-blue-600 text-white text-xs px-2 py-0.5 rounded-full font-bold shadow-sm whitespace-nowrap">
+                      <div className="bg-slate-50 px-4 py-3 border-b border-slate-200 flex items-center gap-3">
+                        <span className="bg-blue-600 text-white text-xs px-2.5 py-1 rounded-md font-bold shadow-sm whitespace-nowrap">
                           明細列 {index + 1}
                         </span>
-                        <span className="font-bold text-slate-700 truncate">
+                        <span className="font-bold text-slate-700 truncate text-[14px]">
                           {fItem.product_name}
                         </span>
-                        <span className="text-slate-500 text-sm whitespace-nowrap">
-                          / {fItem.quantity} {fItem.unit}
+                        <span className="text-slate-500 text-[13px] whitespace-nowrap bg-white px-2 py-0.5 rounded border border-slate-200">
+                          {fItem.quantity} {fItem.unit}
                         </span>
                       </div>
 
@@ -2201,9 +2410,9 @@ const RequirementOrderPage = () => {
                               )}
                               <TypeTag type={item.type} />
                               <span
-                                className={
+                                className={`text-[13px] ${
                                   hasShortage ? "text-red-600 font-black" : ""
-                                }
+                                }`}
                               >
                                 {item.name}
                               </span>
@@ -2228,7 +2437,7 @@ const RequirementOrderPage = () => {
                   );
                 })}
 
-                <div className="mt-8 flex justify-end items-center border-t border-slate-200 pt-6 gap-4">
+                <div className="mt-8 flex justify-end items-center border-t border-slate-100 pt-6">
                   <button
                     onClick={handleOpenPreview}
                     disabled={
@@ -2236,7 +2445,7 @@ const RequirementOrderPage = () => {
                       isSubmitting ||
                       orderItems.length === 0
                     }
-                    className="px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg shadow-md transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="px-8 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-[0_4px_14px_rgba(5,150,105,0.4)] transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed text-[14px]"
                   >
                     <FileText size={18} /> 預覽並建立訂單
                   </button>
@@ -2252,20 +2461,19 @@ const RequirementOrderPage = () => {
                 placeholder="搜尋客戶"
                 value={filterVendor}
                 onChange={(e) => setFilterVendor(e.target.value)}
-                className="w-full md:w-auto px-4 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none shadow-sm"
+                className="w-full md:w-auto px-4 py-2 border border-slate-300 rounded-md text-[13px] focus:ring-2 focus:ring-blue-500 focus:outline-none shadow-sm"
               />
               <input
                 type="text"
                 placeholder="搜尋產品"
                 value={filterProduct}
                 onChange={(e) => setFilterProduct(e.target.value)}
-                className="w-full md:w-auto px-4 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none shadow-sm"
+                className="w-full md:w-auto px-4 py-2 border border-slate-300 rounded-md text-[13px] focus:ring-2 focus:ring-blue-500 focus:outline-none shadow-sm"
               />
             </div>
 
             {groupedMrpPlans.length > 0 ? (
               groupedMrpPlans.map((group) => {
-                // 檢查此 Group (訂購單) 內是否有任何項目缺料，若缺料則禁用「全部轉生產單」按鈕
                 const groupHasShortage = group.plans.some((d) => {
                   const displayId = d.frontend_temp_id || d.id;
                   return (
@@ -2288,10 +2496,10 @@ const RequirementOrderPage = () => {
                     <div className="bg-slate-100 border-b border-slate-300 px-5 py-4 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                       <div className="flex flex-wrap items-center gap-3">
                         <ReceiptText className="text-blue-600" size={20} />
-                        <span className="font-bold text-slate-800 text-lg">
+                        <span className="font-bold text-slate-800 text-[15px]">
                           客戶：{group.vendorInfo.name || "未知"}
                         </span>
-                        <span className="text-slate-500 text-sm">
+                        <span className="text-slate-500 text-[13px]">
                           {new Date(group.createdAt).toLocaleString()}
                         </span>
                         <span className="text-blue-700 text-xs font-bold bg-blue-100 px-2.5 py-1 rounded-md shadow-sm border border-blue-200">
@@ -2304,13 +2512,13 @@ const RequirementOrderPage = () => {
                           <>
                             <button
                               onClick={(e) => handlePreviewBatch(group, e)}
-                              className="flex-1 md:flex-none px-4 py-2 bg-white text-blue-700 border border-blue-300 rounded-lg hover:bg-blue-50 transition-colors text-sm font-bold shadow-sm flex items-center justify-center gap-2"
+                              className="flex-1 md:flex-none px-4 py-2 bg-white text-blue-700 border border-blue-300 rounded-md hover:bg-blue-50 transition-colors text-[13px] font-bold shadow-sm flex items-center justify-center gap-2"
                             >
                               <FileText size={16} /> 全部預覽
                             </button>
                             <button
                               onClick={(e) => handlePrintBatch(group, e)}
-                              className="flex-1 md:flex-none px-4 py-2 bg-blue-600 text-white border border-blue-700 rounded-lg hover:bg-blue-700 transition-colors text-sm font-bold shadow-sm flex items-center justify-center gap-2"
+                              className="flex-1 md:flex-none px-4 py-2 bg-blue-600 text-white border border-blue-700 rounded-md hover:bg-blue-700 transition-colors text-[13px] font-bold shadow-sm flex items-center justify-center gap-2"
                             >
                               <Printer size={16} /> 全部列印
                             </button>
@@ -2327,7 +2535,7 @@ const RequirementOrderPage = () => {
                                 ? "有項目庫存不足，無法整批轉換"
                                 : "將此訂單下的項目全部轉為生產單"
                             }
-                            className="flex-1 md:flex-none px-4 py-2 bg-emerald-600 text-white border border-emerald-700 rounded-lg hover:bg-emerald-700 transition-colors text-sm font-bold shadow-sm flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="flex-1 md:flex-none px-4 py-2 bg-emerald-600 text-white border border-emerald-700 rounded-md hover:bg-emerald-700 transition-colors text-[13px] font-bold shadow-sm flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                           >
                             <PackageCheck size={16} /> 全部轉生產單
                           </button>
@@ -2335,7 +2543,7 @@ const RequirementOrderPage = () => {
                           <button
                             disabled
                             title="此訂單的所有項目皆已轉換為生產單"
-                            className="flex-1 md:flex-none px-4 py-2 bg-slate-100 text-slate-500 border border-slate-300 rounded-lg text-sm font-bold shadow-sm flex items-center justify-center gap-2 cursor-not-allowed"
+                            className="flex-1 md:flex-none px-4 py-2 bg-slate-100 text-slate-500 border border-slate-300 rounded-md text-[13px] font-bold shadow-sm flex items-center justify-center gap-2 cursor-not-allowed"
                           >
                             <PackageCheck
                               size={16}
@@ -2347,7 +2555,7 @@ const RequirementOrderPage = () => {
                       </div>
                     </div>
 
-                    {/* ====== Group Body: Expandable Rows (Table 原樣式但經過優化) ====== */}
+                    {/* ====== Group Body: Expandable Rows ====== */}
                     <div className="overflow-x-auto p-2 md:p-4 bg-slate-50/50">
                       <div className="rounded-xl border border-slate-200 overflow-hidden bg-white shadow-sm">
                         <table className="w-full text-left border-collapse whitespace-nowrap">
@@ -2391,7 +2599,7 @@ const RequirementOrderPage = () => {
                                     </td>
                                     <td className="py-3 px-4">
                                       <div className="flex items-center gap-2">
-                                        <span className="font-bold text-slate-700 text-base group-hover:text-blue-800 transition-colors">
+                                        <span className="font-bold text-slate-700 text-[14px] group-hover:text-blue-800 transition-colors">
                                           {d.product_name}
                                         </span>
                                         {hasShortage && (
@@ -2404,9 +2612,9 @@ const RequirementOrderPage = () => {
                                         )}
                                       </div>
                                     </td>
-                                    <td className="py-3 px-4 text-right text-slate-800 font-bold text-base">
+                                    <td className="py-3 px-4 text-right text-slate-800 font-bold text-[14px]">
                                       {formatNum(d.required_qty, "PRODUCT")}{" "}
-                                      <span className="text-slate-500 font-normal text-sm ml-1">
+                                      <span className="text-slate-500 font-normal text-[13px] ml-1">
                                         {d.unit}
                                       </span>
                                     </td>
@@ -2415,12 +2623,11 @@ const RequirementOrderPage = () => {
                                       onClick={(e) => e.stopPropagation()}
                                     >
                                       <div className="flex flex-wrap items-center justify-end gap-2">
-                                        {/* Row (單一單據) Level Buttons */}
                                         <button
                                           onClick={(e) =>
                                             handlePreviewOrder(d, e)
                                           }
-                                          className="px-3 py-1.5 bg-white text-blue-700 border border-blue-200 rounded hover:bg-blue-50 transition-all duration-200 text-xs font-bold shadow-sm flex items-center justify-center gap-1"
+                                          className="px-3 py-1.5 bg-white text-blue-700 border border-blue-200 rounded hover:bg-blue-50 transition-all duration-200 text-[12px] font-bold shadow-sm flex items-center justify-center gap-1"
                                           title="預覽此單項"
                                         >
                                           <FileText size={14} /> 預覽
@@ -2429,7 +2636,7 @@ const RequirementOrderPage = () => {
                                           onClick={(e) =>
                                             handlePrintOrder(d, e)
                                           }
-                                          className="px-3 py-1.5 bg-white text-blue-700 border border-blue-200 rounded hover:bg-blue-50 transition-all duration-200 text-xs font-bold shadow-sm flex items-center justify-center gap-1"
+                                          className="px-3 py-1.5 bg-white text-blue-700 border border-blue-200 rounded hover:bg-blue-50 transition-all duration-200 text-[12px] font-bold shadow-sm flex items-center justify-center gap-1"
                                           title="列印此單項"
                                         >
                                           <Printer size={14} /> 列印
@@ -2449,7 +2656,7 @@ const RequirementOrderPage = () => {
                                               ? "庫存不足，無法轉為生產單"
                                               : "將此草稿轉為生產單"
                                           }
-                                          className="px-4 py-1.5 bg-emerald-50 text-emerald-700 rounded hover:bg-emerald-500 hover:text-white transition-all duration-200 font-bold text-xs shadow-sm border border-emerald-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                                          className="px-4 py-1.5 bg-emerald-50 text-emerald-700 rounded hover:bg-emerald-500 hover:text-white transition-all duration-200 font-bold text-[12px] shadow-sm border border-emerald-200 disabled:opacity-50 disabled:cursor-not-allowed"
                                         >
                                           轉生產單
                                         </button>
@@ -2458,7 +2665,7 @@ const RequirementOrderPage = () => {
                                             e.stopPropagation();
                                             handleDeleteDraft(d.id);
                                           }}
-                                          className="px-3 py-1.5 bg-red-50 text-red-600 rounded hover:bg-red-500 hover:text-white transition-all duration-200 font-bold text-xs shadow-sm border border-red-200 disabled:opacity-50"
+                                          className="px-3 py-1.5 bg-red-50 text-red-600 rounded hover:bg-red-500 hover:text-white transition-all duration-200 font-bold text-[12px] shadow-sm border border-red-200 disabled:opacity-50"
                                           disabled={isSubmitting}
                                         >
                                           刪除
@@ -2467,7 +2674,7 @@ const RequirementOrderPage = () => {
                                     </td>
                                   </tr>
 
-                                  {/* --- Expanded Content (子單據與批號) --- */}
+                                  {/* --- Expanded Content --- */}
                                   {isExpanded && (
                                     <tr>
                                       <td
@@ -2478,14 +2685,13 @@ const RequirementOrderPage = () => {
                                           <div className="p-4 md:p-6 w-full max-w-full overflow-hidden">
                                             <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
                                               <div className="lg:col-span-4 min-w-0">
-                                                {/* 展開：子單據顯示 */}
                                                 {mrpPlans.filter(
                                                   (child) =>
                                                     child.parent_id ===
                                                     d.mrp_id,
                                                 ).length > 0 && (
                                                   <div className="mb-6 space-y-3 border-b border-slate-200/60 pb-5">
-                                                    <h4 className="text-xs font-bold text-blue-600 uppercase tracking-wider flex items-center gap-1">
+                                                    <h4 className="text-[12px] font-bold text-blue-600 uppercase tracking-wider flex items-center gap-1">
                                                       <span>子單據</span>
                                                     </h4>
                                                     {mrpPlans
@@ -2526,13 +2732,13 @@ const RequirementOrderPage = () => {
                                                                 <span className="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded font-bold">
                                                                   {child.mrp_id}
                                                                 </span>
-                                                                <span className="font-bold text-slate-700 text-sm">
+                                                                <span className="font-bold text-slate-700 text-[13px]">
                                                                   {
                                                                     child.product_name
                                                                   }
                                                                 </span>
                                                               </div>
-                                                              <div className="text-xs text-slate-600 bg-slate-100 px-2 py-1 rounded">
+                                                              <div className="text-[12px] text-slate-600 bg-slate-100 px-2 py-1 rounded">
                                                                 計畫生產:{" "}
                                                                 <span className="font-bold text-slate-800">
                                                                   {formatNum(
@@ -2571,7 +2777,6 @@ const RequirementOrderPage = () => {
                                                   </div>
                                                 )}
 
-                                                {/* 展開：批號分配顯示 */}
                                                 <h4 className="text-xs font-black text-slate-400 uppercase mb-3 flex items-center gap-2">
                                                   批號與庫存分配
                                                 </h4>
@@ -2608,8 +2813,8 @@ const RequirementOrderPage = () => {
             ) : (
               <div className="bg-white p-16 text-center text-slate-400 rounded-xl shadow-sm border border-slate-200">
                 <FileText size={48} className="mx-auto mb-4 text-slate-300" />
-                <p className="text-lg">目前無任何需求單草稿</p>
-                <p className="text-sm mt-2">請至「新增訂購單」分頁建立</p>
+                <p className="text-[15px] font-medium">目前無任何需求單草稿</p>
+                <p className="text-[13px] mt-2">請至「新增訂購單」分頁建立</p>
               </div>
             )}
           </div>
@@ -2620,7 +2825,7 @@ const RequirementOrderPage = () => {
           <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
             <div className="bg-slate-100 max-w-[1000px] w-full max-h-[90vh] rounded-xl shadow-2xl flex flex-col overflow-hidden">
               <div className="bg-white border-b border-slate-200 p-4 flex justify-between items-center z-10 shadow-sm shrink-0">
-                <h3 className="text-xl font-bold text-slate-800 tracking-wider flex items-center gap-2">
+                <h3 className="text-lg font-bold text-slate-800 tracking-wider flex items-center gap-2">
                   <FileText className="text-blue-600" /> 客戶訂貨單預覽
                 </h3>
                 <button
@@ -2643,14 +2848,14 @@ const RequirementOrderPage = () => {
               <div className="bg-white border-t border-slate-200 p-4 flex justify-between items-center shrink-0">
                 <button
                   onClick={handlePrintPreview}
-                  className="px-5 py-2.5 bg-slate-100 text-slate-700 font-bold rounded-lg hover:bg-slate-200 transition-colors flex items-center gap-2 border border-slate-300"
+                  className="px-5 py-2.5 bg-slate-100 text-slate-700 font-bold rounded-md hover:bg-slate-200 transition-colors flex items-center gap-2 border border-slate-300 text-[13px]"
                 >
                   <Printer size={18} /> 列印預覽
                 </button>
                 <div className="flex gap-3">
                   <button
                     onClick={() => setIsPreviewModalOpen(false)}
-                    className="px-5 py-2.5 bg-white text-slate-700 font-bold rounded-lg hover:bg-slate-50 transition-colors border border-slate-300"
+                    className="px-5 py-2.5 bg-white text-slate-700 font-bold rounded-md hover:bg-slate-50 transition-colors border border-slate-300 text-[13px]"
                   >
                     {previewData?.isPreview ? "取消建立" : "關閉預覽"}
                   </button>
@@ -2658,7 +2863,7 @@ const RequirementOrderPage = () => {
                     <button
                       onClick={handleConfirmSaveOrder}
                       disabled={isSubmitting}
-                      className="px-6 py-2.5 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700 shadow-md transition-all disabled:opacity-50 flex items-center gap-2"
+                      className="px-6 py-2.5 bg-emerald-600 text-white font-bold rounded-md hover:bg-emerald-700 shadow-md transition-all disabled:opacity-50 flex items-center gap-2 text-[13px]"
                     >
                       {isSubmitting ? "處理中..." : "確認建立單據"}
                     </button>
@@ -2683,280 +2888,6 @@ const RequirementOrderPage = () => {
       {/* 隱藏的列印區塊 */}
       {printData && <CustomerOrderPrintTemplate data={printData} />}
     </>
-  );
-};
-
-const BatchRow = ({
-  orderId,
-  matId,
-  batch,
-  matType,
-  unit,
-  onSave,
-  readyOnly = false,
-}) => {
-  const [tempValue, setTempValue] = useState(batch.used);
-  useEffect(() => {
-    setTempValue(batch.used);
-  }, [batch.used]);
-
-  const isModified = tempValue !== batch.used;
-  const handleInternalSave = () => {
-    let val = tempValue;
-    if (val !== "") {
-      let parsedVal = parseFloat(val);
-      if (isNaN(parsedVal) || parsedVal < 0) {
-        setTempValue(batch.used);
-        return;
-      }
-      if (parsedVal > batch.available) {
-        val =
-          matType === "PACK"
-            ? Math.floor(batch.available).toString()
-            : batch.available.toString();
-      }
-    }
-    setTempValue(val);
-    onSave(orderId, matId, batch.id, val);
-  };
-
-  const totalCapacity = parseFloat(batch.available) || 0;
-  const usedQty = parseFloat(tempValue) || 0;
-  const remainingQty = Math.max(0, totalCapacity - usedQty);
-  const usagePercent =
-    totalCapacity > 0 ? Math.min(100, (usedQty / totalCapacity) * 100) : 0;
-  const isFullyUsed = usagePercent >= 100;
-
-  return (
-    <div
-      className={`relative flex flex-col bg-white border p-4 rounded-xl transition-all duration-300 w-full min-h-[110px] ${isModified ? "border-amber-400 ring-2 ring-amber-50 shadow-md" : "border-slate-200 hover:border-blue-300 hover:shadow-md shadow-sm"}`}
-    >
-      <div className="flex justify-between items-start mb-4 gap-4">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 mb-1">
-            <span
-              className={`w-2 h-2 rounded-full shrink-0 ${usedQty > 0 ? (isFullyUsed ? "bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.6)]" : "bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.6)]") : "bg-slate-300"}`}
-            ></span>
-            <h4
-              className="text-sm font-black text-slate-800 truncate tracking-wider"
-              title={batch.batch_number}
-            >
-              {batch.batch_number}
-            </h4>
-          </div>
-          {batch.received_date && (
-            <div className="text-[10px] text-slate-400 ml-4">
-              保存期限: {new Date(batch.received_date).toLocaleDateString()}
-            </div>
-          )}
-        </div>
-        <div className="flex flex-col items-end shrink-0">
-          {!readyOnly ? (
-            <div className="flex items-center gap-2">
-              <div className="relative">
-                <input
-                  type="number"
-                  step={matType === "PACK" ? "1" : "0.01"}
-                  min={0}
-                  value={tempValue}
-                  onChange={(e) => setTempValue(e.target.value)}
-                  placeholder="0"
-                  className={`w-24 px-2 py-1.5 text-right text-sm font-bold border rounded-lg transition-all duration-200 focus:outline-none ${isModified ? "bg-amber-50 border-amber-400 text-amber-900 focus:ring-2 focus:ring-amber-200" : usedQty > 0 ? "border-blue-300 bg-blue-50 text-blue-700 focus:ring-2 focus:ring-blue-200" : "border-slate-200 text-slate-600 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-blue-100"}`}
-                />
-                <span className="absolute -top-1 -right-1 flex h-2.5 w-2.5">
-                  {isModified && (
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-                  )}
-                  <span
-                    className={`relative inline-flex rounded-full h-2.5 w-2.5 ${isModified ? "bg-amber-500" : "hidden"}`}
-                  ></span>
-                </span>
-              </div>
-              <div
-                className={`overflow-hidden transition-all duration-300 ease-in-out max-w-[60px] opacity-100`}
-              >
-                <button
-                  onClick={handleInternalSave}
-                  className="px-2.5 py-1.5 bg-amber-500 text-white text-xs font-bold rounded-lg hover:bg-amber-600 active:scale-95 shadow-md whitespace-nowrap"
-                >
-                  儲存
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div className="bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-200 text-center shadow-inner min-w-[60px]">
-              <span
-                className={`text-sm font-bold ${usedQty > 0 ? "text-blue-600" : "text-slate-400"}`}
-              >
-                {tempValue || "0"}
-              </span>
-            </div>
-          )}
-        </div>
-      </div>
-      <div className="mt-auto">
-        <div className="flex justify-between items-end mb-1.5 text-[10px] font-bold text-slate-500">
-          <span>
-            本次分配:{" "}
-            <span className={`text-xs ${usedQty > 0 ? "text-blue-600" : ""}`}>
-              {formatNum(usedQty, matType)}
-            </span>{" "}
-            {unit}
-          </span>
-          <span>
-            庫存剩餘:{" "}
-            <span className="text-xs text-slate-700">
-              {formatNum(remainingQty, matType)}
-            </span>{" "}
-            {unit}
-          </span>
-        </div>
-        <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden border border-slate-200/50 shadow-inner">
-          <div
-            className={`h-full rounded-full transition-all duration-500 ease-out relative ${isFullyUsed ? "bg-amber-400" : usedQty > 0 ? "bg-blue-500" : "bg-transparent"}`}
-            style={{ width: `${usagePercent}%` }}
-          >
-            {usedQty > 0 && !isFullyUsed && (
-              <div className="absolute top-0 right-0 bottom-0 w-8 bg-gradient-to-r from-transparent to-white/30"></div>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-const MaterialAllocationList = ({
-  itemId,
-  readyOnly = false,
-  allocations,
-  expandedMaterials,
-  toggleMaterialExpanded,
-  handleBatchUsageSave,
-}) => {
-  const itemAlloc = allocations[itemId];
-  if (!itemAlloc)
-    return <div className="p-4 text-slate-400">尚未分配物料...</div>;
-
-  const sortedMaterials = Object.entries(itemAlloc)
-    .filter(([k]) => k !== "_base_qty" && k !== "_productId")
-    .sort(([idA, matA], [idB, matB]) => {
-      const typePriority = { SEMI: 1, RAW: 2, PACK: 3, PRODUCT: 4 };
-      const pA = typePriority[matA.type?.toUpperCase()] || 99;
-      const pB = typePriority[matB.type?.toUpperCase()] || 99;
-
-      if (pA !== pB) return pA - pB;
-      return matB.requiredQty - matA.requiredQty;
-    });
-
-  if (sortedMaterials.length === 0) {
-    return (
-      <div className="p-6 text-center text-slate-400 border border-dashed rounded-lg bg-slate-50/50">
-        此項目無須分配底層物料庫存，子單據已負責其原料。
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-3 w-full min-w-0">
-      {sortedMaterials.map(([matId, mat]) => {
-        const totalAllocated = mat.batches.reduce(
-          (sum, b) => sum + (parseFloat(b.used) || 0),
-          0,
-        );
-        const isUnder = totalAllocated < mat.requiredQty - 0.0001;
-        const isOver = totalAllocated > mat.maxQty + 0.0001;
-        const expandedKey = `${itemId}-${matId}`;
-        const isExpanded = expandedMaterials.includes(expandedKey);
-
-        const borderColor = isUnder
-          ? "border-red-300"
-          : isOver
-            ? "border-amber-300"
-            : "border-slate-200";
-        const bgColor = isUnder
-          ? "bg-red-50/30"
-          : isOver
-            ? "bg-amber-50/20"
-            : "bg-white";
-
-        const sortedBatches = [...mat.batches].sort((a, b) => {
-          const usedA = parseFloat(a.used) || 0;
-          const usedB = parseFloat(b.used) || 0;
-          return usedB - usedA;
-        });
-
-        return (
-          <div
-            key={matId}
-            className={`border rounded-lg overflow-hidden transition-colors ${borderColor}`}
-          >
-            <div
-              className={`p-3 flex flex-col md:flex-row justify-between items-start md:items-center cursor-pointer hover:bg-slate-50 ${bgColor}`}
-              onClick={() => toggleMaterialExpanded(expandedKey)}
-            >
-              <div className="flex items-center gap-3 flex-1 min-w-0">
-                <span className="text-slate-400 text-[10px] w-4 flex-shrink-0">
-                  {isExpanded ? "▼" : "▶"}
-                </span>
-                <TypeTag type={mat.type} />
-                <span className="font-bold text-slate-700 truncate">
-                  {mat.materialName}
-                </span>
-              </div>
-              <div className="flex items-center gap-4 text-xs w-full md:w-auto justify-end">
-                {isUnder ? (
-                  <span className="font-bold text-red-600 animate-pulse">
-                    庫存不足！缺少{" "}
-                    {formatNum(mat.requiredQty - totalAllocated, mat.type)}{" "}
-                    {mat.unit}
-                  </span>
-                ) : (
-                  <span
-                    className={`font-bold ${isOver ? "text-amber-600" : "text-emerald-600"}`}
-                  >
-                    已分配 {formatNum(totalAllocated, mat.type)} {mat.unit}
-                  </span>
-                )}
-              </div>
-            </div>
-            {isExpanded && (
-              <div className="bg-slate-50 p-3 border-t border-slate-200 w-full min-w-0">
-                <div className="mb-2 flex flex-col md:flex-row justify-between items-start md:items-center border-b border-slate-200 pb-2 gap-2">
-                  <span className="text-xs font-bold text-slate-500">
-                    批號分配
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] bg-white px-2 py-1 rounded border border-slate-200 text-slate-500">
-                      需求: <b>{formatNum(mat.requiredQty, mat.type)}</b>{" "}
-                      {mat.unit}
-                    </span>
-                  </div>
-                </div>
-                <div className="flex overflow-x-auto gap-4 pb-4 pt-1 snap-x custom-scrollbar w-full min-w-0">
-                  {sortedBatches.map((b) => (
-                    <div
-                      key={b.id}
-                      className="w-[85vw] sm:w-[360px] flex-shrink-0 snap-start"
-                    >
-                      <BatchRow
-                        orderId={itemId}
-                        matId={matId}
-                        batch={b}
-                        matType={mat.type}
-                        unit={mat.unit}
-                        onSave={handleBatchUsageSave}
-                        readyOnly={readyOnly}
-                      />
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        );
-      })}
-    </div>
   );
 };
 

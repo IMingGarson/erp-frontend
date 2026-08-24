@@ -1,13 +1,25 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import CustomDialog from "./components/customDialog";
-import { ChevronDown, ChevronRight, Printer } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronRight,
+  Printer,
+  ReceiptText,
+  FileText,
+  Save,
+  Plus,
+  Trash2,
+  PackageCheck,
+  Search,
+} from "lucide-react";
 import { fetchWithAuth } from "./utils/fetchWithAuth";
 import { useNavigate } from "react-router-dom";
+import { useAuthStore } from "./store/authStore";
 
 const formatNum = (num, type) => {
   if (num === null || num === undefined || isNaN(num) || num === "") return "0";
   if (type === "PACK") return Math.ceil(num).toString();
-  return parseFloat(Number(num).toFixed(4)).toString();
+  return parseFloat(Number(num).toFixed(5)).toString();
 };
 
 const StatusTag = ({ status }) => {
@@ -40,6 +52,21 @@ const StatusTag = ({ status }) => {
       {statusData.label}
     </span>
   );
+};
+
+// ==========================================
+// 輔助函數：計算生產單的總重量 (KG)
+// 邏輯：將所有原料(RAW)與半成品(SEMI)的配方用量加總，即為總製令重量
+// ==========================================
+const getOrderTotalWeight = (materials_info) => {
+  if (!Array.isArray(materials_info)) return 0;
+  return materials_info.reduce((sum, mat) => {
+    const unit = (mat.unit || "").toUpperCase();
+    if (unit === "KG" && mat.type !== "PACK") {
+      return sum + (parseFloat(mat.requiredQty) || 0);
+    }
+    return sum;
+  }, 0);
 };
 
 // ==========================================
@@ -120,6 +147,17 @@ const ProductionFormTemplate = ({ order, isChildForm = false, onPrint }) => {
   const displayShippingDate = `${rawShippingDate} ${vInfo.notes || ""}`.trim();
   const customerName = vInfo.name || "廠內備庫";
 
+  // 計算實際生產重量
+  const totalWeight = getOrderTotalWeight(order.materials_info);
+  const isWeightBased = totalWeight > 0;
+  // 若算得出重量，顯示重量(KG)；否則退回顯示原本的 target_qty (個數)
+  const displayQty = isWeightBased
+    ? formatNum(totalWeight, "PRODUCT")
+    : formatNum(order.target_qty, "PRODUCT");
+  const displayUnit = isWeightBased
+    ? "KG"
+    : order.product_profile?.unit || "KG";
+
   return (
     <div
       className={`bg-white font-sans text-black relative ${isChildForm ? "p-1" : "p-4 print:p-0"}`}
@@ -137,13 +175,13 @@ const ProductionFormTemplate = ({ order, isChildForm = false, onPrint }) => {
           <div className="mt-1">
             產品編號 :{" "}
             <span className="font-mono">
-              {order.product_profile.code || "-"}
+              {order.product_profile?.code || "-"}
             </span>
           </div>
           <div className="mt-1 text-[14px] font-bold whitespace-nowrap">
-            產品名稱 : {order.product_profile.name}
+            產品名稱 : {order.product_profile?.name}
           </div>
-          <div className="mt-1">產品規格 : {order.product_profile.spec}</div>
+          <div className="mt-1">產品規格 : {order.product_profile?.spec}</div>
           <div className="mt-1 italic underline">生產注意 : </div>
         </div>
 
@@ -162,10 +200,8 @@ const ProductionFormTemplate = ({ order, isChildForm = false, onPrint }) => {
           </div>
           <div className="mt-1 text-[14px] text-left pl-8 flex items-baseline gap-2">
             <span>製令數量 : </span>
-            <span className="font-mono font-bold text-xl">
-              {formatNum(order.target_qty, "PRODUCT")}
-            </span>
-            <span>{order.product_profile.unit || "KG"}</span>
+            <span className="font-mono font-bold text-xl">{displayQty}</span>
+            <span className="font-bold">{displayUnit}</span>
           </div>
         </div>
 
@@ -299,8 +335,9 @@ const ProductionFormTemplate = ({ order, isChildForm = false, onPrint }) => {
           <div>
             合計:{" "}
             <span className="font-mono text-[14px] underline px-2">
-              {formatNum(order.target_qty, "PRODUCT")}
+              {displayQty}
             </span>
+            {displayUnit}
           </div>
           <div>
             覆秤:{" "}
@@ -574,7 +611,7 @@ const ProductionOrderPage = () => {
     setPrintData(orderToPrint);
     setTimeout(() => {
       const originalTitle = document.title;
-      document.title = `${po.order_number}_${po.product_profile.name}`;
+      document.title = `${po.order_number}_${po.product_profile?.name}`;
       window.print();
       document.title = originalTitle;
     }, 150);
@@ -588,7 +625,7 @@ const ProductionOrderPage = () => {
           po.order_number.toLowerCase().includes(filterOrder.toLowerCase()));
       const matchProduct =
         !filterProduct ||
-        (po.product_profile.name &&
+        (po.product_profile?.name &&
           po.product_profile.name
             .toLowerCase()
             .includes(filterProduct.toLowerCase()));
@@ -671,8 +708,11 @@ const ProductionOrderPage = () => {
               <tbody className="divide-y divide-slate-100 text-sm">
                 {filteredOrders.length > 0 ? (
                   filteredOrders.map((po) => {
-                    console.log("po", po);
                     const isExpanded = expandedOrderIds.includes(po.id);
+                    // 在列表頁也動態計算總重量
+                    const rowWeight = getOrderTotalWeight(po.materials_info);
+                    const isWeightBased = rowWeight > 0;
+
                     return (
                       <React.Fragment key={po.id}>
                         <tr
@@ -688,14 +728,21 @@ const ProductionOrderPage = () => {
                           <td className="p-4">
                             <div className="flex items-center gap-2">
                               <span className="font-bold text-slate-800">
-                                {po.product_profile.name}
+                                {po.product_profile?.name}
                               </span>
                             </div>
                           </td>
                           <td className="p-4 text-right text-slate-800 font-mono font-bold">
-                            {formatNum(po.target_qty, po.product_profile.type)}{" "}
+                            {isWeightBased
+                              ? formatNum(rowWeight, po.product_profile?.type)
+                              : formatNum(
+                                  po.target_qty,
+                                  po.product_profile?.type,
+                                )}{" "}
                             <span className="text-xs text-slate-500 font-sans font-normal">
-                              {po.product_profile.unit}
+                              {isWeightBased
+                                ? "KG"
+                                : po.product_profile?.unit || "KG"}
                             </span>
                           </td>
                           <td className="p-4 text-center text-slate-600">

@@ -10,6 +10,14 @@ import {
 } from "lucide-react";
 
 // ==========================================
+// 輔助函數：將浮點數轉字串並移除結尾的 0 與小數點
+// ==========================================
+const formatDisplayNum = (val) => {
+  if (val === null || val === undefined || isNaN(parseFloat(val))) return "";
+  return parseFloat(val).toString();
+};
+
+// ==========================================
 // 列印專用 Template (包含 4 頁，完美版面比例)
 // ==========================================
 const RecallReportPrintTemplate = ({
@@ -198,10 +206,7 @@ const RecallReportPrintTemplate = ({
                 回收原料總量
               </td>
               <td className="border border-black px-2 py-1.5 text-center font-mono">
-                {(
-                  parseFloat(reportData.used_raw_total) +
-                  parseFloat(reportData.unused_raw_total)
-                ).toFixed(4)}
+                {formatDisplayNum(reportData.total_raw_recalled)}
               </td>
               <td className="border border-black px-2 py-1.5 text-xs font-normal">
                 異常原料進貨總量(kg)
@@ -212,7 +217,7 @@ const RecallReportPrintTemplate = ({
                 尚未使用原料總量
               </td>
               <td className="border border-black px-2 py-1.5 text-center font-mono">
-                {parseFloat(reportData.unused_raw_total).toFixed(4)}
+                {formatDisplayNum(reportData.unused_raw_total)}
               </td>
               <td className="border border-black px-2 py-1.5 text-xs font-normal">
                 異常原料在庫總量(kg)
@@ -223,7 +228,7 @@ const RecallReportPrintTemplate = ({
                 產品生產總量
               </td>
               <td className="border border-black px-2 py-1.5 text-center font-mono">
-                {parseFloat(reportData.total_produced_product).toFixed(4)}
+                {formatDisplayNum(reportData.total_produced_product)}
               </td>
               <td className="border border-black px-2 py-1.5 text-xs font-normal">
                 各品項產品之總量(kg)
@@ -234,7 +239,7 @@ const RecallReportPrintTemplate = ({
                 尚未出貨產品總量
               </td>
               <td className="border border-black px-2 py-1.5 text-center font-mono">
-                {parseFloat(reportData.total_in_stock_product).toFixed(4)}
+                {formatDisplayNum(reportData.total_in_stock_product)}
               </td>
               <td className="border border-black px-2 py-1.5 text-xs font-normal">
                 各品項在庫總量(kg)
@@ -245,7 +250,7 @@ const RecallReportPrintTemplate = ({
                 下游總出貨總量
               </td>
               <td className="border border-black px-2 py-1.5 text-center text-red-600 font-mono">
-                {parseFloat(reportData.total_shipped_product).toFixed(4)}
+                {formatDisplayNum(reportData.total_shipped_product)}
               </td>
               <td className="border border-black px-2 py-1.5 text-xs font-normal">
                 已出貨至下游廠商之總量
@@ -257,7 +262,7 @@ const RecallReportPrintTemplate = ({
               </td>
               <td className="border border-black px-2 py-1.5 text-center font-mono">
                 {formData.actualRecovered
-                  ? parseFloat(formData.actualRecovered).toFixed(4)
+                  ? formatDisplayNum(formData.actualRecovered)
                   : ""}
               </td>
               <td className="border border-black px-2 py-1.5 text-xs font-normal">
@@ -269,7 +274,9 @@ const RecallReportPrintTemplate = ({
                 整體回收率 (%)
               </td>
               <td className="border border-black px-2 py-1.5 text-center text-red-600 font-mono">
-                {recoveryRate !== null ? `${recoveryRate.toFixed(2)}%` : ""}
+                {recoveryRate !== null
+                  ? `${formatDisplayNum(recoveryRate)}%`
+                  : ""}
               </td>
               <td className="border border-black px-2 py-1.5 text-xs font-normal">
                 (產品實際回收總量+庫存) / 總生產量
@@ -307,7 +314,7 @@ const RecallReportPrintTemplate = ({
               </td>
               <td className="border border-black px-2 py-1.5 text-center font-mono">
                 {formData.destroyAmount
-                  ? parseFloat(formData.destroyAmount).toFixed(4)
+                  ? formatDisplayNum(formData.destroyAmount)
                   : ""}
               </td>
               <td className="border border-black px-2 py-1.5 text-xs font-normal">
@@ -355,7 +362,6 @@ const RecallReportPrintTemplate = ({
         <table className="w-full border-collapse border border-black text-xs text-center">
           <thead className="bg-[#1f4e78] text-white">
             <tr>
-              {/* 🌟 嚴格分配寬度比例，名稱變寬，數量壓縮 */}
               <th className="border border-black px-1 py-1.5 font-bold w-[8%]">
                 配方編號
               </th>
@@ -421,9 +427,11 @@ const RecallReportPrintTemplate = ({
                   po.delivery_notes && po.delivery_notes.length > 0
                     ? po.delivery_notes
                     : [null];
-                const producedQty = po.actual_qty || po.target_qty || 0;
+                const producedQty = parseFloat(
+                  po.actual_qty || po.target_qty || 0,
+                );
 
-                totalProduced += parseFloat(producedQty);
+                totalProduced += producedQty;
                 totalUsed += parseFloat(po.used_qty || 0);
 
                 batches.forEach((batchNum) => {
@@ -454,17 +462,17 @@ const RecallReportPrintTemplate = ({
                           {dn ? dn.note_number : "-"}
                         </td>
                         <td className="border border-slate-300 px-1">
-                          {dn ? dn.quantity : "-"}
+                          {dn ? formatDisplayNum(dn.quantity) : "-"}
                         </td>
                         <td className="border border-slate-300 px-1">-</td>
                         <td className="border border-slate-300 px-1">
                           {po.order_number || "-"}
                         </td>
                         <td className="border border-slate-300 px-1">
-                          {producedQty}
+                          {formatDisplayNum(producedQty)}
                         </td>
                         <td className="border border-slate-300 px-1">
-                          {po.used_qty || "-"}
+                          {po.used_qty ? formatDisplayNum(po.used_qty) : "-"}
                         </td>
                         <td className="border border-slate-300 px-1">-</td>
                       </tr>,
@@ -515,17 +523,17 @@ const RecallReportPrintTemplate = ({
                     合 計
                   </td>
                   <td className="border border-black bg-white text-red-600">
-                    {totalBags || "-"}
+                    {totalBags ? formatDisplayNum(totalBags) : "-"}
                   </td>
                   <td className="border border-black bg-white text-red-600">
                     -
                   </td>
                   <td className="border border-black bg-white text-red-600 border-t-0"></td>
                   <td className="border border-black bg-white text-red-600">
-                    {totalProduced.toFixed(4)}
+                    {formatDisplayNum(totalProduced)}
                   </td>
                   <td className="border border-black bg-white text-red-600">
-                    {totalUsed.toFixed(4)}
+                    {formatDisplayNum(totalUsed)}
                   </td>
                   <td className="border border-black bg-white text-red-600"></td>
                 </tr>,
@@ -601,7 +609,6 @@ const RecallReportPrintTemplate = ({
               </th>
             </tr>
             <tr>
-              {/* 🌟 嚴格分配寬度比例，名稱/地址變寬，數量極度壓縮 */}
               <th className="border border-black px-1 py-1.5 font-bold w-[7%]">
                 客戶編號
               </th>
@@ -696,7 +703,7 @@ const RecallReportPrintTemplate = ({
                   {ship.expiration_date || "-"}
                 </td>
                 <td className="border border-slate-300 px-0 font-mono">
-                  {ship.quantity}
+                  {formatDisplayNum(ship.quantity)}
                 </td>
                 <td className="border border-slate-300 px-0">-</td>
                 <td className="border border-slate-300 px-0">-</td>
@@ -727,7 +734,14 @@ const RecallReportPrintTemplate = ({
                 {downstreamShipments.reduce(
                   (sum, s) => sum + (parseFloat(s.quantity) || 0),
                   0,
-                ) || "-"}
+                )
+                  ? formatDisplayNum(
+                      downstreamShipments.reduce(
+                        (sum, s) => sum + (parseFloat(s.quantity) || 0),
+                        0,
+                      ),
+                    )
+                  : "-"}
               </td>
               <td className="border border-black bg-white text-red-600">-</td>
               <td className="border border-black bg-white text-red-600">-</td>
@@ -884,7 +898,6 @@ const RecallReportPrintTemplate = ({
                       </td>
                     </tr>
                     <tr>
-                      {/* 🌟 名稱欄變寬，日期欄適中 */}
                       <td className="border border-black w-[35%]">
                         產 品 名 稱
                       </td>
@@ -912,7 +925,7 @@ const RecallReportPrintTemplate = ({
                           {vp.expiration_date || "-"}
                         </td>
                         <td className="border border-black font-mono">
-                          {vp.quantity}
+                          {formatDisplayNum(vp.quantity)}
                         </td>
                         <td className="border border-black bg-slate-100"></td>
                         <td className="border border-black bg-slate-100"></td>
@@ -1126,7 +1139,7 @@ const TracePage = () => {
 
       if (!reportRes.ok) throw new Error("無法取得異常追溯指標資料");
       const reportJson = await reportRes.json();
-      setReportData(reportJson.data);
+      setReportData(reportJson.data || reportJson); // 處理回傳結構可能的變動
 
       const detailUrl = `/api/batches/trace?q=${encodeURIComponent(selectedMaterial.code)}`;
       const detailRes = await fetchWithAuth(detailUrl, { method: "GET" });
@@ -1286,7 +1299,7 @@ const TracePage = () => {
             <select
               value={isSimulation ? "YES" : "NO"}
               onChange={(e) => setIsSimulation(e.target.value === "YES")}
-              className="border border-slate-300 rounded-md px-3 py-2.5 text-sm focus:outline-none focus:border-blue-500 bg-slate-50 cursor-pointer font-bold"
+              className="border border-slate-300 rounded-md px-3 py-2.5 text-sm focus:outline-none focus:border-blue-50 bg-slate-50 cursor-pointer font-bold"
             >
               <option value="YES">是</option>
               <option value="NO">否</option>
@@ -1410,10 +1423,9 @@ const TracePage = () => {
                         回收原料總量
                       </td>
                       <td className="border border-slate-300 px-4 py-3 text-center font-mono text-lg text-blue-600">
-                        {(
-                          parseFloat(reportData.used_raw_total) +
-                          parseFloat(reportData.unused_raw_total)
-                        ).toFixed(4)}
+                        {formatDisplayNum(
+                          parseFloat(reportData.total_raw_recalled),
+                        )}
                       </td>
                       <td className="border border-slate-300 px-4 py-3 text-xs font-normal text-slate-500">
                         異常原料進貨總量(kg)
@@ -1424,7 +1436,7 @@ const TracePage = () => {
                         尚未使用原料總量
                       </td>
                       <td className="border border-slate-300 px-4 py-3 text-center font-mono text-lg text-blue-600">
-                        {parseFloat(reportData.unused_raw_total).toFixed(4)}
+                        {formatDisplayNum(reportData.unused_raw_total)}
                       </td>
                       <td className="border border-slate-300 px-4 py-3 text-xs font-normal text-slate-500">
                         異常原料在庫總量(kg)
@@ -1435,9 +1447,7 @@ const TracePage = () => {
                         產品生產總量
                       </td>
                       <td className="border border-slate-300 px-4 py-3 text-center font-mono text-lg text-blue-600">
-                        {parseFloat(reportData.total_produced_product).toFixed(
-                          4,
-                        )}
+                        {formatDisplayNum(reportData.total_produced_product)}
                       </td>
                       <td className="border border-slate-300 px-4 py-3 text-xs font-normal text-slate-500">
                         各品項產品之總量(kg)
@@ -1448,9 +1458,7 @@ const TracePage = () => {
                         尚未出貨產品總量
                       </td>
                       <td className="border border-slate-300 px-4 py-3 text-center font-mono text-lg text-blue-600">
-                        {parseFloat(reportData.total_in_stock_product).toFixed(
-                          4,
-                        )}
+                        {formatDisplayNum(reportData.total_in_stock_product)}
                       </td>
                       <td className="border border-slate-300 px-4 py-3 text-xs font-normal text-slate-500">
                         各品項在庫總量(kg)
@@ -1461,9 +1469,7 @@ const TracePage = () => {
                         下游總出貨總量
                       </td>
                       <td className="border border-slate-300 px-4 py-3 text-center text-red-600 font-mono text-lg">
-                        {parseFloat(reportData.total_shipped_product).toFixed(
-                          4,
-                        )}
+                        {formatDisplayNum(reportData.total_shipped_product)}
                       </td>
                       <td className="border border-slate-300 px-4 py-3 text-xs font-normal text-slate-500">
                         已出貨至下游廠商之總量
@@ -1499,7 +1505,7 @@ const TracePage = () => {
                       </td>
                       <td className="border border-slate-300 px-4 py-3 text-center text-red-600 font-mono text-xl">
                         {recoveryRate !== null
-                          ? `${recoveryRate.toFixed(2)}%`
+                          ? `${formatDisplayNum(recoveryRate)}%`
                           : ""}
                       </td>
                       <td className="border border-slate-300 px-4 py-3 text-xs font-normal text-slate-500">
@@ -1666,7 +1672,7 @@ const TracePage = () => {
                                 {batch.material_name}
                               </td>
                               <td className="p-4 font-mono text-red-600 text-base">
-                                {batch.remaining_qty}
+                                {formatDisplayNum(batch.remaining_qty)}
                               </td>
                               <td className="p-4 font-mono">
                                 {batch.received_date}
@@ -1739,7 +1745,9 @@ const TracePage = () => {
                                                 <span>
                                                   異常原料投入:{" "}
                                                   <strong className="text-red-600 font-black text-sm ml-1">
-                                                    {po.used_qty}
+                                                    {formatDisplayNum(
+                                                      po.used_qty,
+                                                    )}
                                                   </strong>{" "}
                                                   {po.unit}
                                                 </span>
@@ -1790,7 +1798,9 @@ const TracePage = () => {
                                               <div className="text-sm font-bold text-slate-700">
                                                 預計用量:{" "}
                                                 <span className="font-mono font-black text-red-600 text-base ml-1">
-                                                  {mrp.used_qty}
+                                                  {formatDisplayNum(
+                                                    mrp.used_qty,
+                                                  )}
                                                 </span>{" "}
                                                 {mrp.unit}
                                               </div>

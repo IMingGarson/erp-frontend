@@ -149,7 +149,7 @@ const RecallReportPrintTemplate = ({
                 {(
                   parseFloat(reportData.used_raw_total) +
                   parseFloat(reportData.unused_raw_total)
-                ).toFixed(4)}
+                ).toFixed(5)}
               </td>
               <td className="border border-black px-2 py-1.5 text-xs font-normal">
                 異常原料進貨總量(kg)
@@ -160,7 +160,7 @@ const RecallReportPrintTemplate = ({
                 尚未使用原料總量
               </td>
               <td className="border border-black px-2 py-1.5 text-center font-mono">
-                {parseFloat(reportData.unused_raw_total).toFixed(4)}
+                {parseFloat(reportData.unused_raw_total).toFixed(5)}
               </td>
               <td className="border border-black px-2 py-1.5 text-xs font-normal">
                 異常原料在庫總量(kg)
@@ -171,7 +171,7 @@ const RecallReportPrintTemplate = ({
                 產品生產總量
               </td>
               <td className="border border-black px-2 py-1.5 text-center font-mono">
-                {parseFloat(reportData.total_produced_product).toFixed(4)}
+                {parseFloat(reportData.total_produced_product).toFixed(5)}
               </td>
               <td className="border border-black px-2 py-1.5 text-xs font-normal">
                 各品項產品之總量(kg)
@@ -182,7 +182,7 @@ const RecallReportPrintTemplate = ({
                 尚未出貨產品總量
               </td>
               <td className="border border-black px-2 py-1.5 text-center font-mono">
-                {parseFloat(reportData.total_in_stock_product).toFixed(4)}
+                {parseFloat(reportData.total_in_stock_product).toFixed(5)}
               </td>
               <td className="border border-black px-2 py-1.5 text-xs font-normal">
                 各品項在庫總量(kg)
@@ -193,7 +193,7 @@ const RecallReportPrintTemplate = ({
                 下游總出貨總量
               </td>
               <td className="border border-black px-2 py-1.5 text-center text-red-600 font-mono">
-                {parseFloat(reportData.total_shipped_product).toFixed(4)}
+                {parseFloat(reportData.total_shipped_product).toFixed(5)}
               </td>
               <td className="border border-black px-2 py-1.5 text-xs font-normal">
                 已出貨至下游廠商之總量
@@ -205,7 +205,7 @@ const RecallReportPrintTemplate = ({
               </td>
               <td className="border border-black px-2 py-1.5 text-center font-mono">
                 {formData.actualRecovered
-                  ? parseFloat(formData.actualRecovered).toFixed(4)
+                  ? parseFloat(formData.actualRecovered).toFixed(5)
                   : ""}
               </td>
               <td className="border border-black px-2 py-1.5 text-xs font-normal">
@@ -255,7 +255,7 @@ const RecallReportPrintTemplate = ({
               </td>
               <td className="border border-black px-2 py-1.5 text-center font-mono">
                 {formData.destroyAmount
-                  ? parseFloat(formData.destroyAmount).toFixed(4)
+                  ? parseFloat(formData.destroyAmount).toFixed(5)
                   : ""}
               </td>
               <td className="border border-black px-2 py-1.5 text-xs font-normal">
@@ -584,10 +584,7 @@ const TracePage = () => {
                         回收原料總量
                       </td>
                       <td className="border border-slate-300 px-4 py-2.5 text-center font-mono">
-                        {(
-                          parseFloat(reportData.used_raw_total) +
-                          parseFloat(reportData.unused_raw_total)
-                        ).toFixed(4)}
+                        {parseFloat(reportData.total_raw_recalled).toFixed(5)}
                       </td>
                       <td className="border border-slate-300 px-4 py-2.5 text-xs font-normal">
                         異常原料進貨總量(kg)
@@ -598,7 +595,7 @@ const TracePage = () => {
                         尚未使用原料總量
                       </td>
                       <td className="border border-slate-300 px-4 py-2.5 text-center font-mono">
-                        {parseFloat(reportData.unused_raw_total).toFixed(4)}
+                        {parseFloat(reportData.unused_raw_total).toFixed(5)}
                       </td>
                       <td className="border border-slate-300 px-4 py-2.5 text-xs font-normal">
                         異常原料在庫總量(kg)

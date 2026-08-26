@@ -1342,9 +1342,9 @@ const TracePage = () => {
           </h2>
         </div>
 
-        <div className="bg-blue-50 text-blue-800 text-sm p-4 rounded-lg mb-6 border border-blue-100 shadow-sm">
-          <p className="flex items-center gap-2 font-medium mb-1">
-            <span className="text-lg">💡</span> 系統功能說明
+        <div className="bg-blue-50/80 text-blue-800 text-sm p-4 rounded-2xl mb-6 border border-blue-100/50 shadow-sm">
+          <p className="flex items-center gap-2 font-bold mb-2">
+            <span className="text-lg leading-none">💡</span> 系統功能說明
           </p>
           <ul className="list-disc list-inside space-y-1 ml-6 text-slate-700">
             <li>

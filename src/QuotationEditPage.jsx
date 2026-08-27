@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   Search,
@@ -12,7 +12,8 @@ import {
   Calculator,
   Printer,
   XCircle,
-  Lock, // 🌟 新增鎖頭 Icon
+  Lock,
+  Package,
 } from "lucide-react";
 import CustomDialog from "./components/customDialog";
 import { fetchWithAuth } from "./utils/fetchWithAuth";
@@ -153,170 +154,6 @@ const DocumentPreview = ({
       className="flex flex-col gap-8 bg-slate-200 p-8 rounded-lg overflow-y-auto max-h-[75vh] custom-scrollbar print:bg-white print:p-0 print:overflow-visible print:block print:max-h-none"
       style={{ fontFamily: "'MingLiU', 'PMingLiU', serif" }}
     >
-      <div className="bg-white p-10 shadow-lg mx-auto w-full max-w-[210mm] min-h-[297mm] text-black relative print:shadow-none print:w-full print:max-w-none print:m-0 print:p-[15mm] flex flex-col">
-        <div className="flex justify-between items-start mb-6 shrink-0">
-          <div className="w-1/3 text-[12px] leading-relaxed">
-            <h2 className="text-[15px] font-bold mb-1">基香食品有限公司</h2>
-            <p>桃園市觀音區崙坪里1鄰1-10號</p>
-            <p>電話: 03-4988228</p>
-          </div>
-          <div className="w-1/3 text-center">
-            <h1 className="text-[26px] font-bold tracking-[0.5em] mb-1 pb-1 inline-block border-b-[3px] border-double border-black">
-              產品報價單
-            </h1>
-            <p className="text-[12px]">傳真: 03-4988159</p>
-          </div>
-          <div className="w-1/3 text-right text-[12px]">
-            <p>第 1 頁,共 1 頁</p>
-          </div>
-        </div>
-
-        <div className="flex justify-between text-[12px] mb-4 shrink-0">
-          <div className="space-y-1">
-            <p>
-              <span className="inline-block w-16">客戶名稱:</span>{" "}
-              {customer?.name || formData.customer_name || ""}
-            </p>
-            <p>
-              <span className="inline-block w-16">客戶統編:</span>{" "}
-              {customer?.tax_id || ""}
-            </p>
-            <p>
-              <span className="inline-block w-16">客戶電話:</span>{" "}
-              {customer?.phone || ""}
-            </p>
-            <p>
-              <span className="inline-block w-16">送貨地址:</span>{" "}
-              {customer?.delivery_address || customer?.address || ""}
-            </p>
-          </div>
-          <div className="space-y-1">
-            <p>
-              <span className="inline-block w-16">客戶編號:</span>{" "}
-              {customer?.code || ""}
-            </p>
-            <p>
-              <span className="inline-block w-16">聯 絡 人:</span>{" "}
-              {customer?.contact_person || ""}
-            </p>
-            <p>
-              <span className="inline-block w-16">客戶傳真:</span>{" "}
-              {customer?.fax || ""}
-            </p>
-          </div>
-          <div className="space-y-1 text-right">
-            <p>
-              <span className="inline-block w-16 text-left">單據日期:</span>{" "}
-              {today}
-            </p>
-            <p>
-              <span className="inline-block w-16 text-left">單據編號:</span>{" "}
-              {formData.quotation_number || "系統核發"}
-            </p>
-          </div>
-        </div>
-
-        <table className="w-full text-[12px] border-collapse shrink-0">
-          <thead>
-            <tr className="border-t border-b border-black text-left">
-              <th className="py-2 px-1 w-8">序</th>
-              <th className="py-2 px-1 w-20">貨品編號</th>
-              <th className="py-2 px-1">品名</th>
-              <th className="py-2 px-1 w-14 text-center">數量</th>
-              <th className="py-2 px-1 w-14 text-center">單位</th>
-              <th className="py-2 px-1 w-24 text-right">單價(元/單位)</th>
-              <th className="py-2 px-1 w-28 text-center">規格</th>
-              <th className="py-2 px-1 w-20">附註(未稅)</th>
-            </tr>
-          </thead>
-          <tbody>
-            {formData.items.map((item, idx) => {
-              const mat =
-                allMaterials.find(
-                  (m) => String(m.id) === String(item.product),
-                ) || item.product_detail;
-              return (
-                <tr
-                  key={idx}
-                  className="border-b border-dashed border-gray-300"
-                >
-                  <td className="py-2 px-1 text-center">{idx + 1}</td>
-                  <td className="py-2 px-1">{mat?.code}</td>
-                  <td className="py-2 px-1">{mat?.name}</td>
-                  <td className="py-2 px-1 text-center">
-                    {item.sales_unit_quantity || 1}
-                  </td>
-                  <td className="py-2 px-1 text-center">
-                    {item.sales_unit || ""}
-                  </td>
-                  <td className="py-2 px-1 text-right">
-                    {Math.round(parseFloat(item.final_price_per_kg || 0))}
-                  </td>
-                  <td className="py-2 px-1 text-center">{item.spec || ""}</td>
-                  <td className="py-2 px-1"></td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-
-        <div className="flex-1 min-h-[100px]"></div>
-
-        <div className="mt-auto text-[12px] leading-relaxed space-y-4 pt-10 shrink-0">
-          <div>
-            <span className="text-[13px] font-bold">產品備註：</span>
-            <div className="pl-6 space-y-1 mt-1 text-gray-800">
-              <p>
-                1.
-                接收報價單請於三日內簽名回傳，逾期未簽名回傳則視為同意此報價。
-              </p>
-              <p>2. 原物料漲幅超過5% 或作業上有其他異動將重新報價。</p>
-              <p>3. 訂貨後需一次出貨完畢並結清款項。</p>
-              <p>
-                4.
-                調味粉產品：最低出貨量單品項以『箱』為單位，無庫存產品，單一品項出貨量未滿
-                100kg 除負擔運費外須加換線處理費500元。
-              </p>
-              <p>5. 果醬、調味醬產品：最低訂貨量為『 100 kg』。</p>
-              <p className="mt-2 font-bold tracking-widest text-[13px]">
-                ** 此報價金額未包含關稅 **
-              </p>
-            </div>
-          </div>
-          <div>
-            <span className="text-[13px] font-bold">專用原料清單：</span>
-          </div>
-          <div>
-            <span className="text-[13px] font-bold">通用備註：</span>
-            <div className="pl-6 space-y-1 mt-1 text-gray-800">
-              <p>1. 如需內部檢驗報告，請於訂購時提出需求。</p>
-              <p>
-                2. 累計採購量未達經濟批量之產品，其外部檢驗費用將由客戶負擔。
-              </p>
-              <p>
-                3.
-                本報價單30天內有效，非常態庫存產品出貨日期由訂購日起計15～20工作天，請提早訂購。
-              </p>
-              <p>
-                4.
-                上述產品專用之原料，若結束生產後尚有剩餘原料，請以當時採購之原價購回。
-              </p>
-              <p>
-                5.
-                代客研發產品若有採購計畫異動請提早告知，以利進行製程庫存調整。
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <div className="flex justify-between mt-16 text-[13px] shrink-0">
-          <div className="w-1/4">審 核：</div>
-          <div className="w-1/4">經 辦：</div>
-          <div className="w-1/4">會 簽：</div>
-          <div className="w-1/4">客戶簽回：</div>
-        </div>
-      </div>
-
       {formData.items.map((item, idx) => {
         const mat =
           allMaterials.find((m) => String(m.id) === String(item.product)) ||
@@ -325,17 +162,20 @@ const DocumentPreview = ({
 
         const qty = parseFloat(item.sales_unit_quantity) || 1;
 
+        // 🌟 完全聽從畫面上的成本拆解，不再傻傻算 BOM
         const totalMaterialCostPerUnit = Math.round(
-          bomItems.reduce(
-            (sum, b) => precise.add(sum, precise.mul(b.cost, b.qty)),
-            0,
-          ),
+          parseFloat(item.costs_breakdown?.material_cost?.value || 0),
         );
+
         const manualCostPerUnit = Math.round(
-          Object.values(item.costs_breakdown)
-            .filter((c) => c.name !== "原料成本")
-            .reduce((sum, c) => precise.add(sum, parseFloat(c.value) || 0), 0),
+          Object.entries(item.costs_breakdown || {})
+            .filter(([k, c]) => k !== "material_cost")
+            .reduce(
+              (sum, [k, c]) => precise.add(sum, parseFloat(c.value) || 0),
+              0,
+            ),
         );
+
         const totalEstimatedCostPerUnit = precise.add(
           totalMaterialCostPerUnit,
           manualCostPerUnit,
@@ -514,6 +354,9 @@ const DocumentPreview = ({
   );
 };
 
+// ==========================================
+// 🌟 修正版 FilterableDropdown (Apple 風格視窗定位)
+// ==========================================
 const FilterableDropdown = ({
   value,
   onChange,
@@ -524,7 +367,9 @@ const FilterableDropdown = ({
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
-  const dropdownRef = useRef(null);
+  const [dropdownStyle, setDropdownStyle] = useState({});
+  const selectRef = useRef(null);
+  const dropdownMenuRef = useRef(null);
 
   const filteredOptions = options.filter(
     (opt) =>
@@ -534,30 +379,62 @@ const FilterableDropdown = ({
 
   const selectedOpt = options.find((o) => String(o.id) === String(value));
 
+  const handleToggle = () => {
+    if (disabled) return;
+    if (!isOpen && selectRef.current) {
+      const rect = selectRef.current.getBoundingClientRect();
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const dropdownHeight = 260;
+
+      if (spaceBelow < dropdownHeight && rect.top > dropdownHeight) {
+        setDropdownStyle({
+          bottom: `${window.innerHeight - rect.top + 6}px`,
+          top: "auto",
+          left: `${rect.left}px`,
+          width: `${rect.width}px`,
+        });
+      } else {
+        setDropdownStyle({
+          top: `${rect.bottom + 6}px`,
+          bottom: "auto",
+          left: `${rect.left}px`,
+          width: `${rect.width}px`,
+        });
+      }
+    }
+    setIsOpen(!isOpen);
+  };
+
   useEffect(() => {
-    const handleClickOutside = (e) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target))
-        setIsOpen(false);
+    const handleScroll = (e) => {
+      if (dropdownMenuRef.current && dropdownMenuRef.current.contains(e.target))
+        return;
+      if (isOpen) setIsOpen(false);
     };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
+    if (isOpen) {
+      window.addEventListener("scroll", handleScroll, true);
+      window.addEventListener("resize", () => setIsOpen(false), true);
+    }
+    return () => {
+      window.removeEventListener("scroll", handleScroll, true);
+      window.removeEventListener("resize", () => setIsOpen(false), true);
+    };
+  }, [isOpen]);
 
   return (
-    <div className="relative w-full" ref={dropdownRef}>
-      <button
-        type="button"
-        disabled={disabled}
-        onClick={() => setIsOpen(!isOpen)}
-        className={`w-full h-[40px] px-3 py-2 border rounded-md text-[14px] flex justify-between items-center transition-colors ${
+    <>
+      <div
+        ref={selectRef}
+        onClick={handleToggle}
+        className={`w-full h-[42px] px-3.5 py-2 border rounded-xl text-[13px] flex justify-between items-center transition-all shadow-sm cursor-pointer ${
           disabled
             ? "bg-slate-100 text-slate-400 cursor-not-allowed border-slate-200"
             : isOpen
-              ? "border-blue-500 ring-2 ring-blue-500 bg-white"
-              : "bg-white border-slate-300 hover:border-slate-400 text-slate-800"
+              ? "border-blue-500 ring-4 ring-blue-500/15 bg-white"
+              : "bg-white border-slate-300/80 hover:border-slate-400 text-slate-800"
         }`}
       >
-        <span className="truncate pr-2 font-medium">
+        <span className="truncate pr-2 font-bold text-slate-800">
           {selectedOpt ? (
             renderItem ? (
               renderItem(selectedOpt)
@@ -568,54 +445,64 @@ const FilterableDropdown = ({
             <span className="text-slate-400 font-normal">{placeholder}</span>
           )}
         </span>
-        <ChevronDown size={16} className="text-slate-400 flex-shrink-0" />
-      </button>
+        <ChevronDown size={15} className="text-slate-400 flex-shrink-0" />
+      </div>
 
       {isOpen && !disabled && (
-        <div className="absolute z-50 top-full left-0 mt-1 w-full bg-white border border-slate-200 rounded-md shadow-xl flex flex-col max-h-64 overflow-hidden animate-in fade-in zoom-in-95 duration-100">
-          <div className="p-2 border-b border-slate-100 bg-slate-50 shrink-0">
-            <div className="relative">
-              <Search
-                size={15}
-                className="absolute left-2.5 top-2 text-slate-400"
-              />
-              <input
-                autoFocus
-                className="w-full border border-slate-300 rounded pl-8 pr-3 py-1.5 text-[14px] focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
-                placeholder="輸入代碼或名稱搜尋..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
+        <>
+          <div
+            className="fixed inset-0 z-[9998]"
+            onClick={() => setIsOpen(false)}
+          ></div>
+          <div
+            ref={dropdownMenuRef}
+            style={dropdownStyle}
+            className="fixed z-[9999] bg-white/95 backdrop-blur-md border border-slate-200/80 rounded-2xl shadow-2xl flex flex-col max-h-64 overflow-hidden animate-in fade-in zoom-in-95 duration-150"
+          >
+            <div className="p-2.5 border-b border-slate-100 bg-slate-50/80 shrink-0">
+              <div className="relative">
+                <Search
+                  size={14}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                />
+                <input
+                  autoFocus
+                  className="w-full border border-slate-200 bg-white rounded-xl pl-8 pr-3 py-1.5 text-[13px] font-bold focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20 transition-all shadow-sm"
+                  placeholder="輸入代碼或名稱搜尋..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                />
+              </div>
+            </div>
+            <div className="overflow-y-auto flex-1 p-1.5 custom-scrollbar">
+              {filteredOptions.length > 0 ? (
+                filteredOptions.map((opt) => (
+                  <div
+                    key={opt.id}
+                    onClick={() => {
+                      onChange(opt.id);
+                      setIsOpen(false);
+                      setSearchTerm("");
+                    }}
+                    className={`px-3 py-2 text-[13px] rounded-xl cursor-pointer transition-colors font-bold ${
+                      String(value) === String(opt.id)
+                        ? "bg-blue-600 text-white shadow-sm"
+                        : "text-slate-700 hover:bg-slate-100"
+                    }`}
+                  >
+                    {renderItem ? renderItem(opt) : opt.name}
+                  </div>
+                ))
+              ) : (
+                <div className="px-3 py-6 text-center text-slate-400 text-[13px] font-bold">
+                  查無資料
+                </div>
+              )}
             </div>
           </div>
-          <div className="overflow-y-auto flex-1 p-1 custom-scrollbar">
-            {filteredOptions.length > 0 ? (
-              filteredOptions.map((opt) => (
-                <div
-                  key={opt.id}
-                  onClick={() => {
-                    onChange(opt.id);
-                    setIsOpen(false);
-                    setSearchTerm("");
-                  }}
-                  className={`px-3 py-2.5 text-[14px] rounded cursor-pointer transition-colors ${
-                    String(value) === String(opt.id)
-                      ? "bg-blue-50 text-blue-700 font-bold"
-                      : "text-slate-700 hover:bg-slate-100"
-                  }`}
-                >
-                  {renderItem ? renderItem(opt) : opt.name}
-                </div>
-              ))
-            ) : (
-              <div className="px-3 py-5 text-center text-slate-400 text-[14px]">
-                查無資料
-              </div>
-            )}
-          </div>
-        </div>
+        </>
       )}
-    </div>
+    </>
   );
 };
 
@@ -652,6 +539,15 @@ const QuotationEditPage = () => {
     setDialog((prev) => ({ ...prev, isOpen: false, onCloseCallback: null }));
     if (cb) cb();
   };
+
+  const packMaterials = useMemo(() => {
+    return [
+      { id: "", name: "-- 無需對應包材 --", code: "" },
+      ...allMaterials.filter((m) =>
+        ["PACK", "OTHER", "STICKER"].includes(m.type),
+      ),
+    ];
+  }, [allMaterials]);
 
   useEffect(() => {
     const fetchInitialData = async () => {
@@ -691,17 +587,49 @@ const QuotationEditPage = () => {
           status: currentQuot.status,
           items: currentQuot.items.map((item) => {
             let breakdown = item.costs_breakdown || {};
-            if (breakdown.material_cost) {
+
+            // 🌟 防呆修復：如果 material_cost 丟失或為 0，強制抓回最新資料庫成本
+            if (
+              !breakdown.material_cost ||
+              !breakdown.material_cost.value ||
+              breakdown.material_cost.value === "0" ||
+              breakdown.material_cost.value === 0
+            ) {
+              breakdown = {
+                ...breakdown,
+                material_cost: {
+                  name: "原料成本",
+                  value: String(
+                    Math.round(
+                      parseFloat(item.product_detail?.estimated_cost || 0),
+                    ),
+                  ),
+                },
+              };
+            } else {
               breakdown.material_cost.name = "原料成本";
             }
+
+            const fullMat = allMats.find(
+              (m) => String(m.id) === String(item.product_detail?.id),
+            );
+            const matchedProfile =
+              fullMat?.product_profiles?.find(
+                (p) => p.spec === item.spec && p.sales_unit === item.sales_unit,
+              ) || fullMat?.product_profiles?.[0];
+
             return {
               ...item,
               product: item.product_detail?.id || "",
               spec: item.spec || "",
               sales_unit: item.sales_unit || "箱",
-              sales_unit_quantity: item.sales_unit_quantity || 1,
-              sales_pack_unit: item.sales_pack_unit || "包",
-              sales_pack_quantity: item.sales_pack_quantity || 1,
+              sales_unit_quantity: String(item.sales_unit_quantity || 1),
+              sales_pack_unit: item.sales_pack_unit || "無",
+              sales_pack_quantity: String(item.sales_pack_quantity || 0),
+              outer_pack: matchedProfile?.outer_pack || "",
+              inner_pack: matchedProfile?.inner_pack || "",
+              pricing_multiplier: String(item.pricing_multiplier || 1.0),
+              final_price_per_kg: String(item.final_price_per_kg || ""),
               costs_breakdown: breakdown,
             };
           }),
@@ -732,13 +660,15 @@ const QuotationEditPage = () => {
           product: "",
           spec: "",
           sales_unit: "箱",
-          sales_unit_quantity: 1,
+          sales_unit_quantity: "1",
           sales_pack_unit: "包",
-          sales_pack_quantity: 1,
+          sales_pack_quantity: "1",
+          outer_pack: "",
+          inner_pack: "",
           costs_breakdown: {
             material_cost: { name: "原料成本", value: "" },
           },
-          pricing_multiplier: 1.0,
+          pricing_multiplier: "1.0",
           final_price_per_kg: "",
         },
       ],
@@ -755,18 +685,28 @@ const QuotationEditPage = () => {
   const updateItemField = (index, field, value) => {
     setFormData((prev) => {
       const newItems = [...prev.items];
-      newItems[index] = { ...newItems[index], [field]: value };
+
+      // 🌟 深拷貝更新：強制觸發 React Re-render
+      const updatedItem = { ...newItems[index], [field]: value };
 
       if (field === "product" && value) {
         const selectedMat = allMaterials.find(
           (m) => String(m.id) === String(value),
         );
-        if (selectedMat && newItems[index].costs_breakdown["material_cost"]) {
-          newItems[index].costs_breakdown["material_cost"].value = Math.round(
-            parseFloat(selectedMat.estimated_cost || 0),
-          );
+        if (selectedMat) {
+          updatedItem.costs_breakdown = {
+            ...updatedItem.costs_breakdown,
+            material_cost: {
+              name: "原料成本",
+              value: String(
+                Math.round(parseFloat(selectedMat.estimated_cost || 0)),
+              ),
+            },
+          };
         }
       }
+
+      newItems[index] = updatedItem;
       return { ...prev, items: newItems };
     });
   };
@@ -808,6 +748,28 @@ const QuotationEditPage = () => {
     });
   };
 
+  // 數字型文字安全過濾（僅允許整數或小數點）
+  const handleNumericTextInput = (val, allowDecimal = true) => {
+    if (val === "") return "";
+    let clean = val.replace(/[^0-9.]/g, "");
+    if (!allowDecimal) clean = clean.replace(/\./g, "");
+    const parts = clean.split(".");
+    if (parts.length > 2) clean = parts[0] + "." + parts.slice(1).join("");
+    return clean;
+  };
+
+  const calculatedTotals = useMemo(() => {
+    let total = 0;
+    formData.items.forEach((item) => {
+      // 🌟 已修復：改為抓取 sales_unit_quantity 與 final_price_per_kg
+      const q = Number(item.sales_unit_quantity) || 0;
+      const p = Number(item.final_price_per_kg) || 0;
+      total += Math.round(q * p);
+    });
+    const tax = Math.round(total * 0.05);
+    return { total_amount: total, tax_amount: tax, grand_total: total + tax };
+  }, [formData.items]);
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!formData.customer)
@@ -827,14 +789,19 @@ const QuotationEditPage = () => {
         message: "請至少新增一筆報價品項",
       });
     if (
-      formData.items.some((item) => !item.product || !item.final_price_per_kg)
+      formData.items.some(
+        (item) =>
+          !item.product ||
+          !item.final_price_per_kg ||
+          isNaN(Number(item.final_price_per_kg)),
+      )
     )
       return setDialog({
         isOpen: true,
         type: "alert",
         status: "warning",
         title: "資料不完整",
-        message: "所有品項皆須選擇產品並輸入最終報價",
+        message: "所有品項皆須選擇產品並輸入有效的最終報價金額",
       });
 
     setDialog({
@@ -854,9 +821,27 @@ const QuotationEditPage = () => {
             ...formData,
             items: formData.items.map((item) => {
               const { id, product_detail, ...rest } = item;
-              return typeof id === "string" && id.startsWith("temp_")
-                ? rest
-                : { id, ...rest };
+              const processed =
+                typeof id === "string" && id.startsWith("temp_")
+                  ? rest
+                  : { id, ...rest };
+
+              processed.sales_unit_quantity =
+                Number(processed.sales_unit_quantity) || 1;
+              processed.sales_pack_quantity =
+                Number(processed.sales_pack_quantity) || 1;
+              processed.pricing_multiplier =
+                Number(processed.pricing_multiplier) || 1.0;
+              processed.final_price_per_kg =
+                Number(processed.final_price_per_kg) || 0;
+
+              // 🌟 將空字串轉為 null 交給後端，並且帶入 ID 後綴確保 Django 能接
+              processed.outer_pack = processed.outer_pack || null;
+              processed.inner_pack = processed.inner_pack || null;
+              processed.outer_pack_id = processed.outer_pack;
+              processed.inner_pack_id = processed.inner_pack;
+
+              return processed;
             }),
           };
 
@@ -914,38 +899,46 @@ const QuotationEditPage = () => {
   }
 
   return (
-    <div className="w-full p-5 md:p-6 pb-12 max-w-7xl mx-auto bg-slate-50 min-h-screen font-sans text-slate-800 print:bg-white print:p-0">
-      <style>{`@media print { .page-break { page-break-before: always; } @page { size: A4 portrait; margin: 0; } }`}</style>
+    <div className="w-full p-4 md:p-8 pb-16 max-w-7xl mx-auto bg-slate-50 min-h-screen font-sans text-slate-800 print:bg-white print:p-0">
+      <style>{`
+        @media print {
+          .page-break { page-break-before: always; }
+          @page { size: A4 portrait; margin: 0; }
+        }
+      `}</style>
 
-      <div className="mb-5 print:hidden">
-        <h2 className="text-3xl font-extrabold text-slate-800 tracking-tight flex items-center gap-3">
-          編輯報價單
-        </h2>
+      {/* 標題與簡介 */}
+      <div className="mb-6 print:hidden flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div>
+          <h2 className="text-2xl md:text-3xl font-black text-slate-900 tracking-tight">
+            編輯報價單
+          </h2>
+          <p className="text-[13px] text-slate-500 font-medium mt-1">
+            單號：{formData.quotation_number || "未核發"}
+          </p>
+        </div>
       </div>
 
-      <div className="bg-blue-50 text-blue-800 text-[14px] p-4 rounded-lg mb-6 border border-blue-100 shadow-sm print:hidden">
-        <p className="flex items-center gap-2 font-bold mb-1.5">
-          <span className="text-lg leading-none">💡</span> 系統功能說明
+      <div className="bg-blue-50/70 backdrop-blur-md text-blue-900 text-[13px] p-4 md:p-5 rounded-2xl mb-8 border border-blue-200/60 shadow-sm print:hidden">
+        <p className="flex items-center gap-2 font-bold mb-2">
+          <span className="text-base">💡</span> 系統功能說明
         </p>
-        <ul className="list-disc list-inside space-y-1 ml-6 text-slate-700">
-          <li>請先選定客戶，系統才會根據客戶歷史紀錄或特約開啟報價功能。</li>
-          <li>
-            動態成本區塊可新增「包材成本」、「人工成本」，系統將自動加總並乘以「報價常數」給出建議單價。
-          </li>
-          <li>
-            輸入銷售數量後，系統會自動在「成本估算單」中核算總需求量與總材料成本。
-          </li>
+        <ul className="list-disc list-inside space-y-1 ml-5 text-slate-700 font-medium">
+          <li>選定客戶後即可配置產品、拆解內部製造成本與設定報價係數。</li>
+          <li>包材結構採用分組設定，完整支援外箱大單位與內袋輔助單位對應。</li>
+          <li>所有數值欄位均支援文字直接編輯，系統自動核算估計成本與總計。</li>
         </ul>
       </div>
 
-      <form className="flex flex-col gap-6 w-full pb-6 print:hidden">
-        <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-          <h3 className="text-[15px] font-bold text-slate-800 mb-5 border-b border-slate-100 pb-2.5 flex items-center gap-2">
-            <Building2 size={20} className="text-slate-500" /> 客戶與單據資訊
+      <form className="flex flex-col gap-8 w-full pb-6 print:hidden">
+        {/* 客戶與單據狀態卡片 */}
+        <div className="bg-white p-6 md:p-7 rounded-3xl border border-slate-200/80 shadow-sm">
+          <h3 className="text-[14px] font-black text-blue-600 uppercase tracking-widest mb-5 flex items-center gap-2">
+            <Building2 size={18} /> 客戶與單據資訊
           </h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
-              <label className="block text-[13px] font-bold text-slate-500 mb-1.5 uppercase tracking-wider">
+              <label className="block text-[12px] font-bold text-slate-600 mb-2 uppercase tracking-wider">
                 指定客戶 <span className="text-red-500">*</span>
               </label>
               <FilterableDropdown
@@ -959,7 +952,7 @@ const QuotationEditPage = () => {
               />
             </div>
             <div>
-              <label className="block text-[13px] font-bold text-slate-500 mb-1.5 uppercase tracking-wider">
+              <label className="block text-[12px] font-bold text-slate-600 mb-2 uppercase tracking-wider">
                 單據狀態 <span className="text-red-500">*</span>
               </label>
               <select
@@ -967,20 +960,21 @@ const QuotationEditPage = () => {
                 onChange={(e) =>
                   setFormData((p) => ({ ...p, status: e.target.value }))
                 }
-                className="w-full h-[40px] px-3 py-2 border border-slate-300 rounded-md focus:border-blue-500 focus:ring-2 focus:ring-blue-500 outline-none transition-colors bg-white font-medium text-[14px]"
+                className="w-full h-[42px] px-3.5 py-2 border border-slate-300/80 rounded-xl focus:border-blue-500 focus:ring-4 focus:ring-blue-500/15 outline-none transition-all bg-white font-bold text-[13px] text-slate-800 shadow-sm"
               >
-                <option value="DRAFT">📝 草稿</option>
-                <option value="CONFIRMED">✅ 已確認/成立</option>
+                <option value="DRAFT">📝 草稿 (DRAFT)</option>
+                <option value="CONFIRMED">✅ 已確認/成立 (CONFIRMED)</option>
               </select>
             </div>
           </div>
         </div>
 
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
-          <div className="px-6 py-4 border-b border-slate-200 flex flex-col sm:flex-row justify-between items-start sm:items-center bg-slate-50/50 gap-3">
-            <h3 className="text-[15px] font-bold text-slate-800 flex items-center gap-2">
-              <Calculator size={20} className="text-slate-500" /> 報價品項明細
-              <span className="text-slate-400 font-normal text-[14px] ml-1">
+        {/* 報價品項明細 */}
+        <div className="bg-white rounded-3xl border border-slate-200/80 shadow-sm overflow-hidden flex flex-col">
+          <div className="px-6 md:px-8 py-5 border-b border-slate-200/80 flex flex-col sm:flex-row justify-between items-start sm:items-center bg-slate-50/50 gap-3">
+            <h3 className="text-[14px] font-black text-blue-600 uppercase tracking-widest flex items-center gap-2">
+              <Calculator size={18} /> 報價品項明細
+              <span className="text-slate-400 font-bold text-[13px] ml-1">
                 ({formData.items.length})
               </span>
             </h3>
@@ -988,17 +982,17 @@ const QuotationEditPage = () => {
               type="button"
               onClick={handleAddItem}
               disabled={!formData.customer}
-              className="text-[14px] bg-white text-emerald-600 px-3 py-1.5 rounded-md hover:bg-emerald-50 font-bold transition-colors shadow-sm flex items-center gap-1.5 border border-slate-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="text-[13px] bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white px-4 py-2 rounded-xl font-bold transition-all shadow-sm flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              <Plus size={16} /> 新增品項
+              <Plus size={16} strokeWidth={2.5} /> 新增品項
             </button>
           </div>
 
-          <div className="p-6 bg-slate-50/30 flex flex-col gap-6">
+          <div className="p-6 md:p-8 bg-slate-50/40 flex flex-col gap-8">
             {formData.items.length === 0 ? (
-              <div className="py-14 text-center border-2 border-dashed border-slate-200 rounded-lg text-slate-400 font-medium text-[15px]">
+              <div className="py-16 text-center border-2 border-dashed border-slate-300/80 rounded-2xl text-slate-400 font-bold text-[14px] bg-white">
                 {formData.customer
-                  ? "請點擊右上角「新增品項」開始報價"
+                  ? "點擊上方「新增品項」開始配置報價單"
                   : "請先於上方選擇客戶"}
               </div>
             ) : (
@@ -1030,56 +1024,54 @@ const QuotationEditPage = () => {
                 return (
                   <div
                     key={item.id}
-                    className="bg-white border border-slate-200 rounded-lg shadow-sm overflow-hidden relative group"
+                    className="bg-white border border-slate-200/90 rounded-3xl shadow-sm hover:shadow-md transition-all overflow-hidden relative"
                   >
-                    <div className="absolute top-2.5 right-2.5 z-10 lg:hidden">
+                    {/* 品項卡片 Header */}
+                    <div className="bg-slate-100/70 px-6 py-3.5 border-b border-slate-200/80 flex justify-between items-center">
+                      <span className="text-[12px] font-black uppercase tracking-widest text-slate-500">
+                        品項 #{index + 1}
+                      </span>
                       <button
                         type="button"
                         onClick={() => handleRemoveItem(index)}
-                        className="text-red-500 hover:text-white p-1.5 bg-red-50 hover:bg-red-500 rounded-full backdrop-blur-sm shadow-sm border border-red-200 transition-colors"
+                        className="text-red-600 hover:text-white bg-red-50 hover:bg-red-600 px-3 py-1 rounded-lg text-[12px] font-bold transition-all flex items-center gap-1 border border-red-200 shadow-sm"
                       >
-                        <XCircle size={18} />
+                        <Trash2 size={13} /> 移除品項
                       </button>
                     </div>
 
-                    <div className="p-5 grid grid-cols-1 lg:grid-cols-12 gap-6 relative">
-                      <div className="lg:col-span-5 flex flex-col gap-4 border-b lg:border-b-0 lg:border-r border-slate-100 pb-4 lg:pb-0 lg:pr-6">
-                        <div className="flex justify-between items-center mb-1">
-                          <label className="block text-[13px] font-bold text-slate-500 uppercase">
-                            報價產品
+                    <div className="p-6 grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+                      {/* 左側：產品選擇與包材結構 */}
+                      <div className="lg:col-span-5 flex flex-col gap-5 border-b lg:border-b-0 lg:border-r border-slate-200/80 pb-6 lg:pb-0 lg:pr-8">
+                        <div>
+                          <label className="block text-[12px] font-bold text-slate-600 mb-2 uppercase tracking-wider">
+                            報價產品 <span className="text-red-500">*</span>
                           </label>
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveItem(index)}
-                            className="hidden lg:flex text-red-600 bg-red-50 hover:bg-red-500 hover:text-white px-2 py-1 rounded text-[11px] font-bold transition-colors items-center gap-1 border border-red-200 shadow-sm"
-                          >
-                            <Trash2 size={13} /> 移除
-                          </button>
+                          <FilterableDropdown
+                            value={item.product}
+                            onChange={(val) =>
+                              updateItemField(index, "product", val)
+                            }
+                            options={materials}
+                            placeholder="搜尋成品料號或名稱"
+                            renderItem={(m) => (
+                              <div className="flex justify-between items-center w-full">
+                                <span className="text-[13px] text-slate-400 font-mono">
+                                  [{m.code}]
+                                </span>
+                                <span className="text-[13px] text-slate-800 font-bold ml-2">
+                                  {m.name}
+                                </span>
+                              </div>
+                            )}
+                          />
                         </div>
-                        <FilterableDropdown
-                          value={item.product}
-                          onChange={(val) =>
-                            updateItemField(index, "product", val)
-                          }
-                          options={materials}
-                          placeholder="搜尋成品"
-                          renderItem={(m) => (
-                            <div className="flex justify-between items-center w-full">
-                              <span className="text-[14px] text-slate-400 shrink-0">
-                                [{m.code}]
-                              </span>
-                              <span className="text-[14px] text-slate-800 ml-2">
-                                {m.name}
-                              </span>
-                            </div>
-                          )}
-                        />
 
                         <div>
-                          <label className="block text-[13px] font-bold text-slate-500 mb-1.5 uppercase flex justify-between items-end">
+                          <label className="block text-[12px] font-bold text-slate-600 mb-2 uppercase tracking-wider flex justify-between">
                             <span>包裝規格文字</span>
                             <span className="text-[11px] text-slate-400 font-normal">
-                              列印呈現在報價單上
+                              (印於報價單)
                             </span>
                           </label>
                           <input
@@ -1089,242 +1081,296 @@ const QuotationEditPage = () => {
                               updateItemField(index, "spec", e.target.value)
                             }
                             placeholder="如：1KG*25包/箱"
-                            className="w-full px-3 py-2 border border-slate-300 rounded-md focus:border-blue-500 focus:ring-2 focus:ring-blue-500 outline-none text-[14px]"
+                            className="w-full px-3.5 py-2 h-[42px] border border-slate-300/80 rounded-xl focus:border-blue-500 focus:ring-4 focus:ring-blue-500/15 outline-none text-[13px] font-bold text-slate-800 transition-all shadow-sm"
                           />
                         </div>
 
-                        <div className="flex flex-col gap-3 bg-slate-50 p-3 rounded-lg border border-slate-200 mt-auto">
-                          <div className="flex gap-2 items-end">
-                            <div className="flex-1">
-                              <label className="block text-[11px] font-bold text-slate-500 mb-1 uppercase">
-                                銷售數量
-                              </label>
-                              <input
-                                type="number"
-                                min="1"
-                                value={item.sales_unit_quantity}
-                                onChange={(e) =>
-                                  updateItemField(
-                                    index,
-                                    "sales_unit_quantity",
-                                    e.target.value,
-                                  )
-                                }
-                                className="w-full px-2.5 py-1.5 border border-slate-300 rounded-md focus:border-blue-500 focus:ring-2 focus:ring-blue-500 outline-none text-[14px] font-mono"
-                              />
+                        {/* 🌟 Apple 風格 包裝與換算結構分組 */}
+                        <div className="bg-slate-50/80 p-4 rounded-2xl border border-slate-200/80 flex flex-col gap-3.5">
+                          <div className="flex items-center gap-1.5 text-blue-700 font-black text-[12px] uppercase tracking-wider border-b border-slate-200/60 pb-2">
+                            <Package size={15} strokeWidth={2.5} />{" "}
+                            包材結構與換算設定
+                          </div>
+
+                          {/* 銷售大單位 (外層) */}
+                          <div className="bg-white p-3.5 rounded-xl border border-slate-200/70 shadow-2xs space-y-3">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[11px] font-black uppercase text-slate-500 tracking-wider">
+                                銷售大單位 (外層)
+                              </span>
                             </div>
-                            <div className="w-24 shrink-0">
-                              <label className="block text-[11px] font-bold text-slate-500 mb-1 uppercase">
-                                銷售單位
+                            <div className="grid grid-cols-2 gap-3">
+                              <div>
+                                <label className="block text-[11px] font-bold text-slate-400 mb-1">
+                                  銷售數量
+                                </label>
+                                <input
+                                  type="text"
+                                  inputMode="decimal"
+                                  value={+item.sales_unit_quantity}
+                                  onChange={(e) =>
+                                    updateItemField(
+                                      index,
+                                      "sales_unit_quantity",
+                                      handleNumericTextInput(e.target.value),
+                                    )
+                                  }
+                                  className="w-full px-3 py-1.5 h-[38px] border border-slate-200 rounded-lg text-center font-mono font-bold text-[13px] focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[11px] font-bold text-slate-400 mb-1">
+                                  大單位名稱
+                                </label>
+                                <input
+                                  type="text"
+                                  value={item.sales_unit}
+                                  onChange={(e) =>
+                                    updateItemField(
+                                      index,
+                                      "sales_unit",
+                                      e.target.value,
+                                    )
+                                  }
+                                  placeholder="箱"
+                                  className="w-full px-3 py-1.5 h-[38px] border border-slate-200 rounded-lg text-center font-bold text-[13px] focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none"
+                                />
+                              </div>
+                            </div>
+                            <div>
+                              <label className="block text-[11px] font-bold text-slate-400 mb-1">
+                                對應實體外包裝 (MRP推算用)
                               </label>
-                              <input
-                                type="text"
-                                value={item.sales_unit}
-                                onChange={(e) =>
-                                  updateItemField(
-                                    index,
-                                    "sales_unit",
-                                    e.target.value,
-                                  )
+                              <FilterableDropdown
+                                value={item.outer_pack}
+                                onChange={(val) =>
+                                  updateItemField(index, "outer_pack", val)
                                 }
-                                placeholder="箱"
-                                className="w-full px-2.5 py-1.5 border border-slate-300 rounded-md focus:border-blue-500 focus:ring-2 focus:ring-blue-500 outline-none text-[14px]"
+                                options={packMaterials}
+                                placeholder="-- 無需對應外包裝 --"
+                                renderItem={(m) =>
+                                  m.id ? `[${m.code}] ${m.name}` : m.name
+                                }
                               />
                             </div>
                           </div>
 
-                          <div className="w-full h-px bg-slate-200"></div>
-
-                          <div className="flex gap-2 items-end">
-                            <div className="flex-1">
-                              <label className="block text-[11px] font-bold text-slate-500 mb-1 uppercase">
-                                每單位含個數
-                              </label>
-                              <input
-                                type="number"
-                                min="1"
-                                value={item.sales_pack_quantity}
-                                onChange={(e) =>
-                                  updateItemField(
-                                    index,
-                                    "sales_pack_quantity",
-                                    e.target.value,
-                                  )
-                                }
-                                placeholder="1"
-                                className="w-full px-2.5 py-1.5 border border-slate-300 rounded-md focus:border-blue-500 focus:ring-2 focus:ring-blue-500 outline-none text-[14px] font-mono"
-                              />
+                          {/* 內部小單位 (內層) */}
+                          <div className="bg-white p-3.5 rounded-xl border border-slate-200/70 shadow-2xs space-y-3">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[11px] font-black uppercase text-slate-500 tracking-wider">
+                                內部小單位 (內層)
+                              </span>
                             </div>
-                            <div className="w-24 shrink-0">
-                              <label className="block text-[11px] font-bold text-slate-500 mb-1 uppercase">
-                                輔助單位
+                            <div className="grid grid-cols-2 gap-3">
+                              <div>
+                                <label className="block text-[11px] font-bold text-slate-400 mb-1">
+                                  每單位內含數量
+                                </label>
+                                <input
+                                  type="text"
+                                  inputMode="decimal"
+                                  value={+item.sales_pack_quantity}
+                                  onChange={(e) =>
+                                    updateItemField(
+                                      index,
+                                      "sales_pack_quantity",
+                                      handleNumericTextInput(e.target.value),
+                                    )
+                                  }
+                                  className="w-full px-3 py-1.5 h-[38px] border border-slate-200 rounded-lg text-center font-mono font-bold text-[13px] focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[11px] font-bold text-slate-400 mb-1">
+                                  小單位名稱
+                                </label>
+                                <input
+                                  type="text"
+                                  value={item.sales_pack_unit}
+                                  onChange={(e) =>
+                                    updateItemField(
+                                      index,
+                                      "sales_pack_unit",
+                                      e.target.value,
+                                    )
+                                  }
+                                  placeholder="包"
+                                  className="w-full px-3 py-1.5 h-[38px] border border-slate-200 rounded-lg text-center font-bold text-[13px] focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none"
+                                />
+                              </div>
+                            </div>
+                            <div>
+                              <label className="block text-[11px] font-bold text-slate-400 mb-1">
+                                對應實體內包裝 (MRP推算用)
                               </label>
-                              <input
-                                type="text"
-                                value={item.sales_pack_unit}
-                                onChange={(e) =>
-                                  updateItemField(
-                                    index,
-                                    "sales_pack_unit",
-                                    e.target.value,
-                                  )
+                              <FilterableDropdown
+                                value={item.inner_pack}
+                                onChange={(val) =>
+                                  updateItemField(index, "inner_pack", val)
                                 }
-                                placeholder="包"
-                                className="w-full px-2.5 py-1.5 border border-slate-300 rounded-md focus:border-blue-500 focus:ring-2 focus:ring-blue-500 outline-none text-[14px] bg-white"
+                                options={packMaterials}
+                                placeholder="-- 無需對應內包裝 --"
+                                renderItem={(m) =>
+                                  m.id ? `[${m.code}] ${m.name}` : m.name
+                                }
                               />
                             </div>
                           </div>
                         </div>
                       </div>
 
-                      <div className="lg:col-span-4 flex flex-col gap-3 border-b lg:border-b-0 lg:border-r border-slate-100 pb-4 lg:pb-0 lg:pr-6">
-                        <div className="flex justify-between items-center mb-1 relative">
-                          <label className="block text-[13px] font-bold text-slate-500 uppercase">
-                            內部成本拆解 (每單位)
-                          </label>
-                          <AddCostDropdown
-                            existingKeys={costsKeys}
-                            onSelect={(key) =>
-                              handleAddSpecificCost(index, key)
-                            }
-                          />
+                      {/* 中間：成本拆解 */}
+                      <div className="lg:col-span-4 flex flex-col gap-4 border-b lg:border-b-0 lg:border-r border-slate-200/80 pb-6 lg:pb-0 lg:pr-8 h-full justify-between">
+                        <div className="space-y-4">
+                          <div className="flex justify-between items-center">
+                            <label className="block text-[12px] font-bold text-slate-600 uppercase tracking-wider">
+                              內部成本拆解 (每單位)
+                            </label>
+                            <AddCostDropdown
+                              existingKeys={costsKeys}
+                              onSelect={(key) =>
+                                handleAddSpecificCost(index, key)
+                              }
+                            />
+                          </div>
+
+                          <div className="space-y-2.5">
+                            {costsKeys.map((costKey) => (
+                              <div
+                                key={costKey}
+                                className="flex gap-2 items-center"
+                              >
+                                <input
+                                  type="text"
+                                  value={item.costs_breakdown[costKey].name}
+                                  readOnly
+                                  className="w-28 px-3 py-2 h-[40px] border border-slate-200 rounded-xl outline-none text-[13px] font-bold bg-slate-100 text-slate-600 shrink-0"
+                                />
+                                <div className="relative flex-1 flex items-center min-w-0">
+                                  <span className="absolute left-3 text-slate-400 text-[13px] font-bold">
+                                    $
+                                  </span>
+                                  <input
+                                    type="text"
+                                    inputMode="decimal"
+                                    value={item.costs_breakdown[costKey].value}
+                                    onChange={(e) =>
+                                      updateCostBreakdown(
+                                        index,
+                                        costKey,
+                                        "value",
+                                        handleNumericTextInput(e.target.value),
+                                      )
+                                    }
+                                    placeholder="0"
+                                    className="w-full pl-7 pr-3 py-2 h-[40px] border border-slate-300/80 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none text-[14px] text-right font-mono font-bold text-slate-800"
+                                  />
+                                </div>
+                                <div className="shrink-0">
+                                  {costKey === "material_cost" ? (
+                                    <div
+                                      className="w-[36px] h-[40px] flex items-center justify-center text-slate-300 bg-slate-50 border border-slate-200/60 rounded-xl cursor-not-allowed"
+                                      title="基礎成本項目不可刪除"
+                                    >
+                                      <Lock size={14} />
+                                    </div>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        removeCostField(index, costKey)
+                                      }
+                                      className="w-[36px] h-[40px] flex items-center justify-center text-red-500 hover:text-white bg-red-50 hover:bg-red-500 rounded-xl border border-red-200 transition-colors shadow-sm"
+                                      title="移除此項目"
+                                    >
+                                      <Trash2 size={14} />
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
                         </div>
 
-                        {costsKeys.map((costKey) => (
-                          <div
-                            key={costKey}
-                            className="flex gap-2 items-center"
-                          >
+                        <div className="pt-4 border-t border-slate-200/80 flex justify-between items-center bg-slate-50/50 p-4 rounded-2xl">
+                          <span className="text-[12px] font-bold text-slate-500 uppercase tracking-wider">
+                            估算單位成本
+                          </span>
+                          <span className="text-[16px] font-black font-mono text-slate-900">
+                            ${formatCurrency(totalCostPerUnit)}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* 右側：係數、售價與小計 */}
+                      <div className="lg:col-span-3 flex flex-col gap-4 h-full justify-between">
+                        <div className="space-y-4">
+                          <div>
+                            <label className="block text-[12px] font-bold text-slate-600 mb-2 uppercase tracking-wider">
+                              報價係數 (Multiplier)
+                            </label>
                             <input
                               type="text"
-                              value={item.costs_breakdown[costKey].name}
-                              readOnly
-                              className="flex-1 px-3 py-1.5 border border-slate-200 rounded-md outline-none text-[13px] bg-slate-100 text-slate-500 min-w-0"
-                            />
-                            <div className="relative flex-1 flex items-center gap-1.5 min-w-0">
-                              <span className="text-slate-400 text-[13px]">
-                                $
-                              </span>
-                              <input
-                                type="number"
-                                min="0"
-                                step="1"
-                                value={item.costs_breakdown[costKey].value}
-                                onChange={(e) =>
-                                  updateCostBreakdown(
-                                    index,
-                                    costKey,
-                                    "value",
-                                    e.target.value,
-                                  )
-                                }
-                                placeholder="0"
-                                className="w-full px-2.5 py-1.5 border border-slate-300 rounded-md focus:border-blue-500 focus:ring-2 focus:ring-blue-500 outline-none text-[14px] text-right font-mono"
-                              />
-                            </div>
-                            <div className="w-8 flex justify-center items-center shrink-0">
-                              {costKey === "material_cost" ? (
-                                <div
-                                  className="w-[34px] h-[34px] flex items-center justify-center text-slate-300 bg-slate-50 border border-slate-100 rounded-md cursor-not-allowed"
-                                  title="基本成本項目，不可移除"
-                                >
-                                  <Lock size={15} />
-                                </div>
-                              ) : (
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    removeCostField(index, costKey)
-                                  }
-                                  className="w-[34px] h-[34px] flex items-center justify-center text-red-500 bg-red-50 hover:bg-red-500 hover:text-white transition-colors rounded-md border border-red-100 shadow-sm"
-                                  title="移除成本項目"
-                                >
-                                  <Trash2 size={15} />
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        ))}
-
-                        <div className="mt-auto pt-3 border-t border-slate-200 flex flex-col justify-end h-[54px] gap-1">
-                          <div className="flex justify-between items-end leading-none">
-                            <span className="text-[13px] font-bold text-slate-600">
-                              估算單位成本：
-                            </span>
-                            <span className="text-[15px] font-black font-mono text-slate-800">
-                              ${formatCurrency(totalCostPerUnit)}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="lg:col-span-3 flex flex-col gap-4">
-                        <div>
-                          <label className="block text-[13px] font-bold text-slate-500 mb-1.5 uppercase">
-                            報價係數
-                          </label>
-                          <input
-                            type="number"
-                            min="0"
-                            step="0.001"
-                            value={item.pricing_multiplier}
-                            onChange={(e) =>
-                              updateItemField(
-                                index,
-                                "pricing_multiplier",
-                                e.target.value,
-                              )
-                            }
-                            className="w-full px-3 py-2 border border-slate-300 rounded-md focus:border-purple-500 focus:ring-2 focus:ring-purple-500 outline-none text-[14px] font-mono text-purple-700 font-bold bg-purple-50/30"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[13px] font-bold text-slate-500 mb-1.5 uppercase">
-                            建議售價 (每單位)
-                          </label>
-                          <div className="bg-slate-50 p-2 text-[13px] flex justify-between border border-slate-200 rounded-md">
-                            <span className="text-[14px] font-mono font-bold text-slate-500">
-                              ${formatCurrency(suggestedPrice)}
-                            </span>
-                          </div>
-                        </div>
-
-                        <div>
-                          <label className="block text-[12px] font-black text-blue-600 mb-1.5 uppercase">
-                            最終報價單價 (每單位){" "}
-                            <span className="text-red-500">*</span>
-                          </label>
-                          <div className="relative">
-                            <span className="absolute left-3 top-2.5 text-slate-400 font-bold text-[16px]">
-                              $
-                            </span>
-                            <input
-                              type="number"
-                              min="0"
-                              step="1"
-                              value={item.final_price_per_kg}
+                              inputMode="decimal"
+                              value={item.pricing_multiplier}
                               onChange={(e) =>
                                 updateItemField(
                                   index,
-                                  "final_price_per_kg",
-                                  e.target.value,
+                                  "pricing_multiplier",
+                                  handleNumericTextInput(e.target.value),
                                 )
                               }
-                              placeholder={suggestedPrice.toString()}
-                              className="w-full pl-7 pr-3 py-2 border-2 border-blue-200 rounded-md focus:border-blue-500 outline-none text-[18px] font-mono font-black text-blue-700"
+                              placeholder="1.0"
+                              className="w-full px-3.5 py-2 h-[42px] border border-purple-200 rounded-xl focus:border-purple-500 focus:ring-4 focus:ring-purple-500/15 outline-none text-[14px] font-mono text-purple-700 font-bold bg-purple-50/40 shadow-sm"
                             />
+                          </div>
+
+                          <div>
+                            <label className="block text-[12px] font-bold text-slate-600 mb-2 uppercase tracking-wider">
+                              建議售價 (每單位)
+                            </label>
+                            <div className="bg-slate-100/80 px-3.5 py-2 h-[42px] text-[13px] flex items-center justify-between border border-slate-200 rounded-xl">
+                              <span className="text-[14px] font-mono font-bold text-slate-500">
+                                ${formatCurrency(suggestedPrice)}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div>
+                            <label className="block text-[12px] font-black text-blue-600 mb-2 uppercase tracking-wider">
+                              最終報價單價 (每單位){" "}
+                              <span className="text-red-500">*</span>
+                            </label>
+                            <div className="relative">
+                              <span className="absolute left-3.5 top-2.5 text-slate-400 font-bold text-[15px]">
+                                $
+                              </span>
+                              <input
+                                type="text"
+                                inputMode="decimal"
+                                value={item.final_price_per_kg}
+                                onChange={(e) =>
+                                  updateItemField(
+                                    index,
+                                    "final_price_per_kg",
+                                    handleNumericTextInput(e.target.value),
+                                  )
+                                }
+                                placeholder={suggestedPrice.toString()}
+                                className="w-full pl-8 pr-3.5 py-2 h-[44px] border-2 border-blue-200 rounded-xl focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20 outline-none text-[17px] font-mono font-black text-blue-700 shadow-sm"
+                              />
+                            </div>
                           </div>
                         </div>
 
-                        <div className="mt-auto pt-3 border-t border-slate-200 flex flex-col justify-end h-[54px]">
-                          <div className="flex justify-end items-baseline">
-                            <span className="text-[12px] text-slate-500 font-bold mr-2">
-                              品項小計 (未稅)：
-                            </span>
-                            <span className="text-[18px] font-black font-mono text-slate-800 leading-none">
-                              ${formatCurrency(Math.round(finalTotalPrice))}
-                            </span>
-                          </div>
+                        <div className="pt-4 border-t border-slate-200/80 flex flex-col justify-end bg-blue-50/40 p-4 rounded-2xl border border-blue-100">
+                          <span className="text-[11px] text-blue-600 font-black uppercase tracking-wider mb-1">
+                            品項小計 (未稅)
+                          </span>
+                          <span className="text-[20px] font-black font-mono text-blue-900 leading-none">
+                            ${formatCurrency(Math.round(finalTotalPrice))}
+                          </span>
                         </div>
                       </div>
                     </div>
@@ -1335,51 +1381,52 @@ const QuotationEditPage = () => {
           </div>
         </div>
 
-        <div className="mt-5 flex flex-col md:flex-row justify-end gap-3 w-full">
+        {/* 底部功能列 */}
+        <div className="mt-2 flex flex-col sm:flex-row justify-end gap-3.5 w-full">
           <button
             type="button"
             onClick={() => setIsPreviewOpen(true)}
             disabled={formData.items.length === 0}
-            className="w-full md:w-auto px-6 py-2.5 bg-white text-slate-700 border border-slate-300 rounded-md hover:bg-slate-50 shadow-sm transition-all font-bold text-[14px] flex items-center justify-center gap-2 disabled:opacity-50"
+            className="w-full sm:w-auto px-7 py-3 bg-white text-slate-700 border border-slate-300 rounded-xl hover:bg-slate-50 active:scale-95 shadow-sm transition-all font-bold text-[14px] flex items-center justify-center gap-2 disabled:opacity-40"
           >
-            <Eye size={16} /> 預覽報價單
+            <Eye size={17} /> 預覽報價單
           </button>
           <button
             type="button"
             onClick={handleSubmit}
             disabled={isSubmitting}
-            className="w-full md:w-auto px-8 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-md shadow-sm transition-all font-bold text-[14px] flex items-center justify-center gap-2 disabled:opacity-50"
+            className="w-full sm:w-auto px-9 py-3 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white rounded-xl shadow-[0_4px_14px_rgba(37,99,235,0.3)] transition-all font-bold text-[14px] flex items-center justify-center gap-2 disabled:opacity-40"
           >
-            <Save size={16} /> {isSubmitting ? "更新中..." : "更新報價"}
+            <Save size={17} /> {isSubmitting ? "更新中..." : "更新報價單"}
           </button>
         </div>
       </form>
 
+      {/* 預覽視窗 Modal */}
       {isPreviewOpen && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 print:static print:block print:bg-transparent print:p-0 print:backdrop-blur-none">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200 print:shadow-none print:w-full print:max-w-none print:max-h-none print:overflow-visible print:block">
-            <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50 shrink-0 print:hidden">
-              <h3 className="text-[18px] font-bold text-slate-800 flex items-center gap-2">
-                <FileText size={20} className="text-blue-600" /> 單據列印預覽
-                (外部報價 / 內部估算)
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md flex items-center justify-center z-50 p-4 print:static print:block print:bg-transparent print:p-0 print:backdrop-blur-none">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200 border border-slate-200 print:shadow-none print:w-full print:max-w-none print:max-h-none print:overflow-visible print:block">
+            <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50/80 shrink-0 print:hidden">
+              <h3 className="text-[16px] font-black text-slate-800 flex items-center gap-2">
+                <FileText size={18} className="text-blue-600" /> 單據列印預覽
               </h3>
               <div className="flex items-center gap-3">
                 <button
                   onClick={handlePrint}
-                  className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-[14px] font-bold rounded-md flex items-center gap-1.5 transition-colors shadow-sm"
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-[13px] font-bold rounded-xl flex items-center gap-1.5 transition-all shadow-sm active:scale-95"
                 >
-                  <Printer size={15} /> 列印
+                  <Printer size={15} /> 列印單據
                 </button>
                 <button
                   onClick={() => setIsPreviewOpen(false)}
-                  className="text-slate-400 hover:text-slate-600 font-bold text-xl ml-2"
+                  className="text-slate-400 hover:text-slate-700 font-bold text-xl ml-2 w-8 h-8 rounded-full flex items-center justify-center hover:bg-slate-200/60 transition-colors"
                 >
                   ✕
                 </button>
               </div>
             </div>
 
-            <div className="flex-1 bg-slate-300 p-6 overflow-y-auto print:bg-white print:p-0 print:overflow-visible print:block print:max-h-none">
+            <div className="flex-1 bg-slate-200/70 p-6 overflow-y-auto print:bg-white print:p-0 print:overflow-visible print:block print:max-h-none">
               <DocumentPreview
                 formData={formData}
                 vendors={vendors}

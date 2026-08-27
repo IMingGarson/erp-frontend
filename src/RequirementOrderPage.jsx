@@ -13,12 +13,16 @@ import {
   ChevronDown,
   FlaskConical,
   AlertTriangle,
+  Info,
+  CheckCircle2,
   Database,
+  Package,
+  Check,
 } from "lucide-react";
 import { useAuthStore } from "./store/authStore";
-import { TFDA_INGREDIENT_RULES } from "./utils/tfdaLegalRules";
 
 const USEAGE_THRESHOLD = 1.8;
+
 const getTodayString = (formatted = false) => {
   const d = new Date();
   const yyyy = d.getFullYear();
@@ -39,40 +43,32 @@ const precise = {
   div: (a, b) => parseFloat((Number(a) / Number(b)).toPrecision(12)),
 };
 
-const formatCurrency = (num) => {
-  if (num === null || num === undefined || isNaN(num)) return "0";
-  return Number(num).toLocaleString("en-US", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 4,
-  });
-};
-
 const TypeTag = ({ type }) => {
   const config = {
     RAW: {
       label: "原物料",
-      css: "bg-emerald-100/80 text-emerald-800 border-emerald-300",
+      css: "bg-emerald-50 text-emerald-700 border-emerald-200",
     },
     SEMI: {
       label: "半成品",
-      css: "bg-purple-100/80 text-purple-800 border-purple-300",
+      css: "bg-purple-50 text-purple-700 border-purple-200",
     },
     PACK: {
       label: "包材",
-      css: "bg-amber-100/80 text-amber-800 border-amber-300",
+      css: "bg-amber-50 text-amber-700 border-amber-200",
     },
     PRODUCT: {
       label: "成品",
-      css: "bg-blue-100/80 text-blue-800 border-blue-300",
+      css: "bg-blue-50 text-blue-700 border-blue-200",
     },
   };
   const typeData = config[type] || {
     label: type,
-    css: "bg-slate-200 text-slate-700 border-slate-300",
+    css: "bg-slate-100 text-slate-700 border-slate-200",
   };
   return (
     <span
-      className={`inline-block text-center min-w-[56px] px-2.5 py-1 rounded-lg text-[11px] uppercase tracking-widest font-black border flex-shrink-0 shadow-sm ${typeData.css}`}
+      className={`inline-block text-center min-w-[72px] px-3 py-1 rounded-lg text-sm uppercase tracking-widest font-semibold border flex-shrink-0 shadow-sm ${typeData.css}`}
     >
       {typeData.label}
     </span>
@@ -80,7 +76,41 @@ const TypeTag = ({ type }) => {
 };
 
 // ==========================================
-// 共用下拉選單元件 (Apple Style 調整)
+// 🌟 遞迴穿透引擎 (用於法規判定)
+// ==========================================
+const getContainedAdditives = (matId, boms, materials, multiplier = 1) => {
+  const results = {};
+  const children = boms.filter((b) => String(b.parent?.id) === String(matId));
+
+  children.forEach((c) => {
+    const childMat = materials.find(
+      (m) => String(m.id) === String(c.child?.id || c.child),
+    );
+    if (!childMat) return;
+    const baseQty = parseFloat(c.base_quantity || 1);
+    const qty = multiplier * (parseFloat(c.quantity_required) / baseQty);
+
+    if (childMat.is_additive && childMat.legal_limit_percent) {
+      if (!results[childMat.id]) results[childMat.id] = { ...childMat, qty: 0 };
+      results[childMat.id].qty += qty;
+    } else if (childMat.type === "SEMI" || childMat.type === "PRODUCT") {
+      const deepResults = getContainedAdditives(
+        childMat.id,
+        boms,
+        materials,
+        qty,
+      );
+      Object.values(deepResults).forEach((dr) => {
+        if (!results[dr.id]) results[dr.id] = { ...dr, qty: 0 };
+        results[dr.id].qty += dr.qty;
+      });
+    }
+  });
+  return results;
+};
+
+// ==========================================
+// 共用精緻化 Dropdown
 // ==========================================
 const FilterableDropdown = ({
   value,
@@ -89,6 +119,7 @@ const FilterableDropdown = ({
   placeholder,
   disabled,
   renderItem,
+  className,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
@@ -102,11 +133,13 @@ const FilterableDropdown = ({
 
   const selectedOpt = options.find((o) => String(o.id) === String(value));
 
+  const defaultClass = "w-full min-h-[44px] px-4 py-2 rounded-xl text-sm";
+  const combinedClass = className || defaultClass;
+
   useEffect(() => {
     const handleClickOutside = (e) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target))
         setIsOpen(false);
-      }
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
@@ -118,15 +151,15 @@ const FilterableDropdown = ({
         type="button"
         disabled={disabled}
         onClick={() => setIsOpen(!isOpen)}
-        className={`w-full h-[46px] px-4 py-2 rounded-xl text-[14px] flex justify-between items-center transition-all duration-200 shadow-sm ${
+        className={`flex justify-between items-center transition-all duration-300 shadow-sm border ${
           disabled
-            ? "bg-slate-100 text-slate-500 cursor-not-allowed border border-slate-300"
+            ? "bg-slate-50 text-slate-400 cursor-not-allowed border-slate-200"
             : isOpen
-              ? "border-2 border-blue-600 ring-2 ring-blue-500/20 bg-white"
-              : "bg-white border border-slate-300 hover:border-slate-400 text-slate-900"
-        }`}
+              ? "border-blue-500 ring-4 ring-blue-500/10 bg-blue-50/30"
+              : "bg-white border-slate-200 hover:border-slate-300 text-slate-900"
+        } ${combinedClass}`}
       >
-        <span className="truncate pr-2 font-bold">
+        <span className="truncate pr-2 font-medium">
           {selectedOpt ? (
             renderItem ? (
               renderItem(selectedOpt)
@@ -134,24 +167,34 @@ const FilterableDropdown = ({
               selectedOpt.name
             )
           ) : (
-            <span className="text-slate-500 font-medium">{placeholder}</span>
+            <span className={disabled ? "text-slate-400" : "text-slate-500"}>
+              {placeholder}
+            </span>
           )}
         </span>
-        <ChevronDown size={18} className="text-slate-500 flex-shrink-0" />
+        <ChevronDown
+          size={18}
+          className={`flex-shrink-0 transition-transform duration-300 ${
+            disabled
+              ? "text-slate-300"
+              : isOpen
+                ? "rotate-180 text-blue-500"
+                : "text-slate-400"
+          }`}
+        />
       </button>
 
       {isOpen && !disabled && (
-        <div className="absolute z-50 top-[calc(100%+6px)] left-0 w-full bg-white border border-slate-300 rounded-2xl shadow-xl flex flex-col max-h-72 overflow-hidden animate-in fade-in zoom-in-95 duration-100">
-          <div className="p-3 border-b border-slate-200 bg-slate-50 shrink-0">
+        <div className="absolute z-50 top-[calc(100%+8px)] left-0 w-full bg-white/90 backdrop-blur-xl border border-slate-200 rounded-2xl shadow-xl flex flex-col max-h-72 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
+          <div className="p-3 border-b border-slate-100 bg-slate-50/50 shrink-0 sticky top-0 z-10">
             <div className="relative">
               <Search
                 size={16}
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500"
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
               />
               <input
                 autoFocus
-                className="w-full border border-slate-300 bg-white rounded-xl pl-9 pr-3 py-2.5 text-[14px] font-bold focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all shadow-sm"
-                placeholder="搜尋代碼或名稱..."
+                className="w-full h-10 border border-slate-200 bg-white rounded-lg pl-10 pr-4 text-sm font-medium focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all shadow-sm"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
@@ -159,26 +202,35 @@ const FilterableDropdown = ({
           </div>
           <div className="overflow-y-auto flex-1 p-2 custom-scrollbar">
             {filteredOptions.length > 0 ? (
-              filteredOptions.map((opt) => (
-                <div
-                  key={opt.id}
-                  onClick={() => {
-                    onChange(opt.id);
-                    setIsOpen(false);
-                    setSearchTerm("");
-                  }}
-                  className={`px-3 py-3 text-[14px] rounded-xl cursor-pointer transition-colors font-bold ${
-                    String(value) === String(opt.id)
-                      ? "bg-blue-600 text-white shadow-sm"
-                      : "text-slate-800 hover:bg-slate-100"
-                  }`}
-                >
-                  {renderItem ? renderItem(opt) : opt.name}
-                </div>
-              ))
+              filteredOptions.map((opt) => {
+                const isSelected = String(value) === String(opt.id);
+                return (
+                  <div
+                    key={opt.id}
+                    onClick={() => {
+                      onChange(opt.id);
+                      setIsOpen(false);
+                      setSearchTerm("");
+                    }}
+                    className={`flex items-center justify-between px-4 py-3 text-sm rounded-xl cursor-pointer transition-all font-medium mb-1 ${
+                      isSelected
+                        ? "bg-blue-600 text-white shadow-md"
+                        : "text-slate-700 hover:bg-blue-50 hover:text-blue-700"
+                    }`}
+                  >
+                    <span className="truncate pr-2">
+                      {renderItem ? renderItem(opt) : opt.name}
+                    </span>
+                    {isSelected && (
+                      <Check size={16} strokeWidth={3} className="text-white" />
+                    )}
+                  </div>
+                );
+              })
             ) : (
-              <div className="px-3 py-8 text-center text-slate-500 text-[14px] font-bold">
-                查無資料
+              <div className="px-4 py-8 text-center text-slate-400 text-sm font-medium flex flex-col items-center justify-center gap-2">
+                <Package size={28} className="opacity-20" />
+                無結果
               </div>
             )}
           </div>
@@ -189,33 +241,60 @@ const FilterableDropdown = ({
 };
 
 // ==========================================
-// 🌟 MRP 添加物法規驗算面板
+// MRP 添加物法規驗算面板
 // ==========================================
-const AdditiveWarningPanel = ({ alloc, materials }) => {
+const AdditiveWarningPanel = ({ alloc, materials, boms }) => {
   if (!alloc || !alloc._base_qty) return null;
   const baseQty = alloc._base_qty;
 
-  const warnings = [];
+  const additiveSummary = {};
+
   Object.keys(alloc).forEach((matId) => {
     if (matId === "_base_qty" || matId === "_productId") return;
     const matInfo = materials.find((m) => String(m.id) === String(matId));
-    if (!matInfo || !matInfo.is_additive || !matInfo.legal_limit_percent)
-      return;
+    if (!matInfo) return;
 
-    const limit = parseFloat(matInfo.legal_limit_percent);
     const totalUsed = alloc[matId].batches.reduce(
       (sum, b) => sum + (parseFloat(b.used) || 0),
       0,
     );
-    const usagePercent = (totalUsed / baseQty) * 100;
+    if (totalUsed <= 0) return;
 
-    if (usagePercent > limit) {
+    if (matInfo.is_additive && matInfo.legal_limit_percent) {
+      if (!additiveSummary[matId])
+        additiveSummary[matId] = {
+          code: matInfo.code,
+          name: matInfo.name,
+          limit: parseFloat(matInfo.legal_limit_percent),
+          totalUsed: 0,
+          sources: [],
+        };
+      additiveSummary[matId].totalUsed += totalUsed;
+    } else if (matInfo.type === "SEMI" || matInfo.type === "PRODUCT") {
+      const embedded = getContainedAdditives(matId, boms, materials, 1);
+      Object.values(embedded).forEach((ea) => {
+        const contributedQty = totalUsed * ea.qty;
+        if (!additiveSummary[ea.id])
+          additiveSummary[ea.id] = {
+            code: ea.code,
+            name: ea.name,
+            limit: parseFloat(ea.legal_limit_percent),
+            totalUsed: 0,
+            sources: [],
+          };
+        additiveSummary[ea.id].totalUsed += contributedQty;
+      });
+    }
+  });
+
+  const warnings = [];
+  Object.values(additiveSummary).forEach((add) => {
+    const usagePercent = (add.totalUsed / baseQty) * 100;
+    if (usagePercent > add.limit) {
       warnings.push({
-        name: matInfo.name,
-        limit,
+        ...add,
         usagePercent,
-        totalUsed,
-        maxAllowed: baseQty * (limit / 100),
+        maxAllowed: baseQty * (add.limit / 100),
       });
     }
   });
@@ -223,36 +302,35 @@ const AdditiveWarningPanel = ({ alloc, materials }) => {
   if (warnings.length === 0) return null;
 
   return (
-    <div className="mb-5 bg-red-50 border border-red-300 rounded-2xl p-6 shadow-sm animate-in fade-in zoom-in-95">
-      <h4 className="text-red-800 font-black text-[14px] flex items-center gap-2 mb-4">
-        <FlaskConical size={18} strokeWidth={2.5} />
-        法規添加物限量超標警示
+    <div className="mb-6 bg-red-50/80 border border-red-200 rounded-2xl p-5 shadow-sm animate-in fade-in zoom-in-95">
+      <h4 className="text-red-800 font-semibold text-sm flex items-center gap-2 mb-4">
+        <FlaskConical size={18} strokeWidth={2.5} /> 法規添加物限量超標警示
       </h4>
       <div className="space-y-3">
         {warnings.map((w, i) => (
           <div
             key={i}
-            className="bg-white rounded-xl p-4 border border-red-200 flex flex-col sm:flex-row justify-between sm:items-center gap-3 shadow-sm"
+            className="bg-white rounded-xl p-4 border border-red-100 flex flex-col sm:flex-row justify-between sm:items-center gap-3 shadow-sm"
           >
             <div>
-              <span className="font-black text-slate-900 mr-3 text-[14px]">
+              <span className="font-semibold text-slate-900 mr-3 text-sm">
                 {w.name}
               </span>
-              <span className="text-[11px] bg-red-100 text-red-700 px-2.5 py-1 rounded-md font-black tracking-widest uppercase">
+              <span className="text-sm bg-red-100 text-red-700 px-3 py-1 rounded-lg font-medium">
                 法定上限 {formatNum(w.limit)}%
               </span>
             </div>
-            <div className="text-[13px] font-bold text-slate-700 flex items-center gap-3 bg-slate-100 px-4 py-2 rounded-lg border border-slate-200">
+            <div className="text-sm font-medium text-slate-700 flex items-center gap-3 bg-slate-50 px-4 py-2 rounded-xl border border-slate-100">
               <span>
                 總用量:{" "}
-                <span className="font-mono font-black text-red-700">
+                <span className="font-mono font-semibold text-red-600">
                   {formatNum(w.totalUsed)} KG
                 </span>
               </span>
-              <span className="text-slate-400">|</span>
+              <span className="text-slate-300">|</span>
               <span>
                 實際佔比:{" "}
-                <span className="font-mono font-black text-red-700 text-[15px]">
+                <span className="font-mono font-semibold text-red-600 text-base">
                   {formatNum(w.usagePercent, 3)}%
                 </span>
               </span>
@@ -260,7 +338,7 @@ const AdditiveWarningPanel = ({ alloc, materials }) => {
           </div>
         ))}
       </div>
-      <p className="text-[12px] text-red-600 font-bold mt-4 flex items-center gap-2">
+      <p className="text-sm text-red-500 font-medium mt-4 flex items-center gap-2">
         <AlertTriangle size={16} />{" "}
         調整批號用量後，實際添加物比例已超出食安法規上限，目前已被系統鎖定無法發行生產單。
       </p>
@@ -314,23 +392,23 @@ const BatchRow = ({
 
   return (
     <div
-      className={`relative flex flex-col bg-white border p-5 rounded-2xl transition-all duration-300 w-full min-h-[120px] ${isModified ? "border-amber-500 ring-2 ring-amber-100 shadow-md" : "border-slate-300 hover:border-blue-400 hover:shadow-md shadow-sm"}`}
+      className={`relative flex flex-col bg-white border p-5 rounded-2xl transition-all duration-300 w-full min-h-[120px] ${isModified ? "border-amber-400 ring-4 ring-amber-400/10 shadow-md" : "border-slate-200 hover:border-blue-300 hover:shadow-md shadow-sm"}`}
     >
       <div className="flex justify-between items-start mb-5 gap-4">
         <div className="min-w-0">
-          <div className="flex items-center gap-2.5 mb-1.5">
+          <div className="flex items-center gap-3 mb-2">
             <span
-              className={`w-3 h-3 rounded-full shrink-0 ${usedQty > 0 ? (isFullyUsed ? "bg-amber-600 shadow-[0_0_8px_rgba(217,119,6,0.6)]" : "bg-blue-600 shadow-[0_0_8px_rgba(37,99,235,0.6)]") : "bg-slate-400"}`}
+              className={`w-3 h-3 rounded-full shrink-0 ${usedQty > 0 ? (isFullyUsed ? "bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.6)]" : "bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.6)]") : "bg-slate-300"}`}
             ></span>
             <h4
-              className="text-[14px] font-black text-slate-900 truncate tracking-wider"
+              className="text-sm font-semibold text-slate-800 truncate"
               title={batch.batch_number}
             >
               {batch.batch_number}
             </h4>
           </div>
           {batch.received_date && (
-            <div className="text-[11px] font-bold text-slate-500 ml-5 tracking-widest uppercase">
+            <div className="text-sm font-medium text-slate-400 ml-6">
               EXP: {new Date(batch.received_date).toLocaleDateString()}
             </div>
           )}
@@ -340,51 +418,50 @@ const BatchRow = ({
             <div className="flex items-center gap-3">
               <div className="relative">
                 <input
-                  type="number"
-                  step={matType === "PACK" ? "1" : "0.01"}
-                  min={0}
+                  type="text"
+                  inputMode="decimal"
+                  pattern="[0-9]*"
                   value={tempValue}
                   onChange={(e) => setTempValue(e.target.value)}
-                  placeholder="0"
-                  className={`w-28 px-3 py-2 text-right text-[14px] font-black font-mono border rounded-xl transition-all duration-200 focus:outline-none shadow-sm ${isModified ? "bg-amber-50 border-amber-500 text-amber-900 focus:ring-2 focus:ring-amber-200" : usedQty > 0 ? "border-blue-400 bg-blue-50 text-blue-800 focus:ring-2 focus:ring-blue-200" : "border-slate-300 text-slate-700 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-blue-200"}`}
+                  className={`w-28 h-11 px-3 text-right text-sm font-semibold font-mono border rounded-xl transition-all duration-300 focus:outline-none shadow-sm ${isModified ? "bg-amber-50 border-amber-400 text-amber-900 focus:ring-4 focus:ring-amber-400/20" : usedQty > 0 ? "border-blue-300 bg-blue-50/50 text-blue-800 focus:ring-4 focus:ring-blue-500/10" : "border-slate-200 text-slate-700 bg-slate-50 focus:bg-white focus:ring-4 focus:ring-blue-500/10"}`}
                 />
-                <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5">
+                <span className="absolute -top-1 -right-1 flex h-3 w-3">
                   {isModified && (
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-500 opacity-75"></span>
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
                   )}
                   <span
-                    className={`relative inline-flex rounded-full h-3.5 w-3.5 ${isModified ? "bg-amber-600" : "hidden"}`}
+                    className={`relative inline-flex rounded-full h-3 w-3 ${isModified ? "bg-amber-500" : "hidden"}`}
                   ></span>
                 </span>
               </div>
               <div
-                className={`overflow-hidden transition-all duration-300 ease-in-out max-w-[70px] opacity-100`}
+                className={`overflow-hidden transition-all duration-300 ease-in-out opacity-100`}
               >
                 <button
                   onClick={handleInternalSave}
-                  className="px-3.5 py-2 bg-amber-600 text-white text-[13px] font-bold rounded-xl hover:bg-amber-700 active:scale-95 shadow-md whitespace-nowrap"
+                  className="px-4 h-11 bg-amber-500 text-white text-sm font-medium rounded-xl hover:bg-amber-600 active:scale-95 shadow-sm whitespace-nowrap transition-colors"
                 >
                   儲存
                 </button>
               </div>
             </div>
           ) : (
-            <div className="bg-slate-100 px-4 py-2 rounded-xl border border-slate-300 text-center shadow-inner min-w-[70px]">
+            <div className="bg-slate-50 px-4 py-2 rounded-xl border border-slate-200 text-center min-w-[60px]">
               <span
-                className={`text-[15px] font-black font-mono ${usedQty > 0 ? "text-[#007AFF]" : "text-slate-500"}`}
+                className={`text-sm font-semibold font-mono ${usedQty > 0 ? "text-blue-600" : "text-slate-400"}`}
               >
-                {tempValue || "0"}
+                {tempValue}
               </span>
             </div>
           )}
         </div>
       </div>
       <div className="mt-auto">
-        <div className="flex justify-between items-end mb-2.5 text-[11px] font-bold text-slate-500 uppercase tracking-widest">
+        <div className="flex justify-between items-end mb-3 text-sm font-medium text-slate-500">
           <span>
             本次分配:{" "}
             <span
-              className={`text-[13px] font-black font-mono ml-1 ${usedQty > 0 ? "text-blue-700" : ""}`}
+              className={`text-base font-semibold font-mono ml-1 ${usedQty > 0 ? "text-blue-600" : ""}`}
             >
               {formatNum(usedQty, matType)}
             </span>{" "}
@@ -392,15 +469,15 @@ const BatchRow = ({
           </span>
           <span>
             庫存剩餘:{" "}
-            <span className="text-[13px] font-black font-mono text-slate-700 ml-1">
+            <span className="text-base font-semibold font-mono text-slate-700 ml-1">
               {formatNum(remainingQty, matType)}
             </span>{" "}
             {unit}
           </span>
         </div>
-        <div className="h-2.5 w-full bg-slate-200 rounded-full overflow-hidden border border-slate-300 shadow-inner">
+        <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden border border-slate-200 shadow-inner">
           <div
-            className={`h-full rounded-full transition-all duration-500 ease-out relative ${isFullyUsed ? "bg-amber-500" : usedQty > 0 ? "bg-blue-600" : "bg-transparent"}`}
+            className={`h-full rounded-full transition-all duration-500 ease-out relative ${isFullyUsed ? "bg-amber-400" : usedQty > 0 ? "bg-blue-500" : "bg-transparent"}`}
             style={{ width: `${usagePercent}%` }}
           >
             {usedQty > 0 && !isFullyUsed && (
@@ -421,6 +498,7 @@ const MaterialAllocationList = ({
   readyOnly = false,
   allocations,
   materials,
+  boms,
   expandedMaterials,
   toggleMaterialExpanded,
   handleBatchUsageSave,
@@ -428,7 +506,7 @@ const MaterialAllocationList = ({
   const itemAlloc = allocations[itemId];
   if (!itemAlloc)
     return (
-      <div className="p-4 text-slate-500 text-[14px] font-bold">
+      <div className="p-4 text-slate-400 text-sm font-medium">
         尚未分配物料...
       </div>
     );
@@ -447,7 +525,7 @@ const MaterialAllocationList = ({
 
   if (sortedMaterials.length === 0) {
     return (
-      <div className="p-8 text-center text-slate-500 border-2 border-dashed border-slate-300 rounded-2xl bg-white shadow-sm text-[14px] font-bold">
+      <div className="p-8 text-center text-slate-400 border border-dashed border-slate-200 rounded-2xl bg-white shadow-sm text-sm font-medium">
         此項目無須分配底層物料庫存，子單據已負責其原料。
       </div>
     );
@@ -455,7 +533,11 @@ const MaterialAllocationList = ({
 
   return (
     <div className="w-full min-w-0">
-      <AdditiveWarningPanel alloc={itemAlloc} materials={materials} />
+      <AdditiveWarningPanel
+        alloc={itemAlloc}
+        materials={materials}
+        boms={boms}
+      />
 
       <div className="space-y-4">
         {sortedMaterials.map(([matId, mat]) => {
@@ -478,24 +560,25 @@ const MaterialAllocationList = ({
             hasAdditiveError = usagePercent > limitPercent;
           }
 
-          const isUnder = totalAllocated < mat.requiredQty - 0.0001;
+          const isSemi = mat.type?.toUpperCase() === "SEMI";
+          const isUnder = !isSemi && totalAllocated < mat.requiredQty - 0.0001;
           const isOver = totalAllocated > mat.maxQty + 0.0001;
           const expandedKey = `${itemId}-${matId}`;
           const isExpanded = expandedMaterials.includes(expandedKey);
 
           const borderColor = hasAdditiveError
-            ? "border-red-500 ring-2 ring-red-200"
+            ? "border-red-400 ring-4 ring-red-400/10"
             : isUnder
-              ? "border-amber-400"
+              ? "border-amber-300"
               : isOver
-                ? "border-purple-300"
-                : "border-slate-300";
+                ? "border-purple-200"
+                : "border-slate-200";
           const bgColor = hasAdditiveError
-            ? "bg-red-50/80"
+            ? "bg-red-50/50"
             : isUnder
-              ? "bg-amber-50/40"
+              ? "bg-amber-50/30"
               : isOver
-                ? "bg-purple-50/30"
+                ? "bg-purple-50/20"
                 : "bg-white";
 
           const sortedBatches = [...mat.batches].sort(
@@ -508,73 +591,79 @@ const MaterialAllocationList = ({
               className={`border rounded-2xl overflow-hidden transition-all shadow-sm ${borderColor}`}
             >
               <div
-                className={`p-5 flex flex-col md:flex-row justify-between items-start md:items-center cursor-pointer hover:opacity-90 transition-opacity ${bgColor}`}
-                onClick={() => toggleMaterialExpanded(expandedKey)}
+                className={`p-5 flex flex-col md:flex-row justify-between items-start md:items-center ${!isSemi ? "cursor-pointer hover:bg-slate-50/80" : ""} transition-colors ${bgColor}`}
+                onClick={() => {
+                  if (!isSemi) toggleMaterialExpanded(expandedKey);
+                }}
               >
                 <div className="flex flex-wrap items-center gap-3 flex-1 min-w-0">
-                  <span className="text-slate-400 text-[11px] w-4 flex-shrink-0 font-black">
-                    {isExpanded ? "▼" : "▶"}
+                  <span className="text-slate-400 text-base w-5 flex-shrink-0 font-medium">
+                    {!isSemi ? (isExpanded ? "▼" : "▶") : ""}
                   </span>
                   <TypeTag type={mat.type} />
-                  <span className="font-black text-slate-900 truncate text-[15px]">
-                    {mat.materialName}
-                  </span>
                   {isAdditive && (
-                    <span className="bg-orange-100 text-orange-700 border border-orange-300 px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-widest flex items-center gap-1 shadow-sm shrink-0">
-                      <FlaskConical size={12} strokeWidth={2.5} /> 法定添加物
+                    <span className="bg-orange-100 text-orange-700 px-3 py-1 rounded-lg text-sm font-medium flex items-center gap-1.5 shadow-sm shrink-0">
+                      <FlaskConical size={14} strokeWidth={2.5} /> 法定添加物
                     </span>
                   )}
+                  <span className="font-semibold text-slate-800 truncate text-base">
+                    {mat.materialName}
+                  </span>
                 </div>
 
-                <div className="flex flex-wrap items-center justify-end gap-2 text-[13px] w-full md:w-auto mt-3 md:mt-0">
+                <div className="flex flex-wrap items-center justify-end gap-3 text-sm w-full md:w-auto mt-3 md:mt-0">
                   {hasAdditiveError && (
-                    <div className="flex items-center gap-2 bg-red-100 text-red-700 px-3 py-1.5 rounded-lg border border-red-300 shadow-sm animate-pulse">
+                    <div className="flex items-center gap-2 bg-red-100/80 text-red-700 px-3 py-1.5 rounded-xl border border-red-200 shadow-sm animate-pulse">
                       <AlertTriangle size={16} strokeWidth={2.5} />
-                      <span className="font-black">
+                      <span className="font-semibold">
                         超標 {formatNum(usagePercent, 2)}%
                       </span>
-                      <span className="text-[10px] font-bold bg-white/90 px-2 py-0.5 rounded text-red-800 border border-red-200 shadow-sm">
-                        最多只能填 {formatNum(maxAllowedQty, "RAW")} {mat.unit}
+                      <span className="text-sm font-medium bg-white/80 px-2 py-0.5 rounded-md text-red-800">
+                        最多 {formatNum(maxAllowedQty, "RAW")} {mat.unit}
                       </span>
                     </div>
                   )}
                   {!hasAdditiveError && isUnder ? (
-                    <span className="font-black text-amber-700 bg-amber-100 px-3.5 py-1.5 rounded-lg border border-amber-300 shadow-sm">
+                    <span className="font-semibold text-amber-700 bg-amber-50 px-4 py-1.5 rounded-xl border border-amber-200 shadow-sm">
                       缺料{" "}
                       {formatNum(mat.requiredQty - totalAllocated, mat.type)}{" "}
                       {mat.unit}
                     </span>
-                  ) : !hasAdditiveError ? (
+                  ) : !hasAdditiveError && !isSemi ? (
                     <span
-                      className={`font-black px-3.5 py-1.5 rounded-lg border shadow-sm ${isOver ? "bg-purple-100 text-purple-800 border-purple-300" : "bg-emerald-100 text-emerald-800 border-emerald-300"}`}
+                      className={`font-medium px-4 py-1.5 rounded-xl border shadow-sm ${isOver ? "bg-purple-50 text-purple-700 border-purple-200" : "bg-emerald-50 text-emerald-700 border-emerald-200"}`}
                     >
                       已分配 {formatNum(totalAllocated, mat.type)} {mat.unit}
+                    </span>
+                  ) : isSemi ? (
+                    <span className="font-medium px-4 py-1.5 rounded-xl border bg-purple-50 text-purple-700 border-purple-200 shadow-sm">
+                      需生產 {formatNum(mat.requiredQty, mat.type)} {mat.unit}
                     </span>
                   ) : null}
                 </div>
               </div>
 
-              {isExpanded && (
-                <div className="bg-slate-50 p-5 border-t border-slate-200 w-full min-w-0 shadow-inner">
-                  <div className="mb-4 flex flex-col md:flex-row justify-between items-start md:items-center border-b border-slate-300 pb-3 gap-3">
-                    <span className="text-[12px] font-black text-slate-500 tracking-widest uppercase">
+              {isExpanded && !isSemi && (
+                <div className="bg-slate-50/50 p-6 border-t border-slate-100 w-full min-w-0">
+                  <div className="mb-4 flex flex-col md:flex-row justify-between items-start md:items-center border-b border-slate-200 pb-3 gap-3">
+                    <span className="text-sm font-medium text-slate-500">
                       批號分配清單
                     </span>
                     <div className="flex items-center gap-2">
-                      <span className="text-[12px] font-black bg-white px-3.5 py-1.5 rounded-lg border border-slate-300 text-slate-600 shadow-sm tracking-wider">
+                      <span className="text-sm font-medium bg-white px-4 py-1.5 rounded-xl border border-slate-200 text-slate-600 shadow-sm">
                         總需求:{" "}
-                        <b className="text-slate-900 font-mono text-[14px] ml-1">
+                        <b className="text-slate-800 font-mono text-base ml-1">
                           {formatNum(mat.requiredQty, mat.type)}
                         </b>{" "}
                         {mat.unit}
                       </span>
                     </div>
                   </div>
-                  <div className="flex overflow-x-auto gap-5 pb-5 pt-1 snap-x custom-scrollbar w-full min-w-0">
+                  <div className="flex overflow-x-auto gap-5 pb-5 pt-2 snap-x custom-scrollbar w-full min-w-0">
                     {sortedBatches.map((b) => (
                       <div
                         key={b.id}
-                        className="w-[85vw] sm:w-[340px] flex-shrink-0 snap-start"
+                        className="w-[85vw] sm:w-[320px] flex-shrink-0 snap-start"
                       >
                         <BatchRow
                           orderId={itemId}
@@ -634,17 +723,27 @@ const RequirementOrderPage = () => {
     product_id: "",
     product_code: "",
     product_name: "",
+    profile_id: "",
     spec: "",
     quantity: "",
     unit: "",
     sales_unit_quantity: 1,
-    sales_pack_unit: "",
+    sales_pack_unit: "包",
     sales_pack_quantity: 1,
     unit_price: "",
+    outer_pack_id: null,
+    inner_pack_id: null,
   });
 
   const [formItems, setFormItems] = useState([createEmptyRow()]);
   const [documentNote, setDocumentNote] = useState("");
+
+  const packMaterials = useMemo(() => {
+    return [
+      { id: "", name: "無" },
+      ...materials.filter((m) => ["PACK", "OTHER", "STICKER"].includes(m.type)),
+    ];
+  }, [materials]);
 
   const calculatedTotals = useMemo(() => {
     let total = 0;
@@ -820,7 +919,6 @@ const RequirementOrderPage = () => {
           }
         }
       });
-
       setAllocations((prev) => ({ ...prev, ...loadedAllocations }));
     } catch (err) {
       setError(err.message);
@@ -890,10 +988,6 @@ const RequirementOrderPage = () => {
   };
 
   const handleSelectProduct = (rowId, product) => {
-    const profile =
-      product.product_profiles && product.product_profiles.length > 0
-        ? product.product_profiles[0]
-        : {};
     setFormItems((prev) =>
       prev.map((item) =>
         item.id === rowId
@@ -902,15 +996,88 @@ const RequirementOrderPage = () => {
               product_id: product.id,
               product_code: product.code || "",
               product_name: product.name || "",
-              spec: profile.spec || "",
-              unit: profile.sales_unit || product.unit || "",
-              unit_price: profile.sales_price || "",
-              sales_unit_quantity: profile.sales_unit_quantity || 1,
-              sales_pack_unit: profile.sales_pack_unit || "",
-              sales_pack_quantity: profile.sales_pack_quantity || 1,
+              profile_id: "",
+              spec: "",
+              unit: product.unit || "KG",
+              unit_price: "",
+              sales_unit_quantity: 1,
+              sales_pack_unit: "包",
+              sales_pack_quantity: 1,
+              outer_pack_id: null,
+              inner_pack_id: null,
             }
           : item,
       ),
+    );
+  };
+
+  const handleSelectProfile = (rowId, profileId) => {
+    setFormItems((prev) =>
+      prev.map((item) => {
+        if (item.id !== rowId) return item;
+        const product = materials.find(
+          (m) => String(m.id) === String(item.product_id),
+        );
+        if (!product) return item;
+
+        // 如果選擇「自製規格」
+        if (profileId === "custom") {
+          return {
+            ...item,
+            profile_id: "custom",
+            spec: "",
+            unit: product.unit || "KG",
+            unit_price: "",
+            sales_unit_quantity: 1,
+            sales_pack_unit: "包",
+            sales_pack_quantity: 1,
+            outer_pack_id: null,
+            inner_pack_id: null,
+          };
+        }
+
+        // 未選擇時 (預設)
+        if (!profileId) {
+          return {
+            ...item,
+            profile_id: "",
+            spec: "",
+            unit: product.unit || "KG",
+            unit_price: "",
+            sales_unit_quantity: 1,
+            sales_pack_unit: "包",
+            sales_pack_quantity: 1,
+            outer_pack_id: null,
+            inner_pack_id: null,
+          };
+        }
+
+        const profile = product.product_profiles?.find(
+          (p) => String(p.id) === String(profileId),
+        );
+        if (!profile) return item;
+
+        const getPackId = (packData) => {
+          if (!packData) return null;
+          if (typeof packData === "object") return packData.id;
+          return Number(packData);
+        };
+
+        return {
+          ...item,
+          profile_id: profile.id,
+          spec: profile.spec || "",
+          unit: profile.sales_unit || product.unit || "",
+          unit_price: profile.sales_price || "",
+          sales_unit_quantity: profile.sales_unit_quantity || 1,
+          sales_pack_unit: profile.sales_pack_unit || "包",
+          sales_pack_quantity: profile.sales_pack_quantity || 1,
+          outer_pack_id:
+            getPackId(profile.outer_pack_id) || getPackId(profile.outer_pack),
+          inner_pack_id:
+            getPackId(profile.inner_pack_id) || getPackId(profile.inner_pack),
+        };
+      }),
     );
   };
 
@@ -931,33 +1098,25 @@ const RequirementOrderPage = () => {
       const unitQty = Number(fItem.sales_unit_quantity) || 1;
       const packQty = Number(fItem.sales_pack_quantity) || 1;
 
-      const packMaterials = boms.filter(
-        (b) =>
-          String(b.parent?.id) === String(fItem.product_id) &&
-          b.child &&
-          b.child.type === "PACK",
-      );
+      let unitCapacity = null;
+      const packId = fItem.inner_pack_id || fItem.outer_pack_id;
 
-      let capacityPerPack = null;
-      for (const pm of packMaterials) {
-        if (pm.child && pm.child.pack_capacity) {
-          capacityPerPack = parseFloat(pm.child.pack_capacity);
+      if (packId) {
+        const packMat = materials.find((m) => String(m.id) === String(packId));
+        if (packMat && packMat.pack_capacity) {
+          unitCapacity = parseFloat(packMat.pack_capacity);
         }
       }
 
-      if (!capacityPerPack) {
-        hasCapacityError = true;
-        setTimeout(() => {
-          showAlert(
-            "包材容量資料有誤",
-            `無法計算產品「${product.name}」的實際重量！請確認該成品的 BOM 表中是否已加入包材，且該包材的「包材容量/淨重」欄位已有設定數值。`,
-            "error",
-          );
-        }, 0);
-        break;
+      if (!unitCapacity || isNaN(unitCapacity) || unitCapacity <= 0) {
+        unitCapacity = 1.0;
       }
 
-      const totalWeightKG = orderQty * (packQty / unitQty) * capacityPerPack;
+      const totalWeightKG = precise.mul(
+        precise.mul(precise.div(orderQty, unitQty), packQty),
+        unitCapacity,
+      );
+
       const motherId = fItem.id;
       const generatedItems = [];
 
@@ -1107,32 +1266,25 @@ const RequirementOrderPage = () => {
       }
 
       const itemReqs = {};
-      const traverse = (parentId, multiplier) => {
-        const children = boms.filter(
-          (b) => String(b.parent?.id) === String(parentId),
-        );
-        if (children.length === 0) {
-          if (!itemReqs[parentId]) itemReqs[parentId] = 0;
-          itemReqs[parentId] += multiplier;
-        } else {
-          children.forEach((c) => {
-            const childMat = c.child;
-            if (childMat) {
-              const baseQty = parseFloat(c.base_quantity || 1);
-              const nextMultiplier =
-                multiplier * (parseFloat(c.quantity_required) / baseQty);
-              if (childMat.type === "RAW" || childMat.type === "PACK") {
-                if (!itemReqs[childMat.id]) itemReqs[childMat.id] = 0;
-                itemReqs[childMat.id] += nextMultiplier;
-              } else if (childMat.type === "SEMI") {
-                traverse(childMat.id, nextMultiplier);
-              }
-            }
-          });
-        }
-      };
+      const directChildren = boms.filter(
+        (b) => String(b.parent?.id) === String(productId),
+      );
 
-      traverse(productId, qtyValue);
+      if (directChildren.length === 0) {
+        itemReqs[productId] = qtyValue;
+      } else {
+        directChildren.forEach((c) => {
+          const childMat = c.child;
+          if (childMat) {
+            const baseQty = parseFloat(c.base_quantity || 1);
+            const reqQty =
+              qtyValue * (parseFloat(c.quantity_required) / baseQty);
+            if (!itemReqs[childMat.id]) itemReqs[childMat.id] = 0;
+            itemReqs[childMat.id] += reqQty;
+          }
+        });
+      }
+
       const itemAlloc = { _base_qty: qtyValue, _productId: productId };
 
       Object.keys(itemReqs).forEach((matIdStr) => {
@@ -1267,26 +1419,49 @@ const RequirementOrderPage = () => {
       const alloc = allocations[orderId];
       if (!alloc || !alloc._base_qty) return;
       const baseQty = alloc._base_qty;
+      const additiveSummary = {};
 
-      let hasError = false;
       Object.keys(alloc).forEach((matId) => {
         if (matId === "_base_qty" || matId === "_productId") return;
         const matInfo = materials.find((m) => String(m.id) === String(matId));
-        if (!matInfo || !matInfo.is_additive || !matInfo.legal_limit_percent)
-          return;
+        if (!matInfo) return;
 
-        const limit = parseFloat(matInfo.legal_limit_percent);
         const totalUsed = alloc[matId].batches.reduce(
           (sum, b) => sum + (parseFloat(b.used) || 0),
           0,
         );
-        const usagePercent = (totalUsed / baseQty) * 100;
-        if (usagePercent > limit) hasError = true;
+        if (totalUsed <= 0) return;
+
+        if (matInfo.is_additive && matInfo.legal_limit_percent) {
+          if (!additiveSummary[matId])
+            additiveSummary[matId] = {
+              limit: parseFloat(matInfo.legal_limit_percent),
+              totalUsed: 0,
+            };
+          additiveSummary[matId].totalUsed += totalUsed;
+        } else if (matInfo.type === "SEMI" || matInfo.type === "PRODUCT") {
+          const embedded = getContainedAdditives(matId, boms, materials, 1);
+          Object.values(embedded).forEach((ea) => {
+            const contributedQty = totalUsed * ea.qty;
+            if (!additiveSummary[ea.id])
+              additiveSummary[ea.id] = {
+                limit: parseFloat(ea.legal_limit_percent),
+                totalUsed: 0,
+              };
+            additiveSummary[ea.id].totalUsed += contributedQty;
+          });
+        }
+      });
+
+      let hasError = false;
+      Object.values(additiveSummary).forEach((add) => {
+        const usagePercent = (add.totalUsed / baseQty) * 100;
+        if (usagePercent > add.limit) hasError = true;
       });
       errors[orderId] = hasError;
     });
     return errors;
-  }, [allocations, materials]);
+  }, [allocations, materials, boms]);
 
   const hasAnyAdditiveErrorInDraft = orderItems.some(
     (item) => mrpAdditiveErrors[item.id],
@@ -1328,6 +1503,32 @@ const RequirementOrderPage = () => {
     setIsPreviewModalOpen(false);
     setIsSubmitting(true);
     try {
+      for (const item of formItems) {
+        if (item.profile_id === "custom") {
+          try {
+            await fetchWithAuth("/api/product_profiles", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                vendor: vendorData.id,
+                product: item.product_id,
+                material: item.product_id,
+                spec: item.spec,
+                sales_unit: item.unit,
+                sales_pack_unit: item.sales_pack_unit,
+                sales_unit_quantity: item.sales_unit_quantity,
+                sales_pack_quantity: item.sales_pack_quantity,
+                sales_price: item.unit_price ? Number(item.unit_price) : 0,
+                outer_pack: item.outer_pack_id,
+                inner_pack: item.inner_pack_id,
+              }),
+            });
+          } catch (e) {
+            console.warn("自製規格同步建立失敗", e);
+          }
+        }
+      }
+
       const itemMap = {};
       orderItems.forEach((item) => {
         const cleanBatchInfo = { ...(allocations[item.id] || {}) };
@@ -1679,20 +1880,20 @@ const RequirementOrderPage = () => {
 
     return (
       <div className="bg-white font-sans text-black relative p-6 print:p-0">
-        <div className="mb-1 w-full">
+        <div className="mb-2 w-full">
           <div className="flex justify-between items-end">
             <div className="flex-1">
-              <div className="text-[16px]">基香食品有限公司</div>
-              <div className="text-[13px]">桃園市觀音區崙坪里1鄰1-10號</div>
+              <div className="text-lg">基香食品有限公司</div>
+              <div className="text-sm">桃園市觀音區崙坪里1鄰1-10號</div>
             </div>
             <div className="flex-1 text-center">
-              <h1 className="text-[30px] font-bold tracking-[0.5em] m-0 ml-[0.5em] whitespace-nowrap">
+              <h1 className="text-3xl font-bold tracking-[0.5em] m-0 ml-[0.5em] whitespace-nowrap">
                 客 戶 訂 貨 單
               </h1>
             </div>
             <div className="flex-1"></div>
           </div>
-          <div className="flex justify-between text-[13px] mt-1">
+          <div className="flex justify-between text-sm mt-2">
             <div className="flex-1">電 話: 03-4988228</div>
             <div className="flex-1 text-center pr-[4.5rem]">
               傳 真: 03-4988159
@@ -1701,44 +1902,44 @@ const RequirementOrderPage = () => {
           </div>
         </div>
 
-        <table className="w-full border-collapse border border-black mb-1 text-[13px]">
+        <table className="w-full border-collapse border border-black mb-2 text-sm">
           <tbody>
             <tr>
-              <td className="border border-black px-2 py-0.5 align-top w-[40%]">
+              <td className="border border-black px-3 py-1 align-top w-[40%]">
                 客戶名稱：{customer.name || ""}
               </td>
-              <td className="border border-black px-2 py-0.5 align-top w-[30%]">
+              <td className="border border-black px-3 py-1 align-top w-[30%]">
                 客戶編號：{customer.code || ""}
               </td>
-              <td className="border border-black px-2 py-0.5 align-top w-[30%]">
+              <td className="border border-black px-3 py-1 align-top w-[30%]">
                 單據日期：{orderDate}
               </td>
             </tr>
             <tr>
-              <td className="border border-black px-2 py-0.5 align-top">
+              <td className="border border-black px-3 py-1 align-top">
                 客戶統編：{customer.tax_id || ""}
               </td>
-              <td className="border border-black px-2 py-0.5 align-top">
+              <td className="border border-black px-3 py-1 align-top">
                 聯 絡 人：{customer.contact || ""}
               </td>
-              <td className="border border-black px-2 py-0.5 align-top">
+              <td className="border border-black px-3 py-1 align-top">
                 單據編號：{orderNo}
               </td>
             </tr>
             <tr>
-              <td className="border border-black px-2 py-0.5 align-top">
+              <td className="border border-black px-3 py-1 align-top">
                 客戶電話：{customer.phone || ""}
               </td>
-              <td className="border border-black px-2 py-0.5 align-top">
+              <td className="border border-black px-3 py-1 align-top">
                 客戶傳真：{customer.fax || ""}
               </td>
-              <td className="border border-black px-2 py-0.5 align-top">
+              <td className="border border-black px-3 py-1 align-top">
                 交貨日期：{deliveryDate}
               </td>
             </tr>
             <tr>
               <td
-                className="border border-black px-2 py-0.5 align-top"
+                className="border border-black px-3 py-1 align-top"
                 colSpan="3"
               >
                 送貨地址：{customer.address || ""}{" "}
@@ -1748,34 +1949,34 @@ const RequirementOrderPage = () => {
           </tbody>
         </table>
 
-        <table className="w-full border-collapse border border-black text-center text-[13px]">
+        <table className="w-full border-collapse border border-black text-center text-sm">
           <thead>
             <tr className="font-normal">
-              <th className="border border-black px-1 py-1 w-[4%] font-normal">
+              <th className="border border-black px-2 py-1 w-[4%] font-normal">
                 序
               </th>
-              <th className="border border-black px-1 py-1 w-[14%] font-normal">
+              <th className="border border-black px-2 py-1 w-[14%] font-normal">
                 貨品編號
               </th>
-              <th className="border border-black px-1 py-1 w-[22%] font-normal">
+              <th className="border border-black px-2 py-1 w-[22%] font-normal">
                 品名
               </th>
-              <th className="border border-black px-1 py-1 w-[16%] font-normal">
+              <th className="border border-black px-2 py-1 w-[16%] font-normal">
                 規格
               </th>
-              <th className="border border-black px-1 py-1 w-[9%] font-normal">
+              <th className="border border-black px-2 py-1 w-[9%] font-normal">
                 數量
               </th>
-              <th className="border border-black px-1 py-1 w-[5%] font-normal">
+              <th className="border border-black px-2 py-1 w-[5%] font-normal">
                 單位
               </th>
-              <th className="border border-black px-1 py-1 w-[8%] font-normal">
+              <th className="border border-black px-2 py-1 w-[8%] font-normal">
                 單價
               </th>
-              <th className="border border-black px-1 py-1 w-[10%] font-normal">
+              <th className="border border-black px-2 py-1 w-[10%] font-normal">
                 小計
               </th>
-              <th className="border border-black px-1 py-1 w-[12%] font-normal">
+              <th className="border border-black px-2 py-1 w-[12%] font-normal">
                 備註
               </th>
             </tr>
@@ -1783,42 +1984,42 @@ const RequirementOrderPage = () => {
           <tbody>
             {paddedItems.map((item, idx) => (
               <tr key={idx}>
-                <td className="border border-black px-1 py-1">
+                <td className="border border-black px-2 py-1">
                   {item ? idx + 1 : "."}
                 </td>
                 <td
-                  className={`border border-black px-1 py-1 ${item ? "text-left" : "text-transparent"}`}
+                  className={`border border-black px-2 py-1 ${item ? "text-left" : "text-transparent"}`}
                 >
                   {item ? item.product_code : "."}
                 </td>
                 <td
-                  className={`border border-black px-1 py-1 ${item ? "text-left" : "text-transparent"}`}
+                  className={`border border-black px-2 py-1 ${item ? "text-left" : "text-transparent"}`}
                 >
                   {item ? item.product_name : "."}
                 </td>
                 <td
-                  className={`border border-black px-1 py-1 ${item ? "text-left" : "text-transparent"}`}
+                  className={`border border-black px-2 py-1 ${item ? "text-left" : "text-transparent"}`}
                 >
                   {item ? item.spec : "."}
                 </td>
-                <td className="border border-black px-1 py-1 text-right">
+                <td className="border border-black px-2 py-1 text-right">
                   {item && item.quantity
                     ? Number(item.quantity).toLocaleString(undefined, {
                         minimumFractionDigits: 2,
                       })
                     : ""}
                 </td>
-                <td className="border border-black px-1 py-1">
+                <td className="border border-black px-2 py-1">
                   {item ? item.unit : ""}
                 </td>
-                <td className="border border-black px-1 py-1 text-right">
+                <td className="border border-black px-2 py-1 text-right">
                   {item
                     ? Number(item.unit_price).toLocaleString(undefined, {
                         minimumFractionDigits: 2,
                       })
                     : ""}
                 </td>
-                <td className="border border-black px-1 py-1 text-right">
+                <td className="border border-black px-2 py-1 text-right">
                   {item
                     ? Number(item.subtotal).toLocaleString(undefined, {
                         minimumFractionDigits: 2,
@@ -1826,45 +2027,45 @@ const RequirementOrderPage = () => {
                     : ""}
                 </td>
                 <td
-                  className={`border border-black px-1 py-1 ${item ? "text-left" : ""}`}
+                  className={`border border-black px-2 py-1 ${item ? "text-left" : ""}`}
                 ></td>
               </tr>
             ))}
           </tbody>
         </table>
 
-        <table className="w-full border-collapse border border-black border-t-0 text-[13px]">
+        <table className="w-full border-collapse border border-black border-t-0 text-sm">
           <tbody>
             <tr>
-              <td className="border-r border-b border-black px-2 py-1 align-top w-[35%]">
+              <td className="border-r border-b border-black px-3 py-1 align-top w-[35%]">
                 合計金額：{totals.total_amount}
               </td>
-              <td className="border-r border-b border-black px-2 py-1 align-top w-[30%] text-center">
+              <td className="border-r border-b border-black px-3 py-1 align-top w-[30%] text-center">
                 營業稅：{totals.tax_amount}
               </td>
-              <td className="border-b border-black px-2 py-1 align-top w-[35%]">
+              <td className="border-b border-black px-3 py-1 align-top w-[35%]">
                 總計金額：{totals.grand_total}
               </td>
             </tr>
             <tr>
-              <td className="px-2 py-1 align-top" colSpan="3">
-                <div className="flex justify-between mb-1">
+              <td className="px-3 py-2 align-top" colSpan="3">
+                <div className="flex justify-between mb-2">
                   <div className="w-[50%]">
                     單據備註：{totals.document_note}
                   </div>
                   <div className="w-[25%] flex items-center">
                     車輛是否清潔：
-                    <div className="w-4 h-4 border border-black ml-1 inline-block"></div>
+                    <div className="w-5 h-5 border border-black ml-2 inline-block"></div>
                   </div>
                   <div className="w-[25%] flex items-center">
                     車輛是否上鎖：
-                    <div className="w-4 h-4 border border-black ml-1 inline-block"></div>
+                    <div className="w-5 h-5 border border-black ml-2 inline-block"></div>
                   </div>
                 </div>
                 <div className="flex justify-between">
                   <div className="w-[65%]">
                     車輛溫度：
-                    <span className="inline-block w-12 border-b border-black"></span>
+                    <span className="inline-block w-16 border-b border-black mx-1"></span>
                     °C 冷藏：0-7°C , 冷凍：-18°C 以下。
                   </div>
                   <div className="w-[35%]">
@@ -1876,7 +2077,7 @@ const RequirementOrderPage = () => {
           </tbody>
         </table>
 
-        <div className="flex justify-between mt-2 px-4 text-[13px]">
+        <div className="flex justify-between mt-3 px-6 text-sm">
           <div>主 管：</div>
           <div>經 辦：</div>
           <div>出 貨：</div>
@@ -1902,7 +2103,7 @@ const RequirementOrderPage = () => {
   if (loading && materials.length === 0)
     return (
       <div className="flex justify-center items-center h-screen bg-slate-50">
-        <div className="animate-pulse text-slate-600 font-bold text-lg">
+        <div className="animate-pulse text-slate-500 font-semibold text-xl">
           載入系統資料中...
         </div>
       </div>
@@ -1911,54 +2112,57 @@ const RequirementOrderPage = () => {
   return (
     <>
       <div className="print:hidden p-6 md:p-8 max-w-7xl mx-auto bg-slate-50 min-h-screen font-sans text-slate-900 w-full">
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
           <div>
-            <h2 className="text-3xl font-extrabold text-slate-900 tracking-tight">
+            <h2 className="text-3xl font-bold text-slate-900 tracking-tight">
               建立客戶訂購單
             </h2>
           </div>
         </div>
 
-        <div className="bg-blue-50/80 text-blue-800 text-sm p-4 rounded-2xl mb-6 border border-blue-100/50 shadow-sm">
-          <p className="flex items-center gap-2 font-bold mb-2">
-            <span className="text-lg leading-none">💡</span> 系統功能說明
+        <div className="bg-blue-50/70 backdrop-blur-md text-blue-900 text-sm p-5 md:p-6 rounded-3xl mb-10 border border-blue-200/60 shadow-sm print:hidden">
+          <p className="flex items-center gap-2 font-semibold mb-3 text-lg">
+            <span className="text-xl">💡</span> 系統功能說明
           </p>
-          <ul className="list-disc list-inside space-y-1.5 ml-6 text-slate-800 font-medium">
-            <li>此頁面專注於「配方比例設計」與「打料基數成本試算」。</li>
+          <ul className="list-disc list-inside space-y-2 ml-2 text-slate-700 font-medium">
+            <li>選定客戶後即可配置產品、拆解內部製造成本與設定報價係數。</li>
             <li>
-              加入法定添加物或含添加物的半成品時，系統會自動攤平計算全配方的佔比，嚴格把關法規上限。
+              包材結構採用分組設定，完整支援外箱大單位與內袋輔助單位對應。
+            </li>
+            <li>
+              所有數值欄位均支援文字直接編輯，系統自動核算估計成本與總計。
             </li>
           </ul>
         </div>
 
-        <div className="flex bg-slate-200/80 p-1.5 rounded-xl mb-8 w-fit shadow-inner">
+        <div className="flex bg-slate-200/60 p-1.5 rounded-2xl mb-10 w-fit shadow-inner">
           <button
             onClick={() => setActiveMainTab("create")}
-            className={`px-8 py-3 rounded-lg text-[14px] font-black transition-all duration-200 ${activeMainTab === "create" ? "bg-white text-blue-800 shadow-sm" : "text-slate-600 hover:text-slate-900 hover:bg-slate-200"}`}
+            className={`px-8 py-3 rounded-xl text-sm font-semibold transition-all duration-300 ${activeMainTab === "create" ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-800 hover:bg-slate-200/50"}`}
           >
             新增訂購單
           </button>
           <button
             onClick={() => setActiveMainTab("view")}
-            className={`px-8 py-3 rounded-lg text-[14px] font-black transition-all duration-200 ${activeMainTab === "view" ? "bg-white text-blue-800 shadow-sm" : "text-slate-600 hover:text-slate-900 hover:bg-slate-200"}`}
+            className={`px-8 py-3 rounded-xl text-sm font-semibold transition-all duration-300 ${activeMainTab === "view" ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-800 hover:bg-slate-200/50"}`}
           >
-            查看線上單據 (
-            {mrpPlans.filter((mrp) => mrp.parent_id === null).length})
+            查看線上單據{" "}
+            {mrpPlans.filter((mrp) => mrp.parent_id === null).length}
           </button>
         </div>
 
         {activeMainTab === "create" ? (
           <div>
-            <div className="bg-white rounded-3xl shadow-[0_4px_16px_-4px_rgba(0,0,0,0.05)] border border-slate-300 mb-8 overflow-hidden w-full">
-              <div className="p-8 bg-slate-50/50 border-b border-slate-200">
-                <h3 className="text-[12px] font-black text-blue-600 uppercase tracking-widest mb-5 flex items-center gap-2">
-                  <FileText className="text-blue-600" size={18} /> 1.
+            <div className="bg-white rounded-3xl shadow-sm border border-slate-200 mb-8 overflow-hidden w-full">
+              <div className="p-8 bg-slate-50/50 border-b border-slate-100">
+                <h3 className="text-lg font-semibold text-blue-600 tracking-wide mb-6 flex items-center gap-3">
+                  <FileText className="text-blue-500" size={22} /> 1.
                   客戶訂單與出貨資訊
                 </h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                   <div className="relative lg:col-span-1">
-                    <label className="block text-[12px] font-bold text-slate-600 mb-2 uppercase tracking-wider">
-                      指定客戶 <span className="text-red-600">*</span>
+                    <label className="block text-sm font-medium text-slate-500 mb-2">
+                      指定客戶 <span className="text-red-500">*</span>
                     </label>
                     <FilterableDropdown
                       value={vendorData.id}
@@ -1967,12 +2171,12 @@ const RequirementOrderPage = () => {
                         if (v) handleSelectVendor(v);
                       }}
                       options={vendors}
-                      placeholder="-- 請搜尋並選擇客戶 --"
+                      placeholder="選擇客戶"
                       renderItem={(v) => `[${v.code || "無代碼"}] ${v.name}`}
                     />
                   </div>
                   <div className="lg:col-span-1">
-                    <label className="block text-[12px] font-bold text-slate-600 mb-2 uppercase tracking-wider">
+                    <label className="block text-sm font-medium text-slate-500 mb-2">
                       客戶統編
                     </label>
                     <input
@@ -1981,13 +2185,12 @@ const RequirementOrderPage = () => {
                       onChange={(e) =>
                         setVendorData({ ...vendorData, tax_id: e.target.value })
                       }
-                      className="w-full h-[46px] px-4 py-2 bg-slate-50 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:bg-white text-slate-800 text-[14px] font-bold transition-all shadow-sm"
-                      placeholder="統編"
+                      className="w-full h-11 px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 focus:bg-white text-slate-800 text-sm font-medium transition-all shadow-sm"
                     />
                   </div>
                   <div className="lg:col-span-1">
-                    <label className="block text-[12px] font-bold text-slate-600 mb-2 uppercase tracking-wider">
-                      預計出貨日期 <span className="text-red-600">*</span>
+                    <label className="block text-sm font-medium text-slate-500 mb-2">
+                      預計出貨日期 <span className="text-red-500">*</span>
                     </label>
                     <input
                       type="date"
@@ -1998,12 +2201,12 @@ const RequirementOrderPage = () => {
                           shippingDate: e.target.value,
                         })
                       }
-                      className="w-full h-[46px] px-4 py-2 bg-white border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-slate-800 text-[14px] font-bold transition-all shadow-sm"
+                      className="w-full h-11 px-4 py-2 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 text-slate-800 text-sm font-medium transition-all shadow-sm"
                     />
                   </div>
 
                   <div className="lg:col-span-2">
-                    <label className="block text-[12px] font-bold text-slate-600 mb-2 uppercase tracking-wider">
+                    <label className="block text-sm font-medium text-slate-500 mb-2">
                       出貨地址
                     </label>
                     <input
@@ -2015,47 +2218,52 @@ const RequirementOrderPage = () => {
                           address: e.target.value,
                         })
                       }
-                      className="w-full h-[46px] px-4 py-2 bg-white border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-slate-800 text-[14px] font-bold transition-all shadow-sm"
-                      placeholder="出貨地址"
+                      className="w-full h-11 px-4 py-2 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 text-slate-800 text-sm font-medium transition-all shadow-sm"
                     />
                   </div>
 
                   <div className="lg:col-span-1">
-                    <label className="block text-[12px] font-bold text-slate-600 mb-2 uppercase tracking-wider">
-                      物流商選擇 <span className="text-red-600">*</span>
+                    <label className="block text-sm font-medium text-slate-500 mb-2">
+                      物流商選擇 <span className="text-red-500">*</span>
                     </label>
-                    <select
-                      value={vendorData.logisticsProvider}
-                      onChange={(e) =>
-                        setVendorData({
-                          ...vendorData,
-                          logisticsProvider: e.target.value,
-                        })
-                      }
-                      className="w-full h-[46px] bg-white border border-slate-300 rounded-xl px-4 py-2 text-[14px] font-bold focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all shadow-sm cursor-pointer appearance-none text-slate-800"
-                    >
-                      <option value="">-- 請選擇物流商 --</option>
-                      {logisticsOptions.map((option) => (
-                        <option key={option} value={option}>
-                          {option}
-                        </option>
-                      ))}
-                    </select>
+                    <div className="relative">
+                      <select
+                        value={vendorData.logisticsProvider}
+                        onChange={(e) =>
+                          setVendorData({
+                            ...vendorData,
+                            logisticsProvider: e.target.value,
+                          })
+                        }
+                        className="appearance-none w-full h-11 bg-white border border-slate-200 rounded-xl pl-4 pr-10 py-2 text-sm font-medium focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all shadow-sm cursor-pointer text-slate-800"
+                      >
+                        <option value="">選擇物流商</option>
+                        {logisticsOptions.map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))}
+                      </select>
+                      <ChevronDown
+                        size={18}
+                        className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
+                      />
+                    </div>
                   </div>
                 </div>
               </div>
 
-              {/* --- 表單 Body: 訂單明細與產品項目 --- */}
+              {/* --- 表單 Body --- */}
               <div className="p-8">
                 <div className="flex justify-between items-center mb-6">
-                  <h3 className="text-[12px] font-black text-blue-600 uppercase tracking-widest flex items-center gap-2">
-                    <ReceiptText className="text-blue-600" size={18} /> 2.
+                  <h3 className="text-lg font-semibold text-blue-600 tracking-wide flex items-center gap-3">
+                    <ReceiptText className="text-blue-500" size={22} /> 2.
                     填寫訂單明細
                   </h3>
                   <button
                     type="button"
                     onClick={handleAddRow}
-                    className="text-[13px] bg-slate-100 text-slate-700 px-5 py-2.5 rounded-xl hover:bg-slate-200 font-bold transition-all shadow-sm flex items-center gap-2 border border-slate-300"
+                    className="text-sm bg-slate-100 text-slate-700 px-5 py-2.5 rounded-xl hover:bg-slate-200 font-medium transition-all shadow-sm flex items-center gap-2 border border-slate-200"
                   >
                     <Plus size={18} strokeWidth={2.5} /> 新增明細
                   </button>
@@ -2067,37 +2275,43 @@ const RequirementOrderPage = () => {
                       (Number(item.quantity) || 0) *
                         (Number(item.unit_price) || 0),
                     );
-                    const isErrorRow = Boolean(
-                      item.material_code &&
-                      ((item.is_additive &&
-                        additiveCalculations.exceededCodes.includes(
-                          item.material_code,
-                        )) ||
-                        (item.contained_additives &&
-                          item.contained_additives.some((add) =>
-                            additiveCalculations.exceededCodes.includes(
-                              add.code,
-                            ),
-                          ))),
+                    const selectedProductObj = readyProducts.find(
+                      (p) => String(p.id) === String(item.product_id),
                     );
+                    const productProfiles =
+                      selectedProductObj?.product_profiles || [];
 
-                    const excludedIds = formItems
-                      .filter((_, i) => i !== index)
-                      .map((i) => i.product_id)
-                      .filter(Boolean);
+                    // 檢查欄位是否被鎖定 (未選自製規格)
+                    const isFieldsLocked = item.profile_id !== "custom";
 
                     return (
                       <div
                         key={item.id}
-                        className="bg-white border border-slate-300 rounded-3xl shadow-sm relative group transition-all hover:border-blue-400 hover:shadow-md"
+                        className="bg-white border border-slate-200 rounded-3xl shadow-sm relative group transition-all hover:border-blue-300 hover:shadow-md p-6 md:p-8"
                       >
-                        <div className="p-6 grid grid-cols-1 lg:grid-cols-12 gap-8 relative items-stretch">
-                          <div className="lg:col-span-5 flex flex-col gap-3 border-b lg:border-b-0 lg:border-r border-slate-200 pb-6 lg:pb-0 lg:pr-8 h-full">
-                            <label className="block text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">
-                              產品資訊 <span className="text-red-600">*</span>
+                        {formItems.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveRow(item.id)}
+                            className="absolute -top-4 -right-4 w-9 h-9 flex items-center justify-center bg-white text-slate-400 hover:text-white hover:bg-red-500 rounded-full border border-slate-200 transition-all shadow-md z-10"
+                          >
+                            <Trash2 size={18} strokeWidth={2.5} />
+                          </button>
+                        )}
+
+                        <div className="space-y-6">
+                          {/* 🌟 上方：產品與規格設定 */}
+                          <div className="bg-slate-50/70 p-5 rounded-2xl border border-slate-100 space-y-5">
+                            <label className="block text-sm font-semibold text-slate-600 tracking-wide">
+                              產品與規格資訊{" "}
+                              <span className="text-red-500">*</span>
                             </label>
-                            <div className="flex flex-col bg-white rounded-2xl border border-slate-300 shadow-sm overflow-visible h-full justify-between">
-                              <div className="p-2 border-b border-slate-200">
+
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                              <div>
+                                <label className="block text-sm font-medium text-slate-500 mb-2">
+                                  選擇成品
+                                </label>
                                 <FilterableDropdown
                                   value={item.product_id}
                                   onChange={(valId) => {
@@ -2108,43 +2322,221 @@ const RequirementOrderPage = () => {
                                       handleSelectProduct(item.id, prod);
                                   }}
                                   options={readyProducts}
-                                  placeholder="搜尋成品"
+                                  placeholder="選擇成品"
                                   renderItem={(m) => (
                                     <div className="flex justify-between items-center w-full">
-                                      <span className="text-[13px] text-slate-500 shrink-0 font-mono">
+                                      <span className="text-sm text-slate-400 shrink-0 font-mono">
                                         [{m.code}]
                                       </span>
-                                      <span className="text-[14px] text-slate-900 ml-2 font-bold">
+                                      <span className="text-sm text-slate-800 ml-3 font-medium">
                                         {m.name}
                                       </span>
                                     </div>
                                   )}
                                 />
                               </div>
-                              <div className="flex justify-between items-center p-4 bg-slate-50/80 rounded-b-2xl">
-                                <span className="text-[12px] text-slate-600 font-bold uppercase tracking-widest">
-                                  包裝規格
+
+                              <div>
+                                <label className="block text-sm font-medium text-slate-500 mb-2">
+                                  規格範本
+                                </label>
+                                <FilterableDropdown
+                                  value={item.profile_id || ""}
+                                  onChange={(valId) =>
+                                    handleSelectProfile(item.id, valId)
+                                  }
+                                  options={[
+                                    { id: "", name: "選擇規格" },
+                                    ...productProfiles.map((p) => ({
+                                      id: p.id,
+                                      name: `${p.spec} ${p.sales_price ? `$${p.sales_price}` : ""}`,
+                                    })),
+                                    { id: "custom", name: "+ 自製規格" },
+                                  ]}
+                                  placeholder="選擇規格"
+                                  disabled={!item.product_id}
+                                />
+                              </div>
+
+                              <div>
+                                <label className="block text-sm font-medium text-slate-500 mb-2">
+                                  自訂規格文字
+                                </label>
+                                <input
+                                  type="text"
+                                  value={item.spec}
+                                  onChange={(e) =>
+                                    handleItemChange(
+                                      item.id,
+                                      "spec",
+                                      e.target.value,
+                                    )
+                                  }
+                                  disabled={isFieldsLocked}
+                                  className="w-full h-11 px-4 border border-slate-200 rounded-xl text-sm font-medium outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 shadow-sm disabled:bg-slate-50/80 disabled:text-slate-500 disabled:cursor-not-allowed transition-all"
+                                />
+                              </div>
+                            </div>
+
+                            {/* 實體包材與換算結構 */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-5 pt-3 border-t border-slate-200/60">
+                              {/* 銷售大單位 */}
+                              <div className="bg-white p-5 rounded-2xl border border-slate-100 space-y-4 shadow-sm">
+                                <span className="text-sm font-semibold text-slate-600 tracking-wide block">
+                                  銷售大單位
                                 </span>
-                                <span className="text-[14px] font-black text-slate-800">
-                                  {item.spec || "-"}
+                                <div className="grid grid-cols-2 gap-4">
+                                  <div>
+                                    <label className="block text-sm text-slate-400 mb-2 font-medium">
+                                      數量
+                                    </label>
+                                    <input
+                                      type="text"
+                                      inputMode="decimal"
+                                      pattern="[0-9]*"
+                                      value={item.sales_unit_quantity}
+                                      onChange={(e) =>
+                                        handleItemChange(
+                                          item.id,
+                                          "sales_unit_quantity",
+                                          e.target.value,
+                                        )
+                                      }
+                                      disabled={isFieldsLocked}
+                                      className="w-full px-3 py-2 h-11 border border-slate-200 rounded-xl text-center font-mono font-medium text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 disabled:bg-slate-50 disabled:text-slate-500 disabled:cursor-not-allowed transition-all"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="block text-sm text-slate-400 mb-2 font-medium">
+                                      單位
+                                    </label>
+                                    <input
+                                      type="text"
+                                      value={item.unit}
+                                      onChange={(e) =>
+                                        handleItemChange(
+                                          item.id,
+                                          "unit",
+                                          e.target.value,
+                                        )
+                                      }
+                                      disabled={isFieldsLocked}
+                                      className="w-full px-3 py-2 h-11 border border-slate-200 rounded-xl text-center font-medium text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 disabled:bg-slate-50 disabled:text-slate-500 disabled:cursor-not-allowed transition-all"
+                                    />
+                                  </div>
+                                </div>
+                                <div>
+                                  <label className="block text-sm font-medium text-slate-400 mb-2">
+                                    對應實體外包裝
+                                  </label>
+                                  <FilterableDropdown
+                                    value={item.outer_pack_id || ""}
+                                    onChange={(valId) =>
+                                      handleItemChange(
+                                        item.id,
+                                        "outer_pack_id",
+                                        valId ? Number(valId) : null,
+                                      )
+                                    }
+                                    options={packMaterials}
+                                    placeholder="無"
+                                    disabled={isFieldsLocked}
+                                    renderItem={(p) =>
+                                      p.code ? `[${p.code}] ${p.name}` : p.name
+                                    }
+                                    className="w-full h-11 px-4 rounded-xl text-sm"
+                                  />
+                                </div>
+                              </div>
+
+                              {/* 內部小單位 */}
+                              <div className="bg-white p-5 rounded-2xl border border-slate-100 space-y-4 shadow-sm">
+                                <span className="text-sm font-semibold text-slate-600 tracking-wide block">
+                                  內部小單位與包材對應
                                 </span>
+                                <div className="grid grid-cols-2 gap-4">
+                                  <div>
+                                    <label className="block text-sm text-slate-400 mb-2 font-medium">
+                                      每單位內含
+                                    </label>
+                                    <input
+                                      type="text"
+                                      inputMode="decimal"
+                                      pattern="[0-9]*"
+                                      value={item.sales_pack_quantity}
+                                      onChange={(e) =>
+                                        handleItemChange(
+                                          item.id,
+                                          "sales_pack_quantity",
+                                          e.target.value,
+                                        )
+                                      }
+                                      disabled={isFieldsLocked}
+                                      className="w-full px-3 py-2 h-11 border border-slate-200 rounded-xl text-center font-mono font-medium text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 disabled:bg-slate-50 disabled:text-slate-500 disabled:cursor-not-allowed transition-all"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="block text-sm text-slate-400 mb-2 font-medium">
+                                      小單位
+                                    </label>
+                                    <input
+                                      type="text"
+                                      value={item.sales_pack_unit}
+                                      onChange={(e) =>
+                                        handleItemChange(
+                                          item.id,
+                                          "sales_pack_unit",
+                                          e.target.value,
+                                        )
+                                      }
+                                      disabled={isFieldsLocked}
+                                      className="w-full px-3 py-2 h-11 border border-slate-200 rounded-xl text-center font-medium text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 disabled:bg-slate-50 disabled:text-slate-500 disabled:cursor-not-allowed transition-all"
+                                    />
+                                  </div>
+                                </div>
+                                <div>
+                                  <label className="block text-sm font-medium text-slate-400 mb-2">
+                                    對應實體內包裝
+                                  </label>
+                                  <FilterableDropdown
+                                    value={item.inner_pack_id || ""}
+                                    onChange={(valId) =>
+                                      handleItemChange(
+                                        item.id,
+                                        "inner_pack_id",
+                                        valId ? Number(valId) : null,
+                                      )
+                                    }
+                                    options={packMaterials}
+                                    placeholder="無"
+                                    disabled={isFieldsLocked}
+                                    renderItem={(p) =>
+                                      p.code ? `[${p.code}] ${p.name}` : p.name
+                                    }
+                                    className="w-full h-11 px-4 rounded-xl text-sm"
+                                  />
+                                </div>
                               </div>
                             </div>
                           </div>
 
-                          <div className="lg:col-span-4 flex flex-col gap-3 border-b lg:border-b-0 lg:border-r border-slate-200 pb-6 lg:pb-0 lg:pr-8 h-full">
-                            <label className="block text-[11px] font-black text-slate-500 uppercase tracking-widest mb-1">
-                              數量配置
-                            </label>
-                            <div className="flex flex-col bg-white rounded-2xl border border-slate-300 shadow-sm overflow-hidden h-full justify-between">
-                              <div className="flex justify-between items-center p-4 border-b border-slate-200 bg-white">
-                                <span className="text-[13px] font-black text-slate-700">
+                          {/* 🌟 下方：左右並排「數量配置」與「金額估算」 */}
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            {/* 左側：數量配置 */}
+                            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-center">
+                              <span className="text-sm font-semibold text-slate-500 tracking-wide mb-4 block">
+                                數量配置
+                              </span>
+                              <div className="flex justify-between items-center">
+                                <span className="text-lg font-semibold text-slate-800">
                                   訂購數量{" "}
-                                  <span className="text-red-600">*</span>
+                                  <span className="text-red-500">*</span>
                                 </span>
                                 <div className="flex items-center gap-3">
                                   <input
                                     type="text"
+                                    inputMode="decimal"
+                                    pattern="[0-9]*"
                                     required
                                     value={item.quantity}
                                     onChange={(e) =>
@@ -2154,68 +2546,42 @@ const RequirementOrderPage = () => {
                                         e.target.value,
                                       )
                                     }
-                                    className={`w-28 text-right bg-slate-100 hover:bg-slate-200/80 border-transparent rounded-xl px-4 py-2.5 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none text-[15px] font-mono font-black transition-all shadow-sm ${isErrorRow ? "bg-red-50 border-red-400 text-red-700 focus:ring-red-500/20" : ""}`}
-                                    placeholder="0"
+                                    className="w-32 h-12 text-right bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl px-4 py-2 focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none text-xl font-mono font-semibold transition-all shadow-sm"
                                   />
-                                  <span className="text-[12px] font-black text-slate-500 w-8">
-                                    {item.unit || "-"}
+                                  <span className="text-base font-medium text-slate-500 w-8">
+                                    {item.sales_unit || "箱"}
                                   </span>
                                 </div>
                               </div>
-                              {item.sales_pack_unit !== item.unit ? (
-                                <div className="flex justify-between items-center p-4 bg-slate-50/80 h-[62px]">
-                                  <span className="text-[12px] font-black text-slate-600">
-                                    每{item.unit}包含
-                                  </span>
-                                  <div className="flex items-center gap-3">
-                                    <input
-                                      type="text"
-                                      readOnly
-                                      value={item.sales_pack_quantity}
-                                      className="w-28 text-right bg-transparent border-transparent rounded-lg px-4 py-2 outline-none text-[15px] font-mono font-black text-slate-500 cursor-not-allowed"
-                                    />
-                                    <span className="text-[12px] font-black text-slate-500 w-8">
-                                      {item.sales_pack_unit || "-"}
-                                    </span>
-                                  </div>
-                                </div>
-                              ) : (
-                                <div className="p-4 bg-slate-50/80 h-[62px]"></div>
-                              )}
                             </div>
-                          </div>
 
-                          <div className="lg:col-span-3 flex flex-col gap-3 relative h-full">
-                            {formItems.length > 1 && (
-                              <button
-                                type="button"
-                                onClick={() => handleRemoveRow(item.id)}
-                                className="absolute -top-3 -right-3 w-8 h-8 flex items-center justify-center bg-white text-slate-400 hover:text-white hover:bg-red-600 rounded-full border border-slate-300 transition-all shadow-md z-10"
-                                title="移除此品項"
-                              >
-                                <Trash2 size={16} strokeWidth={2.5} />
-                              </button>
-                            )}
-                            <label className="block text-[11px] font-black text-slate-500 uppercase tracking-widest mb-1">
-                              金額估算
-                            </label>
-                            <div className="flex flex-col bg-white rounded-2xl border border-slate-300 shadow-sm overflow-hidden h-full justify-between">
-                              <div className="flex justify-between items-center p-5 border-b border-slate-200 bg-white">
-                                <span className="text-[13px] font-black text-slate-600">
-                                  單價 (未稅)
+                            {/* 右側：金額估算 */}
+                            <div className="bg-gradient-to-br from-blue-50/50 to-blue-100/30 p-6 rounded-2xl border border-blue-200 shadow-sm flex flex-col justify-center">
+                              <div className="flex justify-between items-center mb-3">
+                                <span className="text-sm font-semibold text-blue-700 tracking-wide">
+                                  單價
                                 </span>
-                                <span className="text-[15px] font-mono text-slate-700 font-bold">
-                                  $
-                                  {item.unit_price
-                                    ? Number(item.unit_price).toLocaleString()
-                                    : "0"}
-                                </span>
+                                <input
+                                  type="text"
+                                  inputMode="decimal"
+                                  pattern="[0-9]*"
+                                  value={item.unit_price}
+                                  onChange={(e) =>
+                                    handleItemChange(
+                                      item.id,
+                                      "unit_price",
+                                      e.target.value,
+                                    )
+                                  }
+                                  disabled={isFieldsLocked}
+                                  className="w-32 h-11 text-right bg-white border border-blue-200 rounded-xl px-3 py-2 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none text-lg font-mono font-medium shadow-sm transition-all disabled:bg-slate-50/50 disabled:text-blue-800 disabled:cursor-not-allowed"
+                                />
                               </div>
-                              <div className="flex flex-col justify-center items-end p-6 bg-gradient-to-br from-blue-50/80 to-blue-100/50 flex-1">
-                                <span className="text-[11px] font-black text-blue-600/90 mb-2 uppercase tracking-widest">
-                                  小計 (未稅)
+                              <div className="flex justify-between items-end pt-4 border-t border-blue-200/60">
+                                <span className="text-sm font-semibold text-blue-700 tracking-wide">
+                                  小計
                                 </span>
-                                <span className="text-lg font-black font-mono text-blue-700 tracking-tight">
+                                <span className="text-2xl font-bold font-mono text-blue-700 tracking-tight">
                                   ${subtotal.toLocaleString()}
                                 </span>
                               </div>
@@ -2228,41 +2594,39 @@ const RequirementOrderPage = () => {
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mt-10">
-                  <div className="bg-white rounded-3xl border border-slate-300 shadow-[0_4px_16px_-4px_rgba(0,0,0,0.05)] p-8 flex flex-col h-full">
-                    <label className="block text-[12px] font-black text-slate-600 uppercase tracking-widest mb-4">
+                  <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-8 flex flex-col h-full">
+                    <label className="block text-base font-semibold text-slate-600 tracking-wide mb-4">
                       單據備註事項
                     </label>
                     <textarea
                       value={documentNote}
                       onChange={(e) => setDocumentNote(e.target.value)}
-                      className="w-full bg-slate-50 border border-slate-300 rounded-2xl p-5 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none resize-none text-[14px] font-bold transition-all flex-1 shadow-inner text-slate-800"
-                      placeholder="請輸入給物流或內部的備註資訊..."
+                      className="w-full bg-slate-50 border border-slate-200 rounded-2xl p-4 focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none resize-none text-sm font-medium transition-all flex-1 shadow-inner text-slate-800"
                     ></textarea>
                   </div>
-
-                  <div className="flex flex-col justify-end bg-white rounded-3xl border border-slate-300 shadow-[0_4px_16px_-4px_rgba(0,0,0,0.05)] p-8">
-                    <div className="space-y-5">
+                  <div className="flex flex-col justify-end bg-white rounded-3xl border border-slate-200 shadow-sm p-8">
+                    <div className="space-y-4">
                       <div className="flex justify-between items-center">
-                        <span className="text-[14px] text-slate-600 font-black tracking-wider uppercase">
+                        <span className="text-base text-slate-500 font-semibold tracking-wide">
                           未稅小計
                         </span>
-                        <span className="text-[18px] font-mono font-bold text-slate-800">
+                        <span className="text-xl font-mono font-medium text-slate-800">
                           NT$ {calculatedTotals.total_amount.toLocaleString()}
                         </span>
                       </div>
                       <div className="flex justify-between items-center">
-                        <span className="text-[14px] text-slate-600 font-black tracking-wider uppercase">
-                          營業稅 (5%)
+                        <span className="text-base text-slate-500 font-semibold tracking-wide">
+                          營業稅
                         </span>
-                        <span className="text-[18px] font-mono font-bold text-slate-800">
+                        <span className="text-xl font-mono font-medium text-slate-800">
                           NT$ {calculatedTotals.tax_amount.toLocaleString()}
                         </span>
                       </div>
-                      <div className="pt-6 mt-4 border-t-4 border-slate-200 flex justify-between items-end">
-                        <span className="text-[15px] font-black text-slate-900 tracking-wider uppercase">
+                      <div className="pt-5 mt-4 border-t-2 border-slate-100 flex justify-between items-end">
+                        <span className="text-lg font-bold text-slate-900 tracking-wide">
                           含稅總額
                         </span>
-                        <span className="text-lg font-black font-mono text-blue-700 tracking-tighter">
+                        <span className="text-4xl font-bold font-mono text-blue-600 tracking-tighter">
                           NT$ {calculatedTotals.grand_total.toLocaleString()}
                         </span>
                       </div>
@@ -2273,9 +2637,9 @@ const RequirementOrderPage = () => {
             </div>
 
             {orderItems.length > 0 && (
-              <div className="bg-white p-8 rounded-3xl shadow-[0_4px_16px_-4px_rgba(0,0,0,0.05)] border border-slate-300 mb-8 animate-in fade-in slide-in-from-bottom-4 duration-500 w-full">
-                <h3 className="text-[12px] font-black text-blue-600 uppercase tracking-widest mb-6 border-b border-slate-200 pb-3 flex items-center gap-2">
-                  <Database size={18} className="text-blue-600" /> 3.
+              <div className="bg-white p-8 md:p-10 rounded-3xl shadow-sm border border-slate-200 mb-8 animate-in fade-in slide-in-from-bottom-4 duration-500 w-full">
+                <h3 className="text-lg font-semibold text-blue-600 tracking-wide mb-6 border-b border-slate-100 pb-4 flex items-center gap-3">
+                  <Database size={22} className="text-blue-500" /> 3.
                   底層物料庫存分配
                 </h3>
 
@@ -2291,21 +2655,21 @@ const RequirementOrderPage = () => {
                   return (
                     <div
                       key={fItem.id}
-                      className="mb-8 border border-slate-300 rounded-3xl overflow-hidden shadow-sm"
+                      className="mb-8 border border-slate-200 rounded-3xl overflow-hidden shadow-sm"
                     >
-                      <div className="bg-slate-50/80 px-6 py-5 border-b border-slate-300 flex items-center gap-4">
-                        <span className="bg-[#007AFF] text-white text-[11px] uppercase tracking-widest px-3 py-1.5 rounded-lg font-black shadow-sm whitespace-nowrap">
+                      <div className="bg-slate-50/80 px-6 py-5 border-b border-slate-200 flex items-center gap-4">
+                        <span className="bg-blue-500 text-white text-sm tracking-wide px-3 py-1 rounded-lg font-semibold shadow-sm whitespace-nowrap">
                           明細列 {index + 1}
                         </span>
-                        <span className="font-black text-slate-900 truncate text-[16px]">
+                        <span className="font-bold text-slate-900 truncate text-xl">
                           {fItem.product_name}
                         </span>
-                        <span className="text-slate-600 font-mono font-bold text-[14px] whitespace-nowrap bg-white px-4 py-1.5 rounded-lg border border-slate-300 shadow-sm ml-auto">
+                        <span className="text-slate-600 font-mono font-medium text-lg whitespace-nowrap bg-white px-4 py-1.5 rounded-xl border border-slate-200 shadow-sm ml-auto">
                           {fItem.quantity} {fItem.unit}
                         </span>
                       </div>
 
-                      <div className="flex overflow-x-auto border-b border-slate-300 custom-scrollbar bg-white px-2 pt-2">
+                      <div className="flex overflow-x-auto border-b border-slate-200 custom-scrollbar bg-white px-4 pt-4">
                         {rowOrderItems.map((item) => {
                           let hasShortage = false;
                           if (allocations[item.id]) {
@@ -2313,7 +2677,12 @@ const RequirementOrderPage = () => {
                               .filter(
                                 (k) => k !== "_base_qty" && k !== "_productId",
                               )
-                              .some((k) => allocations[item.id][k].isShortage);
+                              .some((k) => {
+                                const matData = allocations[item.id][k];
+                                return (
+                                  matData.isShortage && matData.type !== "SEMI"
+                                );
+                              });
                           }
                           const isChild = String(item.id).includes("-");
                           const isActive = activeTabId === item.id;
@@ -2321,7 +2690,7 @@ const RequirementOrderPage = () => {
                           return (
                             <div
                               key={item.id}
-                              className={`flex items-center gap-2 px-5 py-4 border-b-4 cursor-pointer transition-colors whitespace-nowrap ${isActive ? "border-blue-600 text-blue-800 bg-blue-50/30 rounded-t-2xl" : "border-transparent text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-t-2xl"}`}
+                              className={`flex items-center gap-2 px-5 py-4 border-b-[3px] cursor-pointer transition-all whitespace-nowrap ${isActive ? "border-blue-500 text-blue-700 bg-blue-50/50 rounded-t-2xl" : "border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-50 rounded-t-2xl"}`}
                               onClick={() =>
                                 setActiveTabIds((prev) => ({
                                   ...prev,
@@ -2330,13 +2699,13 @@ const RequirementOrderPage = () => {
                               }
                             >
                               {isChild && (
-                                <span className="text-slate-400 font-black">
+                                <span className="text-slate-300 font-semibold text-lg">
                                   ↳
                                 </span>
                               )}
                               <TypeTag type={item.type} />
                               <span
-                                className={`text-[14px] font-black ${hasShortage ? "text-red-600" : ""}`}
+                                className={`text-base font-semibold ${hasShortage ? "text-red-500" : ""}`}
                               >
                                 {item.name}
                               </span>
@@ -2347,11 +2716,12 @@ const RequirementOrderPage = () => {
                       </div>
 
                       {activeTabId && (
-                        <div className="p-8 bg-slate-50/30">
+                        <div className="p-6 md:p-8 bg-slate-50/30">
                           <MaterialAllocationList
                             itemId={activeTabId}
                             allocations={allocations}
                             materials={materials}
+                            boms={boms}
                             expandedMaterials={expandedMaterials}
                             toggleMaterialExpanded={toggleMaterialExpanded}
                             handleBatchUsageSave={handleBatchUsageSave}
@@ -2362,7 +2732,7 @@ const RequirementOrderPage = () => {
                   );
                 })}
 
-                <div className="mt-10 flex justify-end items-center border-t border-slate-200 pt-8">
+                <div className="mt-10 flex justify-end items-center border-t border-slate-100 pt-8">
                   <button
                     onClick={handleOpenPreview}
                     disabled={
@@ -2371,14 +2741,9 @@ const RequirementOrderPage = () => {
                       orderItems.length === 0 ||
                       hasAnyAdditiveErrorInDraft
                     }
-                    title={
-                      hasAnyAdditiveErrorInDraft
-                        ? "分配的原料中有添加物比例超標，系統已鎖定無法建立。"
-                        : ""
-                    }
-                    className="px-12 py-4 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-xl shadow-[0_4px_14px_rgba(5,150,105,0.4)] transition-all flex items-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed text-[15px] hover:-translate-y-0.5"
+                    className="px-10 py-4 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-2xl shadow-md transition-all flex items-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed text-lg hover:-translate-y-1"
                   >
-                    <FileText size={20} strokeWidth={2.5} /> 預覽並建立訂單
+                    <FileText size={22} strokeWidth={2.5} /> 預覽並建立訂單
                   </button>
                 </div>
               </div>
@@ -2386,10 +2751,10 @@ const RequirementOrderPage = () => {
           </div>
         ) : (
           <div className="space-y-8 animate-in fade-in">
-            <div className="bg-white rounded-3xl shadow-[0_2px_10px_-4px_rgba(0,0,0,0.05)] border border-slate-300 overflow-hidden p-8 flex flex-col md:flex-row gap-6 items-center w-full">
+            <div className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden p-6 flex flex-col md:flex-row gap-5 items-center w-full">
               <div className="relative w-full md:w-80">
                 <Search
-                  className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500"
+                  className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"
                   size={18}
                 />
                 <input
@@ -2397,12 +2762,12 @@ const RequirementOrderPage = () => {
                   placeholder="搜尋客戶名稱"
                   value={filterVendor}
                   onChange={(e) => setFilterVendor(e.target.value)}
-                  className="w-full pl-11 pr-4 py-3 border border-slate-300 bg-slate-50 rounded-xl text-[14px] font-bold focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:outline-none shadow-sm transition-all text-slate-800"
+                  className="w-full h-[48px] pl-11 pr-4 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:bg-white focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 focus:outline-none shadow-sm transition-all text-slate-800"
                 />
               </div>
               <div className="relative w-full md:w-80">
                 <Search
-                  className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500"
+                  className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"
                   size={18}
                 />
                 <input
@@ -2410,7 +2775,7 @@ const RequirementOrderPage = () => {
                   placeholder="搜尋產品名稱"
                   value={filterProduct}
                   onChange={(e) => setFilterProduct(e.target.value)}
-                  className="w-full pl-11 pr-4 py-3 border border-slate-300 bg-slate-50 rounded-xl text-[14px] font-bold focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:outline-none shadow-sm transition-all text-slate-800"
+                  className="w-full h-[48px] pl-11 pr-4 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:bg-white focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 focus:outline-none shadow-sm transition-all text-slate-800"
                 />
               </div>
             </div>
@@ -2423,7 +2788,10 @@ const RequirementOrderPage = () => {
                     allocations[displayId] &&
                     Object.keys(allocations[displayId])
                       .filter((k) => k !== "_base_qty" && k !== "_productId")
-                      .some((k) => allocations[displayId][k].isShortage)
+                      .some((k) => {
+                        const matData = allocations[displayId][k];
+                        return matData.isShortage && matData.type !== "SEMI";
+                      })
                   );
                 });
 
@@ -2437,37 +2805,37 @@ const RequirementOrderPage = () => {
                 return (
                   <div
                     key={group.batchId}
-                    className="bg-white rounded-3xl shadow-[0_4px_16px_-4px_rgba(0,0,0,0.05)] border border-slate-300 overflow-hidden mb-10"
+                    className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden mb-8"
                   >
                     {/* ====== Group Header (訂單層級) ====== */}
-                    <div className="bg-slate-50 border-b border-slate-300 px-8 py-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+                    <div className="bg-slate-50/80 border-b border-slate-200 px-6 py-5 flex flex-col md:flex-row justify-between items-start md:items-center gap-5">
                       <div className="flex flex-wrap items-center gap-4">
-                        <div className="bg-blue-100 p-2.5 rounded-xl border border-blue-300 text-blue-700 shadow-sm">
-                          <ReceiptText size={22} strokeWidth={2.5} />
+                        <div className="bg-blue-100 p-2.5 rounded-xl border border-blue-200 text-blue-600 shadow-sm">
+                          <ReceiptText size={20} strokeWidth={2.5} />
                         </div>
-                        <span className="font-black text-slate-900 text-[17px]">
+                        <span className="font-bold text-slate-900 text-lg">
                           客戶：{group.vendorInfo.name || "未知"}
                         </span>
-                        <span className="text-slate-500 font-bold text-[13px] bg-white px-3 py-1.5 rounded-lg border border-slate-300 shadow-sm">
+                        <span className="text-slate-500 font-medium text-sm bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm">
                           {new Date(group.createdAt).toLocaleString()}
                         </span>
-                        <span className="text-[#007AFF] text-[12px] uppercase tracking-widest font-black bg-blue-100 px-3.5 py-1.5 rounded-lg shadow-sm border border-blue-300">
+                        <span className="text-blue-600 text-sm tracking-wide font-semibold bg-blue-50 px-3 py-1.5 rounded-lg shadow-sm border border-blue-200">
                           共 {group.plans.length} 筆
                         </span>
                       </div>
 
-                      <div className="flex flex-wrap gap-3 w-full md:w-auto">
+                      <div className="flex flex-wrap flex-nowrap gap-3 w-full md:w-auto">
                         {group.plans.length > 1 && (
                           <>
                             <button
                               onClick={(e) => handlePreviewBatch(group, e)}
-                              className="flex-1 md:flex-none px-5 py-2 bg-white text-[#007AFF] border border-blue-200 rounded-xl hover:bg-blue-50 transition-colors text-[12px] font-black shadow-sm flex items-center justify-center gap-2"
+                              className="px-4 py-2.5 bg-white text-blue-600 border border-blue-200 rounded-xl hover:bg-blue-50 transition-colors text-sm font-semibold shadow-sm flex items-center justify-center gap-2 whitespace-nowrap"
                             >
                               <FileText size={16} strokeWidth={2.5} /> 全部預覽
                             </button>
                             <button
                               onClick={(e) => handlePrintBatch(group, e)}
-                              className="flex-1 md:flex-none px-5 py-2 bg-white text-slate-800 border border-slate-300 rounded-xl hover:bg-slate-100 transition-colors text-[12px] font-black shadow-sm flex items-center justify-center gap-2"
+                              className="px-4 py-2.5 bg-white text-slate-700 border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors text-sm font-semibold shadow-sm flex items-center justify-center gap-2 whitespace-nowrap"
                             >
                               <Printer size={16} strokeWidth={2.5} /> 全部列印
                             </button>
@@ -2483,14 +2851,7 @@ const RequirementOrderPage = () => {
                               groupHasAdditiveError ||
                               isSubmitting
                             }
-                            title={
-                              groupHasAdditiveError
-                                ? "訂單中有項目超出法規添加物上限，系統已鎖定"
-                                : groupHasShortage
-                                  ? "有項目庫存不足，無法整批轉換"
-                                  : "將此訂單下的項目全部轉為生產單"
-                            }
-                            className="flex-1 md:flex-none px-5 py-2 bg-emerald-600 text-white border border-emerald-700 rounded-xl hover:bg-emerald-700 transition-colors text-[12px] font-black shadow-[0_2px_8px_rgba(5,150,105,0.3)] flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none"
+                            className="px-4 py-2.5 bg-emerald-500 text-white border border-emerald-600 rounded-xl hover:bg-emerald-600 transition-colors text-sm font-semibold shadow-sm flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
                           >
                             <PackageCheck size={16} strokeWidth={2.5} />{" "}
                             全部轉生產單
@@ -2498,7 +2859,7 @@ const RequirementOrderPage = () => {
                         ) : (
                           <button
                             disabled
-                            className="flex-1 md:flex-none px-5 py-2 bg-slate-100 text-slate-400 border border-slate-200 rounded-xl text-[12px] font-black shadow-sm flex items-center justify-center gap-2 cursor-not-allowed"
+                            className="px-4 py-2.5 bg-slate-100 text-slate-400 border border-slate-200 rounded-xl text-sm font-semibold shadow-sm flex items-center justify-center gap-2 cursor-not-allowed whitespace-nowrap"
                           >
                             <PackageCheck size={16} strokeWidth={2.5} />{" "}
                             已全數轉換
@@ -2508,22 +2869,22 @@ const RequirementOrderPage = () => {
                     </div>
 
                     {/* ====== Group Body: Expandable Rows ====== */}
-                    <div className="overflow-x-auto p-5 md:p-8 bg-slate-50/30">
-                      <div className="rounded-2xl border border-slate-200/80 overflow-hidden bg-white shadow-sm">
+                    <div className="overflow-x-auto p-5 md:p-6 bg-white">
+                      <div className="rounded-2xl border border-slate-200 overflow-hidden bg-white shadow-sm">
                         <table className="w-full text-left border-collapse whitespace-nowrap">
-                          <thead className="bg-slate-50/80 border-b border-slate-200 text-[10px] text-slate-400 font-black uppercase tracking-widest">
+                          <thead className="bg-slate-50 border-b border-slate-200 text-sm text-slate-500 font-medium tracking-wide">
                             <tr>
                               <th className="py-4 px-5 w-12 text-center"></th>
                               <th className="py-4 px-5">產品名稱</th>
                               <th className="py-4 px-5 text-right w-48">
                                 需求量
                               </th>
-                              <th className="py-4 px-8 text-right w-auto">
+                              <th className="py-4 px-5 text-right w-auto">
                                 操作
                               </th>
                             </tr>
                           </thead>
-                          <tbody className="divide-y divide-slate-200 text-sm bg-white">
+                          <tbody className="divide-y divide-slate-100 text-sm bg-white">
                             {group.plans.map((d) => {
                               const isExpanded = expandedMrpIds.includes(d.id);
                               const displayId = d.frontend_temp_id || d.id;
@@ -2534,61 +2895,58 @@ const RequirementOrderPage = () => {
                                     (k) =>
                                       k !== "_base_qty" && k !== "_productId",
                                   )
-                                  .some(
-                                    (k) => allocations[displayId][k].isShortage,
-                                  );
+                                  .some((k) => {
+                                    const matData = allocations[displayId][k];
+                                    return (
+                                      matData.isShortage &&
+                                      matData.type !== "SEMI"
+                                    );
+                                  });
                               const hasAdditiveError =
                                 mrpAdditiveErrors[displayId];
 
                               return (
                                 <React.Fragment key={d.id}>
                                   <tr
-                                    className={`hover:bg-blue-50/40 cursor-pointer transition-colors group ${isExpanded ? "bg-blue-50/40" : ""}`}
+                                    className={`hover:bg-blue-50/30 cursor-pointer transition-colors group ${isExpanded ? "bg-blue-50/30" : ""}`}
                                     onClick={() => toggleMrpExpanded(d.id)}
                                   >
-                                    <td className="py-5 px-5 text-center text-slate-400 text-[12px] font-bold group-hover:text-[#007AFF] transition-colors">
+                                    <td className="py-4 px-5 text-center text-slate-300 text-sm font-semibold group-hover:text-blue-500 transition-colors">
                                       {isExpanded ? "▼" : "▶"}
                                     </td>
-                                    <td className="py-5 px-5">
+                                    <td className="py-4 px-5">
                                       <div className="flex items-center gap-3">
-                                        <span className="font-black text-slate-800 text-[15px] group-hover:text-[#007AFF] transition-colors">
+                                        <span className="font-semibold text-slate-800 text-base group-hover:text-blue-600 transition-colors">
                                           {d.product_name}
                                         </span>
                                         {hasShortage && (
-                                          <span
-                                            className="text-red-500 text-[10px] uppercase tracking-widest font-black bg-red-50 px-2 py-1 rounded border border-red-100 shadow-sm"
-                                            title="庫存不足"
-                                          >
+                                          <span className="text-red-500 text-sm tracking-wide font-semibold bg-red-50 px-2.5 py-1 rounded-md border border-red-200 shadow-sm">
                                             ⚠️ 缺料
                                           </span>
                                         )}
                                         {hasAdditiveError && (
-                                          <span
-                                            className="text-red-600 text-[10px] uppercase tracking-widest font-black bg-red-100 px-2 py-1 rounded border border-red-200 shadow-sm"
-                                            title="法規超標"
-                                          >
+                                          <span className="text-red-600 text-sm tracking-wide font-semibold bg-red-100 px-2.5 py-1 rounded-md border border-red-300 shadow-sm">
                                             ⚠️ 法規超標
                                           </span>
                                         )}
                                       </div>
                                     </td>
-                                    <td className="py-5 px-5 text-right text-slate-900 font-black font-mono text-[15px]">
+                                    <td className="py-4 px-5 text-right text-slate-900 font-bold font-mono text-base">
                                       {formatNum(d.required_qty, "PRODUCT")}{" "}
-                                      <span className="text-slate-500 font-bold text-[13px] ml-1 uppercase">
+                                      <span className="text-slate-400 font-medium text-sm ml-1.5">
                                         {d.unit}
                                       </span>
                                     </td>
                                     <td
-                                      className="py-5 px-8 text-right whitespace-nowrap"
+                                      className="py-4 px-5 text-right whitespace-nowrap"
                                       onClick={(e) => e.stopPropagation()}
                                     >
-                                      <div className="flex flex-nowrap items-center justify-end gap-2.5">
+                                      <div className="flex flex-nowrap items-center justify-end gap-2">
                                         <button
                                           onClick={(e) =>
                                             handlePreviewOrder(d, e)
                                           }
-                                          className="px-3.5 py-2 bg-white text-[#007AFF] border border-blue-200 rounded-lg hover:bg-blue-50 transition-all duration-200 text-[12px] font-black shadow-sm flex items-center justify-center gap-1.5"
-                                          title="預覽此單項"
+                                          className="px-3 py-2 bg-white text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-50 transition-all duration-300 text-sm font-semibold shadow-sm flex items-center justify-center gap-1.5 whitespace-nowrap"
                                         >
                                           <FileText
                                             size={14}
@@ -2600,8 +2958,7 @@ const RequirementOrderPage = () => {
                                           onClick={(e) =>
                                             handlePrintOrder(d, e)
                                           }
-                                          className="px-3.5 py-2 bg-white text-slate-700 border border-slate-300 rounded-lg hover:bg-slate-50 transition-all duration-200 text-[12px] font-black shadow-sm flex items-center justify-center gap-1.5"
-                                          title="列印此單項"
+                                          className="px-3 py-2 bg-white text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50 transition-all duration-300 text-sm font-semibold shadow-sm flex items-center justify-center gap-1.5 whitespace-nowrap"
                                         >
                                           <Printer
                                             size={14}
@@ -2620,14 +2977,7 @@ const RequirementOrderPage = () => {
                                             d.status.toUpperCase() ===
                                               "CONVERTED"
                                           }
-                                          title={
-                                            hasAdditiveError
-                                              ? "法規超標，系統鎖定"
-                                              : hasShortage
-                                                ? "庫存不足，無法轉為生產單"
-                                                : "將此草稿轉為生產單"
-                                          }
-                                          className="px-3.5 py-2 bg-emerald-50 text-emerald-800 border border-emerald-300 rounded-lg hover:bg-emerald-600 hover:text-white transition-all duration-200 font-black text-[12px] shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                                          className="px-3 py-2 bg-emerald-50 text-emerald-600 border border-emerald-200 rounded-lg hover:bg-emerald-500 hover:text-white transition-all duration-300 font-semibold text-sm shadow-sm disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
                                         >
                                           轉生產單
                                         </button>
@@ -2636,7 +2986,7 @@ const RequirementOrderPage = () => {
                                             e.stopPropagation();
                                             handleDeleteDraft(d.id);
                                           }}
-                                          className="px-3.5 py-2 bg-red-50 text-red-700 border border-red-300 rounded-lg hover:bg-red-600 hover:text-white transition-all duration-200 font-black text-[12px] shadow-sm disabled:opacity-50"
+                                          className="px-3 py-2 bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-500 hover:text-white transition-all duration-300 font-semibold text-sm shadow-sm disabled:opacity-50 whitespace-nowrap"
                                           disabled={isSubmitting}
                                         >
                                           刪除
@@ -2650,20 +3000,20 @@ const RequirementOrderPage = () => {
                                     <tr>
                                       <td
                                         colSpan="4"
-                                        className="p-0 bg-slate-50/50 shadow-[inset_0_4px_10px_-4px_rgba(0,0,0,0.05)] border-b border-slate-200/80"
+                                        className="p-0 bg-slate-50/50 shadow-[inset_0_4px_12px_-4px_rgba(0,0,0,0.05)] border-b border-slate-200"
                                       >
                                         <div className="w-0 min-w-full">
-                                          <div className="p-6 md:p-8 w-full max-w-full overflow-hidden">
-                                            <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
+                                          <div className="p-6 w-full max-w-full overflow-hidden">
+                                            <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
                                               <div className="lg:col-span-4 min-w-0">
                                                 {mrpPlans.filter(
                                                   (child) =>
                                                     child.parent_id ===
                                                     d.mrp_id,
                                                 ).length > 0 && (
-                                                  <div className="mb-8 space-y-4 border-b border-slate-200/60 pb-6">
-                                                    <h4 className="text-[11px] font-black text-[#007AFF] uppercase tracking-widest flex items-center gap-1.5">
-                                                      <span className="w-1.5 h-1.5 rounded-full bg-[#007AFF]"></span>
+                                                  <div className="mb-8 space-y-4 border-b border-slate-200 pb-8">
+                                                    <h4 className="text-sm font-semibold text-blue-600 tracking-wide flex items-center gap-2">
+                                                      <span className="w-2 h-2 rounded-full bg-blue-500"></span>
                                                       子單據
                                                     </h4>
                                                     {mrpPlans
@@ -2684,10 +3034,10 @@ const RequirementOrderPage = () => {
                                                         return (
                                                           <div
                                                             key={child.id}
-                                                            className="border border-slate-200 rounded-2xl bg-white overflow-hidden shadow-[0_2px_8px_rgba(0,0,0,0.04)] hover:border-blue-300 transition-colors"
+                                                            className="border border-slate-200 rounded-2xl bg-white overflow-hidden shadow-sm hover:border-blue-300 transition-colors"
                                                           >
                                                             <div
-                                                              className="p-4 bg-white flex justify-between items-center cursor-pointer hover:bg-slate-50 transition-colors"
+                                                              className="p-5 flex justify-between items-center cursor-pointer hover:bg-slate-50/80 transition-colors"
                                                               onClick={() =>
                                                                 toggleMaterialExpanded(
                                                                   childExpandedKey,
@@ -2695,35 +3045,35 @@ const RequirementOrderPage = () => {
                                                               }
                                                             >
                                                               <div className="flex items-center gap-3">
-                                                                <span className="text-slate-400 text-[11px] font-bold">
+                                                                <span className="text-slate-300 text-sm font-semibold">
                                                                   {isChildCardExpanded
                                                                     ? "▼"
                                                                     : "▶"}
                                                                 </span>
-                                                                <span className="text-[10px] bg-purple-100 text-purple-800 px-2.5 py-1 rounded-md font-black tracking-widest border border-purple-200">
+                                                                <span className="text-sm bg-purple-50 text-purple-700 px-2 py-1 rounded-lg font-semibold tracking-wide border border-purple-200">
                                                                   {child.mrp_id}
                                                                 </span>
-                                                                <span className="font-black text-slate-900 text-[14px]">
+                                                                <span className="font-semibold text-slate-800 text-base">
                                                                   {
                                                                     child.product_name
                                                                   }
                                                                 </span>
                                                               </div>
-                                                              <div className="text-[12px] text-slate-600 bg-slate-50 border border-slate-100 px-3.5 py-1.5 rounded-lg font-bold">
+                                                              <div className="text-sm text-slate-600 bg-slate-50 border border-slate-200 px-4 py-2 rounded-xl font-medium shadow-sm">
                                                                 計畫生產:{" "}
-                                                                <span className="font-black text-slate-900 font-mono ml-1">
+                                                                <span className="font-bold text-slate-900 font-mono ml-2 text-base">
                                                                   {formatNum(
                                                                     child.required_qty,
                                                                     "SEMI",
                                                                   )}
                                                                 </span>{" "}
-                                                                <span className="text-[10px] uppercase ml-1">
+                                                                <span className="text-sm ml-1">
                                                                   {child.unit}
                                                                 </span>
                                                               </div>
                                                             </div>
                                                             {isChildCardExpanded && (
-                                                              <div className="p-6 border-t border-slate-100 bg-slate-50/50">
+                                                              <div className="p-6 border-t border-slate-100 bg-slate-50/30">
                                                                 <MaterialAllocationList
                                                                   itemId={
                                                                     childDisplayId
@@ -2734,6 +3084,7 @@ const RequirementOrderPage = () => {
                                                                   materials={
                                                                     materials
                                                                   }
+                                                                  boms={boms}
                                                                   expandedMaterials={
                                                                     expandedMaterials
                                                                   }
@@ -2752,7 +3103,7 @@ const RequirementOrderPage = () => {
                                                   </div>
                                                 )}
 
-                                                <h4 className="text-[11px] font-black text-slate-600 uppercase tracking-widest mb-4 flex items-center gap-2">
+                                                <h4 className="text-sm font-semibold text-slate-600 tracking-wide mb-5 flex items-center gap-2">
                                                   <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
                                                   批號與庫存分配
                                                 </h4>
@@ -2760,6 +3111,7 @@ const RequirementOrderPage = () => {
                                                   itemId={displayId}
                                                   allocations={allocations}
                                                   materials={materials}
+                                                  boms={boms}
                                                   expandedMaterials={
                                                     expandedMaterials
                                                   }
@@ -2788,16 +3140,16 @@ const RequirementOrderPage = () => {
                 );
               })
             ) : (
-              <div className="bg-white p-24 text-center text-slate-500 rounded-3xl shadow-[0_4px_16px_-4px_rgba(0,0,0,0.05)] border border-slate-300">
+              <div className="bg-white p-20 text-center text-slate-400 rounded-3xl shadow-sm border border-slate-200">
                 <FileText
                   size={56}
                   strokeWidth={1.5}
-                  className="mx-auto mb-6 text-slate-400"
+                  className="mx-auto mb-5 text-slate-300"
                 />
-                <p className="text-[16px] font-black text-slate-700">
+                <p className="text-lg font-semibold text-slate-600">
                   目前無任何需求單草稿
                 </p>
-                <p className="text-[14px] font-bold mt-2">
+                <p className="text-sm font-medium mt-3 text-slate-400">
                   請至上方「新增訂購單」分頁建立
                 </p>
               </div>
@@ -2807,11 +3159,12 @@ const RequirementOrderPage = () => {
 
         {/* 預覽訂單 Modal */}
         {isPreviewModalOpen && previewData && (
-          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-            <div className="bg-slate-50 max-w-[1000px] w-full max-h-[90vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden border border-slate-300">
-              <div className="bg-white/90 backdrop-blur-md border-b border-slate-300 p-6 flex justify-between items-center z-10 shadow-sm shrink-0">
-                <h3 className="text-xl font-black text-slate-900 tracking-wider flex items-center gap-3">
-                  <FileText className="text-[#007AFF]" /> 客戶訂貨單預覽
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-6 print:static print:block print:bg-transparent print:p-0 print:backdrop-blur-none">
+            <div className="bg-slate-50 max-w-[1000px] w-full max-h-[90vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden border border-slate-200">
+              <div className="bg-white/90 backdrop-blur-xl border-b border-slate-200 p-6 flex justify-between items-center z-10 shadow-sm shrink-0">
+                <h3 className="text-xl font-bold text-slate-900 tracking-wide flex items-center gap-3">
+                  <FileText className="text-blue-600" size={26} />{" "}
+                  客戶訂貨單預覽
                 </h3>
                 <button
                   onClick={() => setIsPreviewModalOpen(false)}
@@ -2821,26 +3174,26 @@ const RequirementOrderPage = () => {
                 </button>
               </div>
 
-              <div className="overflow-y-auto p-4 md:p-8 flex-1 bg-slate-200/50">
+              <div className="overflow-y-auto p-6 md:p-8 flex-1 bg-slate-100/50">
                 <div
-                  className="bg-white shadow-xl mx-auto ring-1 ring-black/5 rounded-lg"
+                  className="bg-white shadow-xl mx-auto ring-1 ring-black/5 rounded-2xl overflow-hidden"
                   style={{ minWidth: "800px" }}
                 >
                   <CustomerOrderTemplate order={previewData} />
                 </div>
               </div>
 
-              <div className="bg-white border-t border-slate-300 p-6 flex justify-between items-center shrink-0">
+              <div className="bg-white border-t border-slate-200 p-6 flex justify-between items-center shrink-0">
                 <button
                   onClick={handlePrintPreview}
-                  className="px-8 py-3.5 bg-slate-100 text-slate-800 font-black rounded-xl hover:bg-slate-200 transition-colors flex items-center gap-2 border border-slate-300 text-[14px] shadow-sm"
+                  className="px-8 py-3.5 bg-slate-100 text-slate-700 font-semibold rounded-xl hover:bg-slate-200 transition-colors flex items-center gap-2 border border-slate-200 text-base shadow-sm"
                 >
                   <Printer size={20} strokeWidth={2.5} /> 列印預覽
                 </button>
                 <div className="flex gap-4">
                   <button
                     onClick={() => setIsPreviewModalOpen(false)}
-                    className="px-8 py-3.5 bg-white text-slate-800 font-black rounded-xl hover:bg-slate-50 transition-colors border border-slate-300 text-[14px] shadow-sm"
+                    className="px-8 py-3.5 bg-white text-slate-700 font-semibold rounded-xl hover:bg-slate-50 transition-colors border border-slate-200 text-base shadow-sm"
                   >
                     {previewData?.isPreview ? "取消建立" : "關閉預覽"}
                   </button>
@@ -2848,7 +3201,7 @@ const RequirementOrderPage = () => {
                     <button
                       onClick={handleConfirmSaveOrder}
                       disabled={isSubmitting}
-                      className="px-10 py-3.5 bg-emerald-600 text-white font-black rounded-xl hover:bg-emerald-700 shadow-[0_4px_14px_rgba(5,150,105,0.3)] hover:-translate-y-0.5 transition-all disabled:opacity-50 disabled:transform-none disabled:shadow-none flex items-center gap-2 text-[15px]"
+                      className="px-10 py-3.5 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 shadow-md hover:-translate-y-1 transition-all disabled:opacity-50 disabled:transform-none disabled:shadow-none flex items-center gap-2 text-base"
                     >
                       {isSubmitting ? "處理中..." : "確認建立單據"}
                     </button>

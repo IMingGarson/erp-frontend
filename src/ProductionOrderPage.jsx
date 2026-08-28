@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import CustomDialog from "./components/customDialog";
 import {
   ChevronDown,
@@ -8,7 +8,6 @@ import {
   FileText,
   Save,
   Plus,
-  Trash2,
   PackageCheck,
   Search,
 } from "lucide-react";
@@ -16,9 +15,11 @@ import { fetchWithAuth } from "./utils/fetchWithAuth";
 import { useNavigate } from "react-router-dom";
 import { useAuthStore } from "./store/authStore";
 
-const formatNum = (num, type) => {
-  if (num === null || num === undefined || isNaN(num) || num === "") return "0";
-  if (type === "PACK") return Math.ceil(num).toString();
+// ==========================================
+// 輔助函數：數值格式化 (至多小數後五位，移除 trailing zero)
+// ==========================================
+const formatValue = (num) => {
+  if (num === null || num === undefined || num === "") return "0";
   return parseFloat(Number(num).toFixed(5)).toString();
 };
 
@@ -56,7 +57,6 @@ const StatusTag = ({ status }) => {
 
 // ==========================================
 // 輔助函數：計算生產單的總重量 (KG)
-// 邏輯：將所有原料(RAW)與半成品(SEMI)的配方用量加總，即為總製令重量
 // ==========================================
 const getOrderTotalWeight = (materials_info) => {
   if (!Array.isArray(materials_info)) return 0;
@@ -147,13 +147,10 @@ const ProductionFormTemplate = ({ order, isChildForm = false, onPrint }) => {
   const displayShippingDate = `${rawShippingDate} ${vInfo.notes || ""}`.trim();
   const customerName = vInfo.name || "廠內備庫";
 
-  // 計算實際生產重量
   const totalWeight = getOrderTotalWeight(order.materials_info);
   const isWeightBased = totalWeight > 0;
-  // 若算得出重量，顯示重量(KG)；否則退回顯示原本的 target_qty (個數)
-  const displayQty = isWeightBased
-    ? formatNum(totalWeight, "PRODUCT")
-    : formatNum(order.target_qty, "PRODUCT");
+
+  const displayQty = formatValue(order.target_qty);
   const displayUnit = isWeightBased
     ? "KG"
     : order.product_profile?.unit || "KG";
@@ -282,7 +279,7 @@ const ProductionFormTemplate = ({ order, isChildForm = false, onPrint }) => {
                   {mat.empty_bags}
                 </td>
                 <td className="border border-black text-right px-2 font-mono font-bold text-[13px]">
-                  {formatNum(mat.allocatedQty, "RAW")}
+                  {formatValue(mat.allocatedQty)}
                 </td>
                 <td className="border border-black"></td>
                 <td className="border border-black"></td>
@@ -507,6 +504,7 @@ const ProductionOrderPage = () => {
     message: "",
     onConfirm: null,
   });
+
   const closeDialog = () => setDialog((prev) => ({ ...prev, isOpen: false }));
   const showAlert = (title, message, status = "info") =>
     setDialog({
@@ -664,7 +662,7 @@ const ProductionOrderPage = () => {
           </p>
           <ul className="list-disc list-inside space-y-1 ml-6 text-slate-700">
             <li>
-              支援<strong>單號</strong>單號與<strong>產品名稱</strong>
+              支援<strong>單號</strong>與<strong>產品名稱</strong>
               快速搜尋，即時監控各單號狀態。
             </li>
             <li>一鍵產出符合實體規範的生產單與簽核欄位，對接現場作業。</li>
@@ -702,16 +700,13 @@ const ProductionOrderPage = () => {
                   <th className="p-4">產品名稱</th>
                   <th className="p-4 text-right">預計產量</th>
                   <th className="p-4 text-center">建立者</th>
-                  <th className="p-4 text-center w-24">操作</th>
+                  <th className="p-4 text-center">操作</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-sm">
                 {filteredOrders.length > 0 ? (
                   filteredOrders.map((po) => {
                     const isExpanded = expandedOrderIds.includes(po.id);
-                    // 在列表頁也動態計算總重量
-                    const rowWeight = getOrderTotalWeight(po.materials_info);
-                    const isWeightBased = rowWeight > 0;
 
                     return (
                       <React.Fragment key={po.id}>
@@ -733,44 +728,39 @@ const ProductionOrderPage = () => {
                             </div>
                           </td>
                           <td className="p-4 text-right text-slate-800 font-mono font-bold">
-                            {isWeightBased
-                              ? formatNum(rowWeight, po.product_profile?.type)
-                              : formatNum(
-                                  po.target_qty,
-                                  po.product_profile?.type,
-                                )}{" "}
+                            {formatValue(po.target_qty)}{" "}
                             <span className="text-xs text-slate-500 font-sans font-normal">
-                              {isWeightBased
-                                ? "KG"
-                                : po.product_profile?.unit || "KG"}
+                              KG
                             </span>
                           </td>
                           <td className="p-4 text-center text-slate-600">
                             {po.creator_name}
                           </td>
-                          <td className="p-4 text-center">
-                            <button
-                              onClick={(e) => handlePrintRow(e, po)}
-                              className="px-3 py-1.5 bg-blue-50 text-blue-600 border border-blue-200 rounded-md hover:bg-blue-600 hover:text-white transition-all duration-200 text-xs font-bold mr-2 outline-none shadow-sm"
-                            >
-                              列印
-                            </button>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                navigate(`/production/${po.id}`);
-                              }}
-                              className="px-3 py-1.5 bg-amber-50 text-amber-600 border border-amber-200 rounded-md hover:bg-amber-600 hover:text-white transition-all duration-200 text-xs font-bold outline-none shadow-sm"
-                            >
-                              編輯
-                            </button>
+                          <td className="p-4 text-center whitespace-nowrap">
+                            <div className="flex items-center justify-center gap-2">
+                              <button
+                                onClick={(e) => handlePrintRow(e, po)}
+                                className="px-3 py-1.5 bg-blue-50 text-blue-600 border border-blue-200 rounded-md hover:bg-blue-600 hover:text-white transition-all duration-200 text-xs font-bold inline-flex items-center gap-1 shadow-sm outline-none"
+                              >
+                                <Printer size={14} /> 列印
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  navigate(`/production/${po.id}`);
+                                }}
+                                className="px-3 py-1.5 bg-amber-50 text-amber-600 border border-amber-200 rounded-md hover:bg-amber-600 hover:text-white transition-all duration-200 text-xs font-bold inline-flex items-center gap-1 shadow-sm outline-none"
+                              >
+                                <FileText size={14} /> 編輯
+                              </button>
+                            </div>
                           </td>
                         </tr>
 
                         {isExpanded && (
                           <tr>
                             <td
-                              colSpan="7"
+                              colSpan="6"
                               className="p-0 bg-slate-200/50 shadow-inner border-b-4 border-slate-300"
                             >
                               <div className="p-4 md:p-8 overflow-x-auto flex flex-col gap-6">
@@ -829,7 +819,7 @@ const ProductionOrderPage = () => {
                 ) : (
                   <tr>
                     <td
-                      colSpan="7"
+                      colSpan="6"
                       className="p-12 text-center text-slate-400 bg-white"
                     >
                       查無符合條件的生產單

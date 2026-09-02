@@ -24,6 +24,11 @@ const MENU_GROUPS = [
       { path: "/", label: "庫存監控", icon: Boxes },
       { path: "/materials", label: "產品管理", icon: Package },
       { path: "/trace", label: "追蹤追溯", icon: Waypoints },
+      {
+        path: "/material-price",
+        label: "物料報價管理",
+        icon: Truck,
+      },
     ],
   },
   {

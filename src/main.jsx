@@ -21,6 +21,7 @@ import BOMCreatePage from "./BOMCreatePage.jsx";
 import QuotationCreatePage from "./QuotationCreatePage.jsx";
 import QuotationListPage from "./QuotationListPage.jsx";
 import QuotationEditPage from "./QuotationEditPage.jsx";
+import MaterialProviderPricePage from "./MaterialProviderPricePage.jsx";
 
 const router = createBrowserRouter([
   {
@@ -87,6 +88,10 @@ const router = createBrowserRouter([
               {
                 path: "quotation/:id",
                 element: <QuotationEditPage />,
+              },
+              {
+                path: "material-price",
+                element: <MaterialProviderPricePage />,
               },
               {
                 path: "*",

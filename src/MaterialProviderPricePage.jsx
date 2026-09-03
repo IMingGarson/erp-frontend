@@ -481,9 +481,6 @@ export default function MaterialProviderQuotationPage() {
           <h2 className="text-4xl font-extrabold text-slate-900 tracking-tight">
             供應商報價管理
           </h2>
-          <p className="text-slate-500 mt-2 font-semibold">
-            紀錄並自動換算供應商的歷史報價與未來調漲資訊
-          </p>
         </div>
       </div>
 

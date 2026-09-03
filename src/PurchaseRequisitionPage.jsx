@@ -1,10 +1,14 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
+import { createPortal } from "react-dom";
 import {
   Search,
   ChevronDown,
   Trash2,
   ChevronLeft,
   ChevronRight,
+  DownloadCloud,
+  Printer,
+  FileText,
 } from "lucide-react";
 import CustomDialog from "./components/customDialog";
 import { fetchWithAuth } from "./utils/fetchWithAuth";
@@ -39,12 +43,21 @@ const StatusTag = ({ status }) => {
 };
 
 // ==========================================
-// 輔助函數：將浮點數轉字串並移除結尾的 0 與小數點
+// 輔助函數：數值格式化與去零
 // ==========================================
 const formatDisplayNum = (val) => {
   if (val === null || val === undefined || val === "") return "";
-  const n = Number(val);
-  return isNaN(n) ? val : n.toString();
+  const num = Number(val);
+  return isNaN(num) ? val : parseFloat(num.toFixed(2)).toString();
+};
+
+const formatCurrency = (val) => {
+  const num = parseFloat(val);
+  if (isNaN(num)) return "0";
+  return num.toLocaleString("en-US", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  });
 };
 
 // ==========================================
@@ -52,9 +65,7 @@ const formatDisplayNum = (val) => {
 // ==========================================
 const parseSpecString = (specStr, baseUnit = "KG") => {
   if (!specStr) return null;
-
   let str = specStr.toString().toUpperCase().replace(/\s+/g, "");
-
   const abbrMap = {
     CTN: "箱",
     CARTON: "箱",
@@ -65,69 +76,202 @@ const parseSpecString = (specStr, baseUnit = "KG") => {
     公斤: "KG",
     公克: "G",
   };
-
   for (const [key, val] of Object.entries(abbrMap)) {
     str = str.split(key).join(val);
   }
-
   const isWeightOrVolume = ["KG", "K", "G", "L", "ML"].includes(
     baseUnit.toUpperCase(),
   );
-
   const complexMatch = str.match(
     /([\d.]+)[A-Z\u4e00-\u9fa5\/]*[*X]([\d.]+)[A-Z\u4e00-\u9fa5]*\/([A-Z\u4e00-\u9fa5]+)/,
   );
-
   if (complexMatch) {
     const innerWeight = parseFloat(complexMatch[1]);
     const count = parseFloat(complexMatch[2]);
     const outerUnit = complexMatch[3];
-
-    const finalQty = isWeightOrVolume
-      ? parseFloat((innerWeight * count).toFixed(4))
-      : count;
-
-    return { auxQuantity: finalQty, auxUnit: outerUnit };
+    return {
+      auxQuantity: isWeightOrVolume
+        ? parseFloat((innerWeight * count).toFixed(2))
+        : count,
+      auxUnit: outerUnit,
+    };
   }
-
   const simpleMatch = str.match(
     /([\d.]+)[A-Z\u4e00-\u9fa5]*\/([A-Z\u4e00-\u9fa5]+)/,
   );
-  if (simpleMatch) {
-    let unit = simpleMatch[2].replace(/紙袋/g, "袋");
-    return { auxQuantity: parseFloat(simpleMatch[1]), auxUnit: unit };
-  }
-
+  if (simpleMatch)
+    return {
+      auxQuantity: parseFloat(parseFloat(simpleMatch[1]).toFixed(2)),
+      auxUnit: simpleMatch[2].replace(/紙袋/g, "袋"),
+    };
   if (
     str.includes("*") &&
     (str.includes("CM") || str.includes("MM") || /[\d]+\*[\d]+/.test(str))
-  ) {
+  )
     return { auxQuantity: 1, auxUnit: "件" };
-  }
-
-  if (str.includes("KG/包") || str.includes("K/包")) {
+  if (str.includes("KG/包") || str.includes("K/包"))
     return { auxQuantity: 1, auxUnit: "包" };
-  }
-
   const weightMatch = str.match(/(?:^|[^\d.])([\d.]+)(?:KG|K|G|L|件)/);
-  if (weightMatch) {
-    return { auxQuantity: parseFloat(weightMatch[1]), auxUnit: "件" };
-  }
-
+  if (weightMatch)
+    return {
+      auxQuantity: parseFloat(parseFloat(weightMatch[1]).toFixed(2)),
+      auxUnit: "件",
+    };
   return null;
 };
 
 // ==========================================
-// 列印專用 Template
+// 🌟 Portal Searchable Dropdown (防截斷)
+// ==========================================
+const SearchableDropdown = ({ value, onChange, options, placeholder }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [dropdownStyle, setDropdownStyle] = useState({});
+  const selectRef = useRef(null);
+  const dropdownMenuRef = useRef(null);
+
+  const selectedOption = useMemo(
+    () => options.find((opt) => opt.id === value),
+    [value, options],
+  );
+
+  const filteredOptions = useMemo(() => {
+    if (!search) return options;
+    const lowerSearch = search.toLowerCase();
+    return options.filter(
+      (opt) =>
+        (opt.name && opt.name.toLowerCase().includes(lowerSearch)) ||
+        (opt.code && opt.code.toLowerCase().includes(lowerSearch)),
+    );
+  }, [options, search]);
+
+  const handleToggle = () => {
+    if (!isOpen && selectRef.current) {
+      const rect = selectRef.current.getBoundingClientRect();
+      setDropdownStyle({
+        top: `${rect.bottom + 8}px`,
+        left: `${rect.left}px`,
+        width: `${rect.width}px`,
+      });
+    }
+    setIsOpen(!isOpen);
+  };
+
+  useEffect(() => {
+    const handleScrollOrClick = (e) => {
+      if (dropdownMenuRef.current && dropdownMenuRef.current.contains(e.target))
+        return;
+      if (selectRef.current && selectRef.current.contains(e.target)) return;
+      if (isOpen) setIsOpen(false);
+    };
+    const updatePosition = () => {
+      if (isOpen && selectRef.current) {
+        const rect = selectRef.current.getBoundingClientRect();
+        setDropdownStyle({
+          top: `${rect.bottom + 8}px`,
+          left: `${rect.left}px`,
+          width: `${rect.width}px`,
+        });
+      }
+    };
+
+    if (isOpen) {
+      document.addEventListener("mousedown", handleScrollOrClick);
+      document.addEventListener("scroll", updatePosition, true);
+      window.addEventListener("resize", updatePosition, true);
+    }
+    return () => {
+      document.removeEventListener("mousedown", handleScrollOrClick);
+      document.removeEventListener("scroll", updatePosition, true);
+      window.removeEventListener("resize", updatePosition, true);
+    };
+  }, [isOpen]);
+
+  return (
+    <>
+      <div
+        ref={selectRef}
+        onClick={handleToggle}
+        className={`w-full px-4 py-3 bg-white border rounded-xl text-[15px] cursor-pointer flex justify-between items-center transition-all ${
+          isOpen
+            ? "border-blue-500 ring-4 ring-blue-500/10"
+            : "border-slate-200 hover:border-slate-300 shadow-sm"
+        }`}
+      >
+        <span
+          className={
+            selectedOption
+              ? "text-slate-800 font-bold"
+              : "text-slate-400 font-medium"
+          }
+        >
+          {selectedOption
+            ? `[${selectedOption.code}] ${selectedOption.name}`
+            : placeholder}
+        </span>
+        <ChevronDown
+          size={18}
+          className={`text-slate-400 transition-transform ${isOpen ? "rotate-180" : ""}`}
+        />
+      </div>
+
+      {isOpen &&
+        createPortal(
+          <div
+            ref={dropdownMenuRef}
+            style={dropdownStyle}
+            className="fixed bg-white border border-slate-200 shadow-2xl rounded-2xl max-h-72 flex flex-col z-[99999] overflow-hidden"
+          >
+            <div className="p-3 border-b border-slate-100 bg-slate-50 shrink-0">
+              <input
+                autoFocus
+                type="text"
+                placeholder="搜尋代碼或名稱..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="w-full px-4 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 shadow-sm font-medium text-slate-800"
+              />
+            </div>
+            <div className="overflow-y-auto flex-1 p-2 custom-scrollbar">
+              {filteredOptions.length > 0 ? (
+                filteredOptions.map((opt) => (
+                  <div
+                    key={opt.id}
+                    onClick={() => {
+                      onChange(opt);
+                      setIsOpen(false);
+                      setSearch("");
+                    }}
+                    className="px-3 py-2.5 hover:bg-blue-50 cursor-pointer rounded-xl flex items-center gap-3 transition-colors"
+                  >
+                    <span className="text-[11px] font-mono bg-white shadow-sm border border-slate-200 px-2 py-0.5 rounded-lg text-slate-500 font-bold">
+                      {opt.code}
+                    </span>
+                    <span className="text-sm font-bold text-slate-700">
+                      {opt.name}
+                    </span>
+                  </div>
+                ))
+              ) : (
+                <div className="p-4 text-center text-sm text-slate-400 font-medium">
+                  查無結果
+                </div>
+              )}
+            </div>
+          </div>,
+          document.body,
+        )}
+    </>
+  );
+};
+
+// ==========================================
+// 列印 Template - C-53 (內部請購單)
 // ==========================================
 const PurchaseRequisitionPrintTemplate = ({ data }) => {
   if (!data) return null;
-
   const printItems = [...(data.items || [])];
-  while (printItems.length < 7) {
-    printItems.push({});
-  }
-
+  while (printItems.length < 7) printItems.push({});
   const [printYear, printMonth, printDay] = data.request_date
     ? data.request_date.split("-")
     : ["      ", "    ", "    "];
@@ -137,7 +281,12 @@ const PurchaseRequisitionPrintTemplate = ({ data }) => {
       className="hidden print:block w-full bg-white text-black font-sans mx-auto print:p-8"
       style={{ maxWidth: "210mm" }}
     >
-      <style>{`@media print { @page { margin: 0; } }`}</style>
+      <style>{`
+        @media print {
+          .page-break { page-break-before: always; }
+          @page { size: A4 portrait; margin: 0; }
+        }
+      `}</style>
       <div className="flex border-2 border-black">
         <div className="w-[15%] border-r-2 border-black flex items-center justify-center p-3 overflow-hidden">
           <CompanyLogo className="w-16 h-16 scale-110" />
@@ -149,13 +298,11 @@ const PurchaseRequisitionPrintTemplate = ({ data }) => {
           <div className="text-2xl font-bold py-2 tracking-[0.5em]">請購單</div>
         </div>
       </div>
-
       <div className="border-x-2 border-black px-2 py-3 text-[15px] font-bold">
         填單日期：<span className="mx-1">{printYear}</span>年
         <span className="mx-1">{printMonth}</span>月
         <span className="mx-1">{printDay}</span>日
       </div>
-
       <table className="w-full border-collapse border-2 border-black text-center text-sm font-bold">
         <thead>
           <tr className="border-b-2 border-black">
@@ -185,7 +332,6 @@ const PurchaseRequisitionPrintTemplate = ({ data }) => {
               const parts = item.expected_delivery_date.split("-");
               if (parts.length === 3) deliveryStr = `${parts[1]}/${parts[2]}`;
             }
-
             return (
               <tr
                 key={idx}
@@ -193,7 +339,7 @@ const PurchaseRequisitionPrintTemplate = ({ data }) => {
               >
                 <td className="border-r border-black p-1">{idx + 1}</td>
                 <td className="border-r border-black p-1 text-left px-2 text-lg">
-                  {item.material_name || ""}
+                  {item.material_name || ""}{" "}
                   {item.in_stock_spec ? ` (${item.in_stock_spec})` : ""}
                 </td>
                 <td className="border-r border-black p-1 text-xl">
@@ -208,13 +354,12 @@ const PurchaseRequisitionPrintTemplate = ({ data }) => {
                   {item.provider_name || ""}
                 </td>
                 <td className="border-r border-black p-1"></td>
-                <td className="p-1 text-lg">{item.note || ""}</td>
+                <td className="p-1 text-lg">{item.remark || ""}</td>
               </tr>
             );
           })}
         </tbody>
       </table>
-
       <div className="flex justify-between items-end mt-4 px-4 font-bold text-lg">
         <div className="w-1/3">主管：</div>
         <div className="w-1/3">採購：</div>
@@ -225,14 +370,288 @@ const PurchaseRequisitionPrintTemplate = ({ data }) => {
           </span>
         </div>
       </div>
-
       <div className="text-right mt-6 pr-4 font-bold text-sm">表號：C-53</div>
     </div>
   );
 };
 
 // ==========================================
-// 表格卡片 Component (Apple UI/UX Friendly Diff View)
+// 🌟 列印 Template - C-34 (外部採購單)
+// ==========================================
+const PurchaseOrderPrintTemplate = ({ data, providers, materials }) => {
+  if (!data || !data.items || data.items.length === 0) return null;
+
+  // 1. 將請購明細依照供應商 (material_provider_id) 進行分組
+  const providerGroups = {};
+  data.items.forEach((item) => {
+    const pId = item.material_provider_id || "unknown";
+    if (!providerGroups[pId]) providerGroups[pId] = [];
+    providerGroups[pId].push(item);
+  });
+
+  return (
+    <div className="hidden print:block w-full bg-white text-black font-sans mx-auto">
+      <style>{`
+        @media print { 
+          @page { size: A4; margin-top: 5mm; margin-bottom: 5mm; margin-left: 10mm; } 
+          .page-break { page-break-after: always; }
+          body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        }
+      `}</style>
+
+      {Object.entries(providerGroups).map(([pId, items], index, arr) => {
+        // 查找對應的供應商詳細資訊
+        const provider = providers.find((p) => p.id.toString() === pId) || {};
+
+        // 取得最早或共用的交貨日期
+        const deliveryDates = items
+          .map((i) => i.expected_delivery_date)
+          .filter(Boolean)
+          .sort();
+        const deliveryDateStr =
+          deliveryDates.length > 0 ? deliveryDates[0].replace(/-/g, "/") : "";
+
+        // 計算總計金額
+        const totalSum = items.reduce((acc, curr) => {
+          return (
+            acc +
+            parseFloat(curr.quantity || 0) *
+              parseFloat(curr.purchased_price || 0)
+          );
+        }, 0);
+
+        // 確保表格行數固定美觀
+        const printItems = [...items];
+        while (printItems.length < 15) printItems.push({});
+
+        return (
+          <div
+            key={pId}
+            className={`w-full ${index < arr.length - 1 ? "page-break" : ""}`}
+          >
+            {/* Header 表頭 */}
+            <div className="flex justify-between items-end mb-1 border-b border-black pb-2">
+              <div className="w-1/3 text-[11px] leading-tight font-bold">
+                桃園市觀音區崙坪里1鄰1-10號
+                <br />
+                電話: 03-4988228 <span className="ml-4">傳真: 03-4988159</span>
+              </div>
+              <div className="w-1/3 text-center">
+                <h1 className="text-2xl font-black tracking-[0.1em]">
+                  基香食品有限公司
+                </h1>
+                <h2 className="text-xl font-bold tracking-[0.5em] mt-1">
+                  廠 商 採 購 單
+                </h2>
+              </div>
+              <div className="w-1/3 text-[11px] text-right font-bold leading-tight">
+                版次: 03
+                <br />第 1 頁, 共 1 頁
+              </div>
+            </div>
+
+            {/* 廠商與訂單資訊區塊 */}
+            <div className="border border-black text-[12px] mb-1 flex flex-col font-bold">
+              <div className="flex border-b border-black">
+                <div className="w-[35%] border-r border-black p-1 truncate">
+                  廠商名稱: {provider.name || "未指定廠商"}
+                </div>
+                <div className="w-[35%] border-r border-black p-1 truncate">
+                  廠商編號: {provider.code || "-"}
+                </div>
+                <div className="w-[30%] p-1 truncate">
+                  單據日期:{" "}
+                  {data.request_date
+                    ? data.request_date.replace(/-/g, "/")
+                    : ""}
+                </div>
+              </div>
+              <div className="flex border-b border-black">
+                <div className="w-[35%] border-r border-black p-1 truncate">
+                  廠商統編: {provider.tax_id || "-"}
+                </div>
+                <div className="w-[35%] border-r border-black p-1 truncate">
+                  聯 絡 人: {provider.contact_person || "-"}
+                </div>
+                <div className="w-[30%] p-1 truncate">單據編號: {data.id}</div>
+              </div>
+              <div className="flex border-b border-black">
+                <div className="w-[35%] border-r border-black p-1 truncate">
+                  廠商電話: {provider.phone || "-"}
+                </div>
+                <div className="w-[35%] border-r border-black p-1 truncate">
+                  廠商傳真: {provider.fax || "-"}
+                </div>
+                <div className="w-[30%] p-1 truncate"></div>
+              </div>
+              <div className="flex">
+                <div className="w-[70%] border-r border-black p-1 truncate">
+                  送貨地址: 桃園市觀音區崙坪里1鄰1-10號
+                </div>
+                <div className="w-[30%] p-1 flex justify-between">
+                  <span>交貨日期:</span>
+                  <span className="font-bold text-sm tracking-wider pr-2">
+                    {deliveryDateStr}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* 採購明細表格 */}
+            <table className="w-full border-collapse border border-black text-center text-[11px] font-bold">
+              <thead>
+                <tr className="border-b border-black">
+                  <th className="border-r border-black p-1 font-normal w-8">
+                    序
+                  </th>
+                  <th className="border-r border-black p-1 font-normal w-24">
+                    貨品編號
+                  </th>
+                  <th className="border-r border-black p-1 font-normal text-left px-2">
+                    品名
+                  </th>
+                  <th className="border-r border-black p-1 font-normal w-16">
+                    數量
+                  </th>
+                  <th className="border-r border-black p-1 font-normal w-10">
+                    單位
+                  </th>
+                  <th className="border-r border-black p-1 font-normal w-20">
+                    單價
+                  </th>
+                  <th className="border-r border-black p-1 font-normal w-24">
+                    小計
+                  </th>
+                  <th className="p-1 font-normal w-28">附註</th>
+                </tr>
+              </thead>
+              <tbody>
+                {printItems.map((item, idx) => {
+                  // 從全域 materials 取得物料代號
+                  const matchedMaterial = materials.find(
+                    (m) => m.id === item.material_id,
+                  );
+                  const matCode = matchedMaterial ? matchedMaterial.code : "-";
+
+                  return (
+                    <tr key={idx} className="border-b border-black h-7">
+                      <td className="border-r border-black">
+                        {item.material_id ? idx + 1 : ""}
+                      </td>
+                      <td className="border-r border-black font-mono">
+                        {item.material_id ? matCode : ""}
+                      </td>
+                      <td className="border-r border-black text-left px-2 text-[13px]">
+                        {item.material_name || ""}
+                      </td>
+                      <td className="border-r border-black text-right px-2 font-mono text-[13px]">
+                        {item.quantity ? formatDisplayNum(item.quantity) : ""}
+                      </td>
+                      <td className="border-r border-black">
+                        {item.unit || ""}
+                      </td>
+                      <td className="border-r border-black text-right px-2 font-mono">
+                        {item.purchased_price
+                          ? formatDisplayNum(item.purchased_price)
+                          : ""}
+                      </td>
+                      <td className="border-r border-black text-right px-2 font-mono text-[13px]">
+                        {item.quantity && item.purchased_price
+                          ? formatCurrency(item.quantity * item.purchased_price)
+                          : ""}
+                      </td>
+                      <td className="text-left px-1 truncate max-w-[110px] text-[10px]">
+                        {item.in_stock_spec || ""}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot>
+                <tr className="border-t-2 border-black font-bold h-8 text-[12px]">
+                  <td colSpan="4" className="text-left p-1">
+                    合計金額：{" "}
+                    <span className="float-right pr-4 tracking-wider">
+                      {formatCurrency(totalSum)}
+                    </span>
+                  </td>
+                  <td
+                    colSpan="2"
+                    className="border-l border-black text-left p-1"
+                  >
+                    營業稅：
+                  </td>
+                  <td
+                    colSpan="2"
+                    className="border-l border-black text-left p-1"
+                  >
+                    總計金額：{" "}
+                    <span className="float-right pr-4 tracking-wider text-[13px]">
+                      {formatCurrency(totalSum)}
+                    </span>
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+
+            {/* 固定的法規聲明備註 */}
+            <div className="border border-t-0 border-black p-2 text-[11px] leading-relaxed font-bold">
+              <div className="mb-1">單據備註：</div>
+              <div className="pl-6 space-y-0.5">
+                <div>( 1 ) 11:40-13:00 休息時間不收貨。</div>
+                <div>
+                  ( 2 ) 逐批報告及年度外檢報告以電子檔為主：E-mail:
+                  goodsmell@hotmail.com 。
+                </div>
+                <div>
+                  ( 3 )
+                  包裝外觀應清潔無破損，完整標示品名及製造有效期限，產品品質及標示應符合食品法規相關規定。
+                </div>
+                <div>
+                  ( 4 )
+                  內包材每年請提供符合食品器具容器包裝衛生標準之外部檢驗報告，標示應符合食品安全衛生管理法
+                  26 條。
+                </div>
+              </div>
+            </div>
+
+            {/* 簽核欄位 */}
+            <div className="flex justify-between items-end mt-4 px-4 font-bold text-[13px]">
+              <div>
+                審 核：
+                <span className="w-20 inline-block border-b border-black"></span>
+              </div>
+              <div>
+                經 辦：
+                <span className="w-20 inline-block text-center border-b border-black leading-none pb-0.5">
+                  {data.applicant}
+                </span>
+              </div>
+              <div>
+                會 計：
+                <span className="w-20 inline-block border-b border-black"></span>
+              </div>
+              <div>
+                倉 管：
+                <span className="w-20 inline-block border-b border-black"></span>
+              </div>
+              <div>
+                簽 收：
+                <span className="w-20 inline-block border-b border-black"></span>
+              </div>
+            </div>
+            <div className="text-right mt-2 pr-4 font-bold text-[11px]">
+              表號: C-34
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
+// ==========================================
+// 列表列 Component
 // ==========================================
 const RequisitionNode = ({
   req,
@@ -272,25 +691,31 @@ const RequisitionNode = ({
             </span>
           </div>
         </div>
-
-        <div className="mt-4 md:mt-0 flex-shrink-0 flex items-center w-full md:w-auto md:pl-0 justify-between md:justify-end gap-6 border-t md:border-t-0 pt-4 md:pt-0 border-slate-100">
-          <div className="text-slate-500 text-sm font-medium flex items-center gap-2">
+        <div className="mt-4 md:mt-0 flex-shrink-0 flex items-center w-full md:w-auto md:pl-0 justify-between md:justify-end gap-4 border-t md:border-t-0 pt-4 md:pt-0 border-slate-100">
+          <div className="text-slate-500 text-sm font-medium flex items-center gap-2 mr-2">
             <span>品項數量</span>
             <span className="text-lg font-black text-slate-800">
               {req.items?.length || 0}
             </span>
           </div>
-
-          <div className="flex gap-2.5" onClick={(e) => e.stopPropagation()}>
+          <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
             <button
-              onClick={() => onPrint(req)}
-              className="px-4 py-2 text-slate-600 border border-slate-200 bg-white rounded-xl hover:bg-slate-50 transition-colors text-xs font-bold shadow-sm"
+              onClick={() => onPrint(req, "PR")}
+              className="px-3 py-2 text-slate-600 border border-slate-200 bg-white rounded-xl hover:bg-slate-50 transition-colors text-xs font-bold shadow-sm inline-flex items-center gap-1.5"
             >
-              列印
+              <FileText size={14} /> 內部請購單
             </button>
+            {/* 🌟 新增：外部採購單列印按鈕 */}
+            <button
+              onClick={() => onPrint(req, "PO")}
+              className="px-3 py-2 text-indigo-600 border border-indigo-200 bg-indigo-50 rounded-xl hover:bg-indigo-100 transition-colors text-xs font-bold shadow-sm inline-flex items-center gap-1.5"
+            >
+              <Printer size={14} /> 外部採購單
+            </button>
+
             <button
               onClick={() => onEdit(req)}
-              className="px-4 py-2 bg-blue-50 text-blue-700 border border-blue-100 rounded-xl hover:bg-blue-100 transition-colors text-xs font-bold shadow-sm"
+              className="px-4 py-2 bg-blue-50 text-blue-700 border border-blue-100 rounded-xl hover:bg-blue-100 transition-colors text-xs font-bold shadow-sm ml-2"
             >
               {isStocked ? "檢視內容" : "編輯"}
             </button>
@@ -319,11 +744,8 @@ const RequisitionNode = ({
                         {item.material_name}
                       </span>
                     </div>
-
                     <div className="p-5 flex-1 flex flex-col gap-4 bg-white">
-                      {/* 🌟 Apple Friendly UI/UX 膠囊對比視角 (移除箭頭) */}
                       <div className="flex flex-col gap-3">
-                        {/* 預計採購膠囊 */}
                         <div className="flex items-center justify-between p-3.5 bg-slate-50 border border-slate-200/60 rounded-xl shadow-2xs">
                           <div className="flex items-center gap-2.5">
                             <span className="text-[11px] font-bold text-slate-500 bg-white border border-slate-200 px-2 py-0.5 rounded-md shadow-2xs">
@@ -341,8 +763,6 @@ const RequisitionNode = ({
                             {formatDisplayNum(item.quantity)} {item.unit}
                           </span>
                         </div>
-
-                        {/* 實際入庫膠囊 */}
                         {isStocked && item.actual_package_qty && (
                           <div className="flex items-center justify-between p-3.5 bg-emerald-50/70 border border-emerald-200/70 rounded-xl shadow-2xs">
                             <div className="flex items-center gap-2.5 flex-wrap">
@@ -369,7 +789,6 @@ const RequisitionNode = ({
                           </div>
                         )}
                       </div>
-
                       <div className="flex text-[15px] mt-1">
                         <span className="text-slate-400 font-bold w-16 shrink-0">
                           供應商
@@ -383,10 +802,9 @@ const RequisitionNode = ({
                           備註
                         </span>
                         <span className="text-slate-600 italic line-clamp-2 leading-relaxed">
-                          {item.batch_note || "-"}
+                          {item.remark || "-"}
                         </span>
                       </div>
-
                       {item.expected_delivery_date && (
                         <div className="flex text-sm mt-1">
                           <span className="text-xs font-bold text-blue-700 bg-blue-50 border border-blue-100 px-3 py-1.5 rounded-lg whitespace-nowrap shrink-0 shadow-2xs">
@@ -395,7 +813,6 @@ const RequisitionNode = ({
                         </div>
                       )}
                     </div>
-
                     <div className="bg-slate-50/80 p-5 border-t border-slate-100 flex justify-between items-center mt-auto">
                       <div className="text-sm text-slate-500 font-mono flex items-center">
                         <span className="font-bold text-slate-800 text-lg">
@@ -409,14 +826,13 @@ const RequisitionNode = ({
                           ${formatDisplayNum(item.purchased_price)}
                         </span>
                       </div>
-
                       <div className="flex items-baseline gap-2">
                         <span className="text-xs text-slate-400 font-bold">
                           小計
                         </span>
                         <span className="font-black text-2xl text-blue-700 tracking-tight">
                           $
-                          {formatDisplayNum(
+                          {formatCurrency(
                             (parseFloat(item.quantity) || 0) *
                               (parseFloat(item.purchased_price) || 0),
                           )}
@@ -438,15 +854,11 @@ const RequisitionNode = ({
   );
 };
 
-// ==========================================
-// 主頁面 Component
-// ==========================================
-const PurchaseRequisitionPage = () => {
+export default function PurchaseRequisitionPage() {
   const me = useAuthStore((state) => state.me());
   const [requisitions, setRequisitions] = useState([]);
   const [materials, setMaterials] = useState([]);
   const [materialProviders, setMaterialProviders] = useState([]);
-
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -454,10 +866,11 @@ const PurchaseRequisitionPage = () => {
   const [endDate, setEndDate] = useState("");
   const [searchMaterial, setSearchMaterial] = useState("");
   const [filterStatus, setFilterStatus] = useState("ALL");
-
   const [currentPage, setCurrentPage] = useState(1);
   const [expandedRows, setExpandedRows] = useState([]);
-  const [printData, setPrintData] = useState(null);
+
+  // 🌟 修改：將 printData 改為 printConfig 以區分列印類型 { type: 'PR' | 'PO', data: req }
+  const [printConfig, setPrintConfig] = useState(null);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingRequisition, setEditingRequisition] = useState(null);
@@ -468,7 +881,6 @@ const PurchaseRequisitionPage = () => {
     items: [],
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
-
   const [dialog, setDialog] = useState({
     isOpen: false,
     type: "alert",
@@ -490,7 +902,6 @@ const PurchaseRequisitionPage = () => {
       message,
       onConfirm: null,
     });
-
   const showConfirm = (title, message, onConfirm) =>
     setDialog({
       isOpen: true,
@@ -500,7 +911,6 @@ const PurchaseRequisitionPage = () => {
       message,
       onConfirm,
     });
-
   const closeDialog = () => setDialog((prev) => ({ ...prev, isOpen: false }));
 
   useEffect(() => {
@@ -512,9 +922,8 @@ const PurchaseRequisitionPage = () => {
   }, []);
 
   useEffect(() => {
-    if (me?.full_name && !editingRequisition) {
+    if (me?.full_name && !editingRequisition)
       setFormData((prev) => ({ ...prev, applicant: me.full_name }));
-    }
   }, [me, editingRequisition]);
 
   const fetchRequisitions = async () => {
@@ -526,7 +935,6 @@ const PurchaseRequisitionPage = () => {
       if (endDate) params.append("end_date", endDate);
       const queryString = params.toString();
       if (queryString) url += `?${queryString}`;
-
       const res = await fetchWithAuth(url);
       if (!res.ok) throw new Error("無法載入請購單資料");
       const json = await res.json();
@@ -542,10 +950,7 @@ const PurchaseRequisitionPage = () => {
   const fetchMaterials = async () => {
     try {
       const response = await fetchWithAuth("/api/materials");
-      if (response.ok) {
-        const data = await response.json();
-        setMaterials(data.data || data);
-      }
+      if (response.ok) setMaterials((await response.json()).data || []);
     } catch (error) {
       console.error(error);
     }
@@ -554,10 +959,7 @@ const PurchaseRequisitionPage = () => {
   const fetchMaterialProviders = async () => {
     try {
       const response = await fetchWithAuth("/api/material_providers");
-      if (response.ok) {
-        const data = await response.json();
-        setMaterialProviders(data.data || data);
-      }
+      if (response.ok) setMaterialProviders((await response.json()).data || []);
     } catch (error) {
       console.error(error);
     }
@@ -582,29 +984,30 @@ const PurchaseRequisitionPage = () => {
 
   const totalPages =
     Math.ceil(filteredRequisitions.length / ITEMS_PER_PAGE) || 1;
-
+  const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
   const paginatedRequisitions = useMemo(() => {
-    const start = (currentPage - 1) * ITEMS_PER_PAGE;
-    return filteredRequisitions.slice(start, start + ITEMS_PER_PAGE);
-  }, [filteredRequisitions, currentPage]);
+    return filteredRequisitions.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+  }, [filteredRequisitions, startIndex]);
 
   useEffect(() => {
     setCurrentPage(1);
   }, [searchMaterial, filterStatus]);
 
-  const toggleRowExpand = (id) => {
+  const toggleRowExpand = (id) =>
     setExpandedRows((prev) =>
       prev.includes(id) ? prev.filter((rowId) => rowId !== id) : [...prev, id],
     );
-  };
 
-  const handlePrint = (req) => {
-    setPrintData(req);
+  // 🌟 列印控制邏輯更新
+  const handlePrint = (req, type = "PR") => {
+    setPrintConfig({ type, data: req });
     setTimeout(() => {
       const originalTitle = document.title;
-      document.title = `${req.request_date}_請購單_請購人_${req.applicant}`;
+      const typeStr = type === "PR" ? "請購單" : "採購單";
+      document.title = `${req.request_date}_${typeStr}_請購人_${req.applicant}`;
       window.print();
       document.title = originalTitle;
+      setPrintConfig(null); // 列印完畢後清除
     }, 150);
   };
 
@@ -657,12 +1060,10 @@ const PurchaseRequisitionPage = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-
     if (!formData.applicant || !formData.request_date)
       return showAlert("資料不完整", "請填寫申請人與填單日期", "warning");
     if (formData.items.length === 0)
       return showAlert("資料不完整", "請至少新增一筆請購明細", "warning");
-
     setIsSubmitting(true);
     const payload = {
       ...formData,
@@ -672,11 +1073,9 @@ const PurchaseRequisitionPage = () => {
         expected_delivery_date: item.expected_delivery_date || null,
       })),
     };
-
     const url = editingRequisition
       ? `/api/purchase_requisitions/${editingRequisition.id}`
       : "/api/purchase_requisitions";
-
     try {
       const res = await fetchWithAuth(url, {
         method: editingRequisition ? "PUT" : "POST",
@@ -701,7 +1100,7 @@ const PurchaseRequisitionPage = () => {
   const handleMasterChange = (e) =>
     setFormData((prev) => ({ ...prev, [e.target.name]: e.target.value }));
 
-  const handleAddItem = () =>
+  const handleAddItem = () => {
     setFormData((prev) => ({
       ...prev,
       items: [
@@ -709,6 +1108,8 @@ const PurchaseRequisitionPage = () => {
         {
           material_name: null,
           material_id: null,
+          material_provider_id: null,
+          provider_name: null,
           in_stock_spec: "",
           package_qty: "",
           aux_unit: "",
@@ -717,11 +1118,12 @@ const PurchaseRequisitionPage = () => {
           unit: "KG",
           purchased_price: "",
           expected_delivery_date: null,
-          material_provider_id: null,
           remark: "",
+          suggestions: null,
         },
       ],
     }));
+  };
 
   const handleRemoveItem = (index) =>
     setFormData((prev) => ({
@@ -729,11 +1131,58 @@ const PurchaseRequisitionPage = () => {
       items: prev.items.filter((_, i) => i !== index),
     }));
 
-  const handleItemChange = (index, field, value) =>
+  const fetchPriceSuggestions = async (index, material_id, provider_id) => {
+    if (!material_id || !provider_id) return;
+    try {
+      const res = await fetchWithAuth(
+        `/api/purchase_requisitions/prev_purchase_price?material_id=${material_id}&provider_id=${provider_id}`,
+      );
+      if (res.ok) {
+        const json = await res.json();
+        const suggestionData = json.data || json;
+        setFormData((prev) => {
+          const newItems = [...prev.items];
+          newItems[index].suggestions = suggestionData;
+          if (suggestionData.from_provider?.current_stock !== undefined) {
+            newItems[index].current_stock =
+              suggestionData.from_provider.current_stock;
+          } else if (
+            suggestionData.from_historical_pr?.current_stock !== undefined
+          ) {
+            newItems[index].current_stock =
+              suggestionData.from_historical_pr.current_stock;
+          }
+          return { ...prev, items: newItems };
+        });
+      }
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
+  const applySuggestion = (index, suggestionData) => {
+    if (!suggestionData) return;
+    setFormData((prev) => {
+      const newItems = [...prev.items];
+      const item = newItems[index];
+      item.purchased_price =
+        suggestionData.latest_price !== null
+          ? formatDisplayNum(suggestionData.latest_price)
+          : "";
+      item.in_stock_spec = suggestionData.latest_spec ?? "";
+      item.aux_quantity =
+        suggestionData.latest_aux_quantity !== null
+          ? formatDisplayNum(suggestionData.latest_aux_quantity)
+          : "";
+      item.aux_unit = suggestionData.latest_aux_unit ?? "";
+      return { ...prev, items: newItems };
+    });
+  };
+
+  const handleItemChange = (index, field, value) => {
     setFormData((prev) => {
       const newItems = [...prev.items];
       const item = { ...newItems[index], [field]: value };
-
       if (field === "in_stock_spec" && value) {
         const parsed = parseSpecString(value, item.unit || "KG");
         if (parsed) {
@@ -741,287 +1190,18 @@ const PurchaseRequisitionPage = () => {
           item.aux_unit = parsed.auxUnit;
         }
       }
-
-      if (
-        field === "package_qty" ||
-        field === "aux_quantity" ||
-        field === "in_stock_spec"
-      ) {
+      if (["package_qty", "aux_quantity", "in_stock_spec"].includes(field)) {
         const pq = parseFloat(item.package_qty) || 0;
         const aq = parseFloat(item.aux_quantity) || 0;
         if (pq > 0 && aq > 0) {
-          item.quantity = Number((pq * aq).toFixed(4)).toString();
+          item.quantity = formatDisplayNum(pq * aq);
         } else {
           item.quantity = "";
         }
       }
-
       newItems[index] = item;
       return { ...prev, items: newItems };
     });
-
-  // ========== UI Components ==========
-
-  const MaterialSelect = ({ value, onChange, options }) => {
-    const [isOpen, setIsOpen] = useState(false);
-    const [searchTerm, setSearchTerm] = useState("");
-    const [dropdownStyle, setDropdownStyle] = useState({});
-    const selectRef = useRef(null);
-    const dropdownMenuRef = useRef(null);
-
-    const filtered = options.filter((m) =>
-      m.name.toLowerCase().includes(searchTerm.toLowerCase()),
-    );
-
-    const handleToggle = () => {
-      if (!isOpen && selectRef.current) {
-        const rect = selectRef.current.getBoundingClientRect();
-        setDropdownStyle({
-          top: `${rect.bottom + 8}px`,
-          left: `${rect.left}px`,
-          width: `${rect.width}px`,
-        });
-      }
-      setIsOpen(!isOpen);
-    };
-
-    useEffect(() => {
-      const handleScroll = (e) => {
-        if (
-          dropdownMenuRef.current &&
-          dropdownMenuRef.current.contains(e.target)
-        )
-          return;
-        if (isOpen) setIsOpen(false);
-      };
-      if (isOpen) {
-        window.addEventListener("scroll", handleScroll, true);
-        window.addEventListener("resize", () => setIsOpen(false), true);
-      }
-      return () => {
-        window.removeEventListener("scroll", handleScroll, true);
-        window.removeEventListener("resize", () => setIsOpen(false), true);
-      };
-    }, [isOpen]);
-
-    return (
-      <>
-        <div
-          ref={selectRef}
-          onClick={handleToggle}
-          className={`w-full h-11 px-4 py-2 border rounded-xl text-sm cursor-pointer bg-white flex justify-between items-center transition-all duration-200 ${
-            isOpen
-              ? "border-blue-500 ring-4 ring-blue-500/10"
-              : "border-slate-200 hover:border-slate-300 shadow-sm"
-          }`}
-        >
-          <span
-            className={
-              value
-                ? "text-slate-800 truncate font-bold text-[15px]"
-                : "text-slate-400 truncate"
-            }
-          >
-            {value || "搜尋與選擇物料..."}
-          </span>
-          <ChevronDown
-            size={18}
-            className={`text-slate-400 flex-shrink-0 ml-2 transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`}
-          />
-        </div>
-        {isOpen && (
-          <>
-            <div
-              className="fixed inset-0 z-[9998]"
-              onClick={() => setIsOpen(false)}
-            ></div>
-            <div
-              ref={dropdownMenuRef}
-              style={dropdownStyle}
-              className="fixed z-[9999] bg-white border border-slate-100 rounded-2xl shadow-xl flex flex-col max-h-72 overflow-hidden"
-            >
-              <div className="p-3 border-b border-slate-50 bg-slate-50/80 shrink-0">
-                <div className="relative">
-                  <Search
-                    size={18}
-                    className="absolute left-3 top-2.5 text-slate-400"
-                  />
-                  <input
-                    autoFocus
-                    className="w-full border-none bg-white rounded-xl pl-10 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 shadow-sm font-medium text-slate-700"
-                    placeholder="輸入關鍵字..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                  />
-                </div>
-              </div>
-              <div className="overflow-y-auto flex-1 p-2 custom-scrollbar">
-                {filtered.length > 0 ? (
-                  filtered.map((m) => (
-                    <div
-                      key={m.id}
-                      onClick={() => {
-                        onChange(m);
-                        setIsOpen(false);
-                        setSearchTerm("");
-                      }}
-                      className="px-4 py-3 text-[15px] text-slate-700 rounded-xl hover:bg-blue-50 hover:text-blue-700 cursor-pointer transition-colors flex justify-between items-center font-bold"
-                    >
-                      <span>{m.name}</span>
-                      <span className="text-[11px] text-slate-500 bg-white border border-slate-200 px-2 py-0.5 rounded-lg shadow-sm">
-                        {m.unit}
-                      </span>
-                    </div>
-                  ))
-                ) : (
-                  <div className="px-3 py-8 text-center text-slate-400 text-sm font-medium">
-                    查無符合的物料
-                  </div>
-                )}
-              </div>
-            </div>
-          </>
-        )}
-      </>
-    );
-  };
-
-  const SupplierSelect = ({ valueId, onChange, options }) => {
-    const [isOpen, setIsOpen] = useState(false);
-    const [searchTerm, setSearchTerm] = useState("");
-    const [dropdownStyle, setDropdownStyle] = useState({});
-    const selectRef = useRef(null);
-    const dropdownMenuRef = useRef(null);
-
-    const selectedProvider = useMemo(() => {
-      if (!valueId) return null;
-      return options.find((opt) => opt.id === valueId) || null;
-    }, [valueId, options]);
-
-    const filtered = useMemo(() => {
-      if (!searchTerm) return options;
-      const lowerTerm = searchTerm.toLowerCase();
-      return options.filter(
-        (m) =>
-          (m.name && m.name.toLowerCase().includes(lowerTerm)) ||
-          (m.code && m.code.toLowerCase().includes(lowerTerm)),
-      );
-    }, [options, searchTerm]);
-
-    const handleToggle = () => {
-      if (!isOpen && selectRef.current) {
-        const rect = selectRef.current.getBoundingClientRect();
-        setDropdownStyle({
-          top: `${rect.bottom + 8}px`,
-          left: `${rect.left}px`,
-          width: `${rect.width}px`,
-        });
-      }
-      setIsOpen(!isOpen);
-    };
-
-    useEffect(() => {
-      const handleScroll = (e) => {
-        if (
-          dropdownMenuRef.current &&
-          dropdownMenuRef.current.contains(e.target)
-        )
-          return;
-        if (isOpen) setIsOpen(false);
-      };
-      if (isOpen) {
-        window.addEventListener("scroll", handleScroll, true);
-        window.addEventListener("resize", () => setIsOpen(false), true);
-      }
-      return () => {
-        window.removeEventListener("scroll", handleScroll, true);
-        window.removeEventListener("resize", () => setIsOpen(false), true);
-      };
-    }, [isOpen]);
-
-    return (
-      <>
-        <div
-          ref={selectRef}
-          onClick={handleToggle}
-          className={`w-full h-11 px-4 py-2 border rounded-xl text-sm cursor-pointer bg-white flex justify-between items-center transition-all duration-200 ${
-            isOpen
-              ? "border-blue-500 ring-4 ring-blue-500/10"
-              : "border-slate-200 hover:border-slate-300 shadow-sm"
-          }`}
-        >
-          <div className="flex items-center gap-2.5 overflow-hidden w-full">
-            <Search size={16} className="text-slate-400 flex-shrink-0" />
-            <span
-              className={`truncate ${
-                selectedProvider
-                  ? "text-slate-800 font-bold text-[15px]"
-                  : "text-slate-400 font-medium text-[15px]"
-              }`}
-            >
-              {selectedProvider
-                ? `[${selectedProvider.code}] ${selectedProvider.name}`
-                : "選擇供應商..."}
-            </span>
-          </div>
-          <ChevronDown
-            size={18}
-            className={`text-slate-400 flex-shrink-0 ml-1 transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`}
-          />
-        </div>
-        {isOpen && (
-          <>
-            <div
-              className="fixed inset-0 z-[9998]"
-              onClick={() => setIsOpen(false)}
-            ></div>
-            <div
-              ref={dropdownMenuRef}
-              style={dropdownStyle}
-              className="fixed z-[9999] bg-white border border-slate-100 rounded-2xl shadow-xl flex flex-col max-h-72 overflow-hidden"
-            >
-              <div className="p-3 border-b border-slate-50 bg-slate-50/80 shrink-0">
-                <input
-                  autoFocus
-                  className="w-full border-none bg-white rounded-xl px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 shadow-sm font-medium"
-                  placeholder="輸入代碼或名稱..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                />
-              </div>
-              <div className="overflow-y-auto flex-1 p-2 custom-scrollbar">
-                {filtered.length > 0 ? (
-                  filtered.map((m) => {
-                    return (
-                      <div
-                        key={m.id}
-                        onClick={() => {
-                          onChange(m.id);
-                          setIsOpen(false);
-                          setSearchTerm("");
-                        }}
-                        className="px-3 py-3 text-sm text-slate-700 rounded-xl hover:bg-blue-50 cursor-pointer transition-colors flex items-center gap-3 font-bold"
-                      >
-                        <span className="text-[11px] font-mono bg-white shadow-sm px-2 py-0.5 rounded-lg text-slate-500 border border-slate-200 whitespace-nowrap">
-                          {m.code}
-                        </span>
-                        <span className="truncate text-slate-800 text-[15px]">
-                          {m.name}
-                        </span>
-                      </div>
-                    );
-                  })
-                ) : (
-                  <div className="px-3 py-8 text-center text-slate-400 text-sm font-medium">
-                    查無符合的供應商
-                  </div>
-                )}
-              </div>
-            </div>
-          </>
-        )}
-      </>
-    );
   };
 
   if (loading && requisitions.length === 0) {
@@ -1048,7 +1228,6 @@ const PurchaseRequisitionPage = () => {
           </div>
         </div>
 
-        {/* 🌟 依照你的要求復原此指定樣式的系統功能說明區塊 */}
         <div className="bg-blue-50/80 text-blue-800 text-sm p-4 rounded-2xl mb-6 border border-blue-100/50 shadow-sm">
           <p className="flex items-center gap-2 font-bold mb-2">
             <span className="text-lg leading-none">💡</span> 系統功能說明
@@ -1144,11 +1323,10 @@ const PurchaseRequisitionPage = () => {
               </div>
             )}
           </div>
-
           {totalPages > 1 && (
             <div className="flex items-center justify-between border-t border-slate-100 pt-6 mt-6 px-4">
               <div className="text-sm text-slate-500 font-bold">
-                顯示第 {(currentPage - 1) * ITEMS_PER_PAGE + 1} 到{" "}
+                顯示第 {startIndex + 1} 到{" "}
                 {Math.min(
                   currentPage * ITEMS_PER_PAGE,
                   filteredRequisitions.length,
@@ -1161,7 +1339,7 @@ const PurchaseRequisitionPage = () => {
                     setCurrentPage((prev) => Math.max(prev - 1, 1))
                   }
                   disabled={currentPage === 1}
-                  className="p-2 border border-slate-200 rounded-xl bg-white text-slate-600 hover:bg-slate-50 hover:border-slate-300 disabled:opacity-40 disabled:cursor-not-allowed shadow-sm transition-all"
+                  className="p-2 border border-slate-200 rounded-xl bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40 shadow-sm transition-all"
                 >
                   <ChevronLeft size={18} />
                 </button>
@@ -1173,7 +1351,7 @@ const PurchaseRequisitionPage = () => {
                     setCurrentPage((prev) => Math.min(prev + 1, totalPages))
                   }
                   disabled={currentPage === totalPages}
-                  className="p-2 border border-slate-200 rounded-xl bg-white text-slate-600 hover:bg-slate-50 hover:border-slate-300 disabled:opacity-40 disabled:cursor-not-allowed shadow-sm transition-all"
+                  className="p-2 border border-slate-200 rounded-xl bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40 shadow-sm transition-all"
                 >
                   <ChevronRight size={18} />
                 </button>
@@ -1259,11 +1437,7 @@ const PurchaseRequisitionPage = () => {
                         value={formData.status}
                         onChange={handleMasterChange}
                         disabled={isReadOnly}
-                        className={`w-full px-4 py-3 border rounded-xl text-[15px] outline-none transition-all font-bold disabled:opacity-80 disabled:cursor-not-allowed ${
-                          formData.status === "STOCKED"
-                            ? "bg-emerald-50 border-emerald-200 text-emerald-800"
-                            : "bg-slate-50 border-slate-200 text-slate-800 focus:bg-white focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500"
-                        }`}
+                        className={`w-full px-4 py-3 border rounded-xl text-[15px] outline-none transition-all font-bold disabled:opacity-80 disabled:cursor-not-allowed ${formData.status === "STOCKED" ? "bg-emerald-50 border-emerald-200 text-emerald-800" : "bg-slate-50 border-slate-200 text-slate-800 focus:bg-white focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500"}`}
                       >
                         <option value="WAITING">等待進貨</option>
                         <option value="STOCKED">已經入庫 (產生批號)</option>
@@ -1273,7 +1447,7 @@ const PurchaseRequisitionPage = () => {
 
                   <div className="flex justify-between items-center mb-5 pl-2">
                     <h4 className="text-xl font-extrabold text-slate-900 tracking-tight flex items-center gap-3">
-                      請購明細
+                      請購明細{" "}
                       <span className="bg-slate-200 text-slate-700 text-[13px] py-1 px-3 rounded-full">
                         {formData.items.length}
                       </span>
@@ -1307,11 +1481,7 @@ const PurchaseRequisitionPage = () => {
                         return (
                           <div
                             key={index}
-                            className={`bg-white border rounded-[2rem] p-7 shadow-sm relative transition-all duration-300 group ${
-                              isReadOnly
-                                ? "border-slate-200"
-                                : "border-slate-200 hover:border-blue-300 hover:shadow-md"
-                            }`}
+                            className={`bg-white border rounded-[2rem] p-7 shadow-sm relative transition-all duration-300 group ${isReadOnly ? "border-slate-200" : "border-slate-200 hover:border-blue-300 hover:shadow-md"}`}
                           >
                             <div className="flex justify-between items-center mb-6 pb-4 border-b border-slate-100">
                               <h5 className="font-extrabold text-slate-800 flex items-center gap-3 text-lg tracking-tight">
@@ -1332,10 +1502,64 @@ const PurchaseRequisitionPage = () => {
                             </div>
 
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                              <div className="lg:col-span-4">
+                              <div className="lg:col-span-2">
                                 <label className="block text-xs font-bold text-slate-500 mb-2 ml-1">
-                                  原物料名稱{" "}
-                                  <span className="text-red-500">*</span>
+                                  供應商 <span className="text-red-500">*</span>
+                                </label>
+                                {isReadOnly ? (
+                                  <input
+                                    type="text"
+                                    readOnly
+                                    value={item.provider_name || "-"}
+                                    className="w-full px-4 py-3 border border-slate-200 rounded-xl text-[15px] bg-slate-50 text-slate-800 font-bold"
+                                  />
+                                ) : (
+                                  <SearchableDropdown
+                                    value={item.material_provider_id}
+                                    options={materialProviders}
+                                    onChange={(opt) => {
+                                      handleItemChange(
+                                        index,
+                                        "material_provider_id",
+                                        opt.id,
+                                      );
+                                      handleItemChange(
+                                        index,
+                                        "provider_name",
+                                        opt.name,
+                                      );
+                                      fetchPriceSuggestions(
+                                        index,
+                                        item.material_id,
+                                        opt.id,
+                                      );
+                                    }}
+                                    placeholder="選擇供應商..."
+                                  />
+                                )}
+                              </div>
+
+                              <div className="lg:col-span-2 relative">
+                                <label className="flex justify-between items-end text-xs font-bold text-slate-500 mb-2 ml-1">
+                                  <span className="mb-1">
+                                    原物料名稱{" "}
+                                    <span className="text-red-500">*</span>
+                                  </span>
+                                  {item.current_stock !== undefined && (
+                                    <div className="inline-flex items-center gap-1.5 bg-emerald-100 border border-emerald-300 px-2.5 py-1 rounded-lg shadow-sm transition-all duration-300 hover:shadow-md hover:bg-emerald-50">
+                                      <span className="relative flex h-2 w-2">
+                                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                        <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                                      </span>
+                                      <span className="text-emerald-800 font-black text-[11px] tracking-wider">
+                                        廠內庫存:{" "}
+                                        <span className="font-mono text-[13px]">
+                                          {formatDisplayNum(item.current_stock)}
+                                        </span>{" "}
+                                        {item.unit}
+                                      </span>
+                                    </div>
+                                  )}
                                 </label>
                                 {isReadOnly ? (
                                   <input
@@ -1345,15 +1569,10 @@ const PurchaseRequisitionPage = () => {
                                     className="w-full px-4 py-3 border border-slate-200 rounded-xl text-[15px] bg-slate-50 text-slate-800 font-bold"
                                   />
                                 ) : (
-                                  <MaterialSelect
-                                    value={item.material_name}
+                                  <SearchableDropdown
+                                    value={item.material_id}
                                     options={materials}
-                                    onChange={async (m) => {
-                                      handleItemChange(
-                                        index,
-                                        "material_name",
-                                        m.name,
-                                      );
+                                    onChange={(m) => {
                                       handleItemChange(
                                         index,
                                         "material_id",
@@ -1361,59 +1580,168 @@ const PurchaseRequisitionPage = () => {
                                       );
                                       handleItemChange(
                                         index,
+                                        "material_name",
+                                        m.name,
+                                      );
+                                      handleItemChange(
+                                        index,
                                         "unit",
                                         m.unit || "KG",
                                       );
-
-                                      try {
-                                        const res = await fetchWithAuth(
-                                          `/api/purchase_requisitions/prev_purchase_price?material_id=${m.id}`,
-                                        );
-                                        if (res.ok) {
-                                          const data = await res.json();
-                                          const {
-                                            latest_price,
-                                            latest_spec,
-                                            latest_aux_unit,
-                                            latest_aux_quantity,
-                                          } = data.data;
-
-                                          handleItemChange(
-                                            index,
-                                            "purchased_price",
-                                            latest_price ?? "",
-                                          );
-
-                                          if (latest_spec) {
-                                            handleItemChange(
-                                              index,
-                                              "in_stock_spec",
-                                              latest_spec,
-                                            );
-                                          } else if (latest_aux_quantity) {
-                                            handleItemChange(
-                                              index,
-                                              "aux_quantity",
-                                              latest_aux_quantity,
-                                            );
-                                            handleItemChange(
-                                              index,
-                                              "aux_unit",
-                                              latest_aux_unit ?? "",
-                                            );
-                                          }
-                                        }
-                                      } catch (error) {
-                                        console.error(error);
-                                      }
+                                      fetchPriceSuggestions(
+                                        index,
+                                        m.id,
+                                        item.material_provider_id,
+                                      );
                                     }}
+                                    placeholder="選擇物料..."
                                   />
                                 )}
                               </div>
 
+                              {!isReadOnly && item.suggestions && (
+                                <div className="lg:col-span-4 flex flex-col gap-3 p-4 bg-indigo-50/50 border border-indigo-100 rounded-2xl animate-in slide-in-from-top-2 overflow-hidden">
+                                  <div className="flex justify-between items-center">
+                                    <span className="text-[11px] font-black text-indigo-500 uppercase tracking-widest flex items-center gap-1.5">
+                                      <DownloadCloud size={14} />{" "}
+                                      發現可用報價與歷史紀錄
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        handleItemChange(
+                                          index,
+                                          "suggestions",
+                                          null,
+                                        )
+                                      }
+                                      className="text-xs font-bold text-slate-400 hover:text-slate-600 transition-colors bg-white px-2 py-1 rounded shadow-sm border border-slate-200"
+                                    >
+                                      ✕ 隱藏面板
+                                    </button>
+                                  </div>
+
+                                  <div className="flex gap-4 overflow-x-auto pt-2 pb-4 px-2 -mx-2 custom-scrollbar snap-x items-stretch">
+                                    {item.suggestions.from_provider && (
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          applySuggestion(
+                                            index,
+                                            item.suggestions.from_provider,
+                                          )
+                                        }
+                                        className="flex-none w-[280px] text-left p-4 bg-white border border-indigo-200 hover:border-indigo-400 focus:outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-500/20 hover:shadow-lg rounded-xl transition-all duration-200 group snap-start flex flex-col"
+                                      >
+                                        <div className="flex justify-between items-start w-full mb-1.5">
+                                          <span className="text-[10px] font-bold text-white bg-indigo-500 px-2 py-0.5 rounded shadow-sm">
+                                            廠商報價單
+                                          </span>
+                                          <span className="text-xs font-bold text-indigo-400 group-hover:text-indigo-600 transition-colors">
+                                            套用 ➔
+                                          </span>
+                                        </div>
+                                        <div className="font-bold text-slate-700 text-[15px] mt-2 truncate w-full">
+                                          {item.suggestions.from_provider
+                                            .latest_spec || "無特定規格"}
+                                        </div>
+                                        <div className="font-mono font-black text-blue-700 text-xl mt-1 w-full">
+                                          $
+                                          {formatDisplayNum(
+                                            item.suggestions.from_provider
+                                              .latest_price,
+                                          )}{" "}
+                                          <span className="text-xs text-slate-400">
+                                            / {item.unit}
+                                          </span>
+                                        </div>
+                                        {(item.suggestions.from_provider
+                                          .quote_date ||
+                                          item.suggestions.from_provider
+                                            .valid_until) && (
+                                          <div className="mt-auto pt-4 w-full">
+                                            <div className="bg-slate-50/80 rounded-lg p-3 border border-slate-100 flex flex-col gap-1.5">
+                                              {item.suggestions.from_provider
+                                                .quote_date && (
+                                                <div className="flex justify-between items-center text-[11px]">
+                                                  <span className="text-slate-400 font-bold">
+                                                    報價日期
+                                                  </span>
+                                                  <span className="text-slate-600 font-mono font-bold">
+                                                    {
+                                                      item.suggestions
+                                                        .from_provider
+                                                        .quote_date
+                                                    }
+                                                  </span>
+                                                </div>
+                                              )}
+                                              {item.suggestions.from_provider
+                                                .valid_until && (
+                                                <div className="flex justify-between items-center text-[11px]">
+                                                  <span className="text-slate-400 font-bold">
+                                                    報價效期
+                                                  </span>
+                                                  <span className="text-slate-600 font-mono font-bold">
+                                                    {
+                                                      item.suggestions
+                                                        .from_provider
+                                                        .valid_until
+                                                    }
+                                                  </span>
+                                                </div>
+                                              )}
+                                            </div>
+                                          </div>
+                                        )}
+                                      </button>
+                                    )}
+                                    {item.suggestions.from_historical_pr
+                                      ?.latest_price !== null &&
+                                      item.suggestions.from_historical_pr
+                                        ?.latest_price !== undefined && (
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            applySuggestion(
+                                              index,
+                                              item.suggestions
+                                                .from_historical_pr,
+                                            )
+                                          }
+                                          className="flex-none w-[280px] text-left p-4 bg-white border border-slate-200 hover:border-slate-400 focus:outline-none focus:border-slate-400 focus:ring-4 focus:ring-slate-500/20 hover:shadow-lg rounded-xl transition-all duration-200 group snap-start flex flex-col"
+                                        >
+                                          <div className="flex justify-between items-start w-full mb-1.5">
+                                            <span className="text-[10px] font-bold text-slate-500 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded shadow-sm">
+                                              前次請購紀錄
+                                            </span>
+                                            <span className="text-xs font-bold text-slate-400 group-hover:text-slate-600 transition-colors">
+                                              套用 ➔
+                                            </span>
+                                          </div>
+                                          <div className="font-bold text-slate-700 text-[15px] mt-2 truncate w-full">
+                                            {item.suggestions.from_historical_pr
+                                              .latest_spec || "無特定規格"}
+                                          </div>
+                                          <div className="font-mono font-black text-slate-600 text-xl mt-1 w-full">
+                                            $
+                                            {formatDisplayNum(
+                                              item.suggestions
+                                                .from_historical_pr
+                                                .latest_price,
+                                            )}{" "}
+                                            <span className="text-xs text-slate-400">
+                                              / {item.unit}
+                                            </span>
+                                          </div>
+                                        </button>
+                                      )}
+                                  </div>
+                                </div>
+                              )}
+
                               <div className="lg:col-span-4 grid grid-cols-1 md:grid-cols-4 gap-5 bg-slate-50/70 p-5 rounded-3xl border border-slate-100">
                                 <div>
-                                  {/* 🌟 依照你的要求將 wording 改為「下單規格」 */}
                                   <label className="block text-xs font-bold text-slate-500 mb-2 ml-1">
                                     {isReadOnly
                                       ? "真實入庫規格"
@@ -1436,7 +1764,6 @@ const PurchaseRequisitionPage = () => {
                                       )
                                     }
                                     className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-[15px] font-bold focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all disabled:opacity-80 disabled:bg-slate-100 disabled:text-emerald-800"
-                                    placeholder="如: 30KG/袋 或 1500 PCS/箱"
                                   />
                                 </div>
                                 <div>
@@ -1465,7 +1792,6 @@ const PurchaseRequisitionPage = () => {
                                       )
                                     }
                                     className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-[15px] focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none font-mono font-bold transition-all disabled:opacity-80 disabled:bg-slate-100 disabled:text-emerald-800"
-                                    placeholder="例如: 5"
                                   />
                                 </div>
                                 <div className="flex gap-3">
@@ -1490,7 +1816,6 @@ const PurchaseRequisitionPage = () => {
                                         )
                                       }
                                       className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-[15px] font-bold focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all disabled:opacity-80 disabled:bg-slate-100 disabled:text-emerald-800"
-                                      placeholder="袋, 箱"
                                     />
                                   </div>
                                   <div className="w-1/2">
@@ -1517,7 +1842,6 @@ const PurchaseRequisitionPage = () => {
                                         )
                                       }
                                       className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-[15px] focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none font-mono font-bold transition-all disabled:opacity-80 disabled:bg-slate-100 disabled:text-emerald-800"
-                                      placeholder="如: 30"
                                     />
                                   </div>
                                 </div>
@@ -1548,11 +1872,7 @@ const PurchaseRequisitionPage = () => {
                                           e.target.value,
                                         )
                                       }
-                                      className={`w-full px-4 py-3 border rounded-xl text-[15px] outline-none font-mono font-black transition-all ${
-                                        isReadOnly
-                                          ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-                                          : "border-blue-200 bg-blue-50 text-blue-900 focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 placeholder-blue-300"
-                                      }`}
+                                      className={`w-full px-4 py-3 border rounded-xl text-[15px] outline-none font-mono font-black transition-all ${isReadOnly ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-blue-200 bg-blue-50 text-blue-900 focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 placeholder-blue-300"}`}
                                       placeholder="自動計算..."
                                     />
                                   </div>
@@ -1580,8 +1900,7 @@ const PurchaseRequisitionPage = () => {
                                     $
                                   </span>
                                   <input
-                                    type="number"
-                                    step="0.01"
+                                    type="text"
                                     disabled={isReadOnly}
                                     value={item.purchased_price ?? ""}
                                     placeholder="無前次紀錄"
@@ -1592,35 +1911,25 @@ const PurchaseRequisitionPage = () => {
                                         e.target.value,
                                       )
                                     }
+                                    onBlur={(e) => {
+                                      const val = parseFloat(e.target.value);
+                                      if (!isNaN(val)) {
+                                        handleItemChange(
+                                          index,
+                                          "purchased_price",
+                                          val.toFixed(2),
+                                        );
+                                      } else if (e.target.value !== "") {
+                                        handleItemChange(
+                                          index,
+                                          "purchased_price",
+                                          "",
+                                        );
+                                      }
+                                    }}
                                     className="w-full pl-9 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-[15px] focus:bg-white focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none font-mono font-bold transition-all disabled:opacity-80 disabled:bg-slate-100"
                                   />
                                 </div>
-                              </div>
-
-                              <div>
-                                <label className="block text-xs font-bold text-slate-500 mb-2 ml-1">
-                                  供應商
-                                </label>
-                                {isReadOnly ? (
-                                  <input
-                                    type="text"
-                                    readOnly
-                                    value={item.provider_name || "-"}
-                                    className="w-full px-4 py-3 border border-slate-200 rounded-xl text-[15px] bg-slate-50 text-slate-700 font-bold"
-                                  />
-                                ) : (
-                                  <SupplierSelect
-                                    valueId={item.material_provider_id}
-                                    options={materialProviders}
-                                    onChange={(valId) =>
-                                      handleItemChange(
-                                        index,
-                                        "material_provider_id",
-                                        valId,
-                                      )
-                                    }
-                                  />
-                                )}
                               </div>
 
                               <div>
@@ -1642,7 +1951,7 @@ const PurchaseRequisitionPage = () => {
                                 />
                               </div>
 
-                              <div>
+                              <div className="lg:col-span-2">
                                 <label className="block text-xs font-bold text-slate-500 mb-2 ml-1">
                                   備註說明
                                 </label>
@@ -1650,7 +1959,6 @@ const PurchaseRequisitionPage = () => {
                                   type="text"
                                   disabled={isReadOnly}
                                   value={item.remark || ""}
-                                  placeholder="特殊要求或附註..."
                                   onChange={(e) =>
                                     handleItemChange(
                                       index,
@@ -1669,19 +1977,19 @@ const PurchaseRequisitionPage = () => {
                   </div>
                 </div>
 
-                <div className="p-6 md:px-10 md:py-6 border-t border-slate-100 flex justify-end gap-4 bg-white shrink-0 shadow-[0_-10px_30px_-10px_rgba(0,0,0,0.05)] z-10">
+                <div className="p-6 md:px-10 md:py-6 border-t border-slate-100 bg-white/90 backdrop-blur-md flex justify-end gap-4 z-10 shadow-[0_-10px_30px_-10px_rgba(0,0,0,0.05)]">
                   <button
                     type="button"
                     onClick={closeModal}
                     className="px-8 py-3.5 border border-slate-200 rounded-xl text-slate-600 hover:bg-slate-50 hover:text-slate-800 transition-all text-[15px] font-bold shadow-sm"
                   >
-                    {isReadOnly ? "關閉視窗" : "取消"}
+                    取消
                   </button>
                   {!isReadOnly && (
                     <button
                       type="submit"
                       disabled={isSubmitting}
-                      className="px-10 py-3.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 shadow-[0_4px_12px_rgba(37,99,235,0.2)] transition-all text-[15px] font-bold disabled:opacity-50 hover:-translate-y-0.5 hover:shadow-[0_6px_16px_rgba(37,99,235,0.3)] tracking-wide"
+                      className="px-10 py-3.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 shadow-[0_4px_12px_rgba(37,99,235,0.2)] text-[15px] font-bold disabled:opacity-50 hover:-translate-y-0.5 transition-all tracking-wide"
                     >
                       {isSubmitting ? "處理中..." : "確認儲存"}
                     </button>
@@ -1703,9 +2011,16 @@ const PurchaseRequisitionPage = () => {
         />
       </div>
 
-      {printData && <PurchaseRequisitionPrintTemplate data={printData} />}
+      {printConfig?.type === "PR" && (
+        <PurchaseRequisitionPrintTemplate data={printConfig.data} />
+      )}
+      {printConfig?.type === "PO" && (
+        <PurchaseOrderPrintTemplate
+          data={printConfig.data}
+          providers={materialProviders}
+          materials={materials}
+        />
+      )}
     </>
   );
-};
-
-export default PurchaseRequisitionPage;
+}

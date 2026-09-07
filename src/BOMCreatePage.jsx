@@ -14,6 +14,7 @@ import {
   CheckCircle2,
   Tag,
   AlertCircle,
+  Download, // 🌟 新增匯出 icon
 } from "lucide-react";
 import CustomDialog from "./components/customDialog";
 import { fetchWithAuth } from "./utils/fetchWithAuth";
@@ -202,6 +203,7 @@ const BOMCreatePage = () => {
               unit: bom.child?.unit || "KG",
               estimated_cost: fullMat ? fullMat.estimated_cost || 0 : 0,
               quantity: bom.quantity_required,
+              remark: bom.remark || "",
               is_additive: fullMat ? fullMat.is_additive : false,
               legal_limit_percent: fullMat
                 ? parseFloat(fullMat.legal_limit_percent)
@@ -266,6 +268,7 @@ const BOMCreatePage = () => {
           material_name: "",
           type: "",
           quantity: "",
+          remark: "", // 🌟 新增項目時預設備註為空
           unit: "KG",
           estimated_cost: 0,
           is_additive: false,
@@ -318,9 +321,92 @@ const BOMCreatePage = () => {
     });
   };
 
-  // ==========================================
-  // 🌟 模組化行銷宣稱與法規警語判定引擎
-  // ==========================================
+  const handleExportExcel = () => {
+    if (formData.items.length === 0) {
+      return showAlert("無法匯出", "目前沒有配方明細可供匯出。", "warning");
+    }
+
+    const getTypeLabel = (type) => {
+      const map = {
+        RAW: "原物料",
+        SEMI: "半成品",
+        PRODUCT: "成品",
+        PACK: "包材",
+      };
+      return map[type] || type;
+    };
+
+    const safeStr = (str) =>
+      (str || "").toString().replace(/,/g, "，").replace(/\n/g, " ");
+
+    const topSection = [
+      ["配方代碼", safeStr(formData.code)],
+      ["配方/成品名稱", safeStr(formData.name)],
+      ["物料類型", getTypeLabel(formData.type)],
+      ["基準產量 (KG)", formData.base_quantity],
+    ];
+
+    const itemHeaders = [
+      "物料代碼",
+      "物料名稱",
+      "類型",
+      "使用量",
+      "單位",
+      "單位成本",
+      "小計",
+      "備註",
+    ];
+
+    const itemRows = formData.items.map((item) => {
+      const qty = parseFloat(item.quantity) || 0;
+      const cost = parseFloat(item.estimated_cost) || 0;
+      const subtotal = (qty * cost).toFixed(2);
+
+      return [
+        safeStr(item.material_code),
+        safeStr(item.material_name) +
+          (item.remark.length > 0 ? " (" + safeStr(item.remark) + ")" : ""),
+        getTypeLabel(item.type),
+        qty.toString() + " (KG)",
+        item.unit + " (KG)",
+        "$" + cost.toString(),
+        "$" + subtotal.toString(),
+      ];
+    });
+
+    const footerSection = [
+      ["總材料成本", `$${calculations.totalCost}`],
+      [
+        `每 KG 成本 (除 ${formData.base_quantity} KG 基準)`,
+        `$${formatNum(calculations.unitCost)}`,
+      ],
+      ["用料總重 (不含包材)", `${formatNum(calculations.totalWeight)} KG`],
+    ];
+
+    const csvLines = [
+      ...topSection.map((row) => row.join(",")),
+      "", // 空行
+      itemHeaders.join(","),
+      ...itemRows.map((row) => row.join(",")),
+      "", // 空行
+      ...footerSection.map((row) => row.join(",")),
+    ];
+
+    const csvContent = "\uFEFF" + csvLines.join("\n");
+
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute(
+      "download",
+      `${formData.code || "未命名配方"}_配方表.csv`,
+    );
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const claimsAndWarnings = useMemo(() => {
     const baseQty = parseFloat(formData.base_quantity) || 1;
     let totalSugar = 0;
@@ -463,16 +549,30 @@ const BOMCreatePage = () => {
     return { results, hasLimitError, exceededCodes };
   }, [formData.items, formData.base_quantity]);
 
+  // 🌟 計算總重與總成本 (加入計算與基準差)
   const calculations = useMemo(() => {
-    const totalCost = formData.items.reduce(
-      (sum, item) =>
-        sum +
-        (parseFloat(item.quantity) || 0) *
-          (parseFloat(item.estimated_cost) || 0),
-      0,
-    );
+    let totalCost = 0;
+    let totalWeight = 0; // 不含包材的原料總重
+
+    formData.items.forEach((item) => {
+      const itemQty = parseFloat(item.quantity) || 0;
+      totalCost += itemQty * (parseFloat(item.estimated_cost) || 0);
+
+      // 排除包材與標籤重量
+      if (item.type !== "PACK" && item.type !== "STICKER") {
+        totalWeight += itemQty;
+      }
+    });
+
     const baseQty = parseFloat(formData.base_quantity) || 1;
-    return { totalCost, unitCost: baseQty > 0 ? totalCost / baseQty : 0 };
+    const weightDiff = totalWeight - baseQty;
+
+    return {
+      totalCost,
+      unitCost: baseQty > 0 ? totalCost / baseQty : 0,
+      totalWeight,
+      weightDiff,
+    };
   }, [formData.items, formData.base_quantity]);
 
   // 3. 核心存檔邏輯
@@ -533,6 +633,7 @@ const BOMCreatePage = () => {
           child_id: item.material_id,
           base_quantity: parseFloat(formData.base_quantity),
           quantity_required: parseFloat(item.quantity),
+          remark: item.remark || "",
         };
         const url =
           isEditMode && item.id ? `/api/boms/${item.id}` : "/api/boms";
@@ -551,7 +652,7 @@ const BOMCreatePage = () => {
         "儲存成功",
         `配方已成功${isEditMode ? "更新" : "建立"}！`,
         "success",
-        () => navigate("/materials"),
+        () => windows.location.reload(),
       );
     } catch (err) {
       showAlert("發生錯誤", err.message, "error");
@@ -1019,12 +1120,15 @@ const BOMCreatePage = () => {
                 尚未加入任何原料，請點擊上方按鈕開始設計配方
               </div>
             ) : (
-              <div className="min-w-[800px]">
+              <div className="min-w-[950px]">
                 <div className="grid grid-cols-12 gap-4 px-8 py-3 border-b border-slate-100 bg-white text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                  <div className="col-span-5 pl-8">物料名稱</div>
-                  <div className="col-span-3">使用量 (依基準產量設定)</div>
-                  <div className="col-span-2 text-right">單位成本</div>
-                  <div className="col-span-2 text-right pr-8">小計</div>
+                  <div className="col-span-4 pl-8">物料名稱</div>
+                  <div className="col-span-2 text-left pl-2">
+                    備註/用途
+                  </div>{" "}
+                  <div className="col-span-2">使用量 (依基準)</div>{" "}
+                  <div className="col-span-2">單位成本</div>{" "}
+                  <div className="col-span-2 pr-8">小計</div>
                 </div>
                 <div className="divide-y divide-slate-50">
                   {formData.items.map((item, index) => {
@@ -1058,7 +1162,8 @@ const BOMCreatePage = () => {
                         key={index}
                         className={`grid grid-cols-12 gap-4 px-8 py-3.5 items-center transition-colors group ${isErrorRow ? "bg-red-50/60 hover:bg-red-100/50" : "hover:bg-slate-50/50"}`}
                       >
-                        <div className="col-span-5 flex items-center gap-3">
+                        <div className="col-span-4 flex items-center gap-3">
+                          {" "}
                           <span className="text-slate-300 font-mono font-bold text-xs w-6 text-right shrink-0">
                             {index + 1}.
                           </span>
@@ -1144,12 +1249,21 @@ const BOMCreatePage = () => {
                             />
                           </div>
                         </div>
-
-                        <div className="col-span-3 relative">
+                        <div className="col-span-2">
                           <input
-                            type="number"
-                            min="0"
-                            step="0.0001"
+                            type="text"
+                            value={item.remark || ""}
+                            onChange={(e) =>
+                              handleItemChange(index, "remark", e.target.value)
+                            }
+                            className="w-full px-3 py-2 border border-slate-200 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none text-sm transition-all shadow-sm"
+                            placeholder="另秤、切碎"
+                          />
+                        </div>
+
+                        <div className="col-span-2 relative">
+                          <input
+                            type="text"
                             value={item.quantity}
                             onChange={(e) =>
                               handleItemChange(
@@ -1166,10 +1280,11 @@ const BOMCreatePage = () => {
                           </span>
                         </div>
 
-                        <div className="col-span-2 text-right font-mono font-bold text-sm text-slate-400">
+                        <div className="col-span-2 text-left font-mono font-bold text-sm text-black-400">
                           ${formatNum(item.estimated_cost, 2)}
                         </div>
-                        <div className="col-span-2 flex justify-end items-center gap-4">
+
+                        <div className="col-span-2 flex justify-start items-center gap-4">
                           <span className="font-mono text-sm font-black text-slate-700">
                             ${subtotal}
                           </span>
@@ -1324,7 +1439,8 @@ const BOMCreatePage = () => {
           </div>
 
           <div className="bg-slate-100/50 px-8 py-6 border-t border-slate-200/60 flex flex-col md:flex-row justify-between items-center gap-6">
-            <div className="flex items-center gap-10">
+            {/* 🌟 底部數據匯總區塊 (總成本、單位成本、用料總重) */}
+            <div className="flex flex-wrap items-center gap-6 md:gap-10">
               <div>
                 <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mb-1.5">
                   總材料成本
@@ -1333,7 +1449,9 @@ const BOMCreatePage = () => {
                   ${formatCurrency(calculations.totalCost)}
                 </div>
               </div>
+
               <div className="w-px h-10 bg-slate-300 hidden md:block"></div>
+
               <div>
                 <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mb-1.5">
                   每 KG 成本 (除 {formData.base_quantity} KG 基準)
@@ -1342,9 +1460,54 @@ const BOMCreatePage = () => {
                   ${formatCurrency(calculations.unitCost)}
                 </div>
               </div>
+
+              <div className="w-px h-10 bg-slate-300 hidden md:block"></div>
+
+              <div>
+                <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mb-1.5">
+                  用料總重 (不含包材)
+                </p>
+                <div className="flex items-baseline gap-2">
+                  <div
+                    className={`font-mono font-black text-3xl ${
+                      calculations.weightDiff < -0.001
+                        ? "text-red-500" // 少於基準: 紅燈
+                        : calculations.weightDiff > 0.001
+                          ? "text-amber-500" // 超過基準: 黃燈
+                          : "text-emerald-500" // 剛剛好: 綠燈
+                    }`}
+                  >
+                    {formatNum(calculations.totalWeight, 2)}
+                  </div>
+                  <span className="text-slate-500 font-bold text-sm">KG</span>
+
+                  {/* 差異提示 Tag */}
+                  <div
+                    className={`font-mono font-bold text-sm px-2 py-0.5 rounded-lg border shadow-sm ml-1 ${
+                      calculations.weightDiff < -0.001
+                        ? "bg-red-50 text-red-600 border-red-200"
+                        : calculations.weightDiff > 0.001
+                          ? "bg-amber-50 text-amber-600 border-amber-200"
+                          : "bg-emerald-50 text-emerald-600 border-emerald-200"
+                    }`}
+                  >
+                    {calculations.weightDiff > 0.001 ? "+" : ""}
+                    {formatNum(calculations.weightDiff, 2)}
+                  </div>
+                </div>
+              </div>
             </div>
 
-            <div className="w-full md:w-auto">
+            {/* 🌟 匯出按鈕與儲存按鈕整合 */}
+            <div className="w-full md:w-auto flex flex-col sm:flex-row gap-3">
+              <button
+                type="button"
+                onClick={handleExportExcel}
+                className="w-full md:w-auto px-6 py-3.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl shadow-[0_2px_8px_rgba(16,185,129,0.3)] transition-all font-black text-sm flex items-center justify-center gap-2 hover:-translate-y-0.5"
+              >
+                <Download size={18} strokeWidth={2.5} />
+                匯出 EXCEL
+              </button>
               <button
                 type="submit"
                 disabled={

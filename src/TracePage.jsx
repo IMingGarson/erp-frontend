@@ -908,10 +908,7 @@ const RecallReportPrintTemplate = ({
                       </td>
                       <td className="border border-black px-2 py-2 text-[#1f4e78] tracking-wider leading-relaxed">
                         {isSimulation && <div>“廠內模擬回收演練”</div>}
-                        <div>
-                          供應商通知產品中 {selectedMaterial?.name || "原料"}{" "}
-                          抽驗發現疑慮，需進行招回。
-                        </div>
+                        <div>原因：</div>
                       </td>
                     </tr>
                   </tbody>

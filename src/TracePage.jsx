@@ -41,7 +41,6 @@ const RecallReportPrintTemplate = ({
   formData,
   recoveryRate,
   traceResults,
-  selectedMaterial,
   isSimulation,
   activeTab,
 }) => {
@@ -436,7 +435,8 @@ const RecallReportPrintTemplate = ({
                 <br />
                 (kg)
               </th>
-              <th className="border border-black px-0.5 py-1.5 font-bold w-[5%] leading-tight relative">
+              {/* 🌟 修改點：列印時隱藏此欄位 print:hidden */}
+              <th className="border border-black px-0.5 py-1.5 font-bold w-[5%] leading-tight relative print:hidden">
                 誤差量
                 <br />
                 (kg)
@@ -521,7 +521,8 @@ const RecallReportPrintTemplate = ({
                       <td className="border border-slate-300 px-1 font-mono">
                         {dnIdx === 0 ? formatDisplayNum(usedKg) : ""}
                       </td>
-                      <td className="border border-slate-300 px-1 font-mono text-red-600">
+                      {/* 🌟 修改點：列印時隱藏此欄位 print:hidden */}
+                      <td className="border border-slate-300 px-1 font-mono text-red-600 print:hidden">
                         {dnIdx === 0 ? formatDisplayNum(errorKg) : ""}
                       </td>
                     </tr>,
@@ -543,12 +544,14 @@ const RecallReportPrintTemplate = ({
               for (let i = 0; i < padCount; i++) {
                 flattenedRows.push(
                   <tr key={`pad-${i}`} className="h-8">
-                    {[...Array(11)].map((_, col) => (
+                    {[...Array(10)].map((_, col) => (
                       <td
                         key={col}
                         className="border border-slate-300 px-1"
                       ></td>
                     ))}
+                    {/* 🌟 修改點：補白列也需要加上 print:hidden */}
+                    <td className="border border-slate-300 px-1 print:hidden"></td>
                   </tr>,
                 );
               }
@@ -577,7 +580,8 @@ const RecallReportPrintTemplate = ({
                   <td className="border border-black">
                     {formatDisplayNum(sumUsedKg)}
                   </td>
-                  <td className="border border-black"></td>
+                  {/* 🌟 修改點：列印時隱藏此欄位 print:hidden */}
+                  <td className="border border-black print:hidden"></td>
                 </tr>,
               );
 

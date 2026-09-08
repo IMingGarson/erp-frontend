@@ -3,6 +3,8 @@ import { useParams, useNavigate } from "react-router-dom";
 import {
   Search,
   ChevronDown,
+  ChevronRight,
+  CornerDownRight, // 🌟 新增 L 型樹狀箭頭
   Trash2,
   Plus,
   Save,
@@ -14,7 +16,7 @@ import {
   CheckCircle2,
   Tag,
   AlertCircle,
-  Download, // 🌟 新增匯出 icon
+  Download,
 } from "lucide-react";
 import CustomDialog from "./components/customDialog";
 import { fetchWithAuth } from "./utils/fetchWithAuth";
@@ -43,7 +45,6 @@ const formatCurrency = (num) => {
 };
 
 const BOMCreatePage = () => {
-  const me = useAuthStore((state) => state.me());
   const { materialCode } = useParams();
   const navigate = useNavigate();
   const isEditMode = Boolean(materialCode);
@@ -53,6 +54,8 @@ const BOMCreatePage = () => {
   const [materials, setMaterials] = useState([]);
   const [loading, setLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const [expandedRows, setExpandedRows] = useState(new Set());
 
   const [sortConfig, setSortConfig] = useState({
     key: "quantity",
@@ -204,6 +207,7 @@ const BOMCreatePage = () => {
               estimated_cost: fullMat ? fullMat.estimated_cost || 0 : 0,
               quantity: bom.quantity_required,
               remark: bom.remark || "",
+              set_cost: bom.set_cost || 0,
               is_additive: fullMat ? fullMat.is_additive : false,
               legal_limit_percent: fullMat
                 ? parseFloat(fullMat.legal_limit_percent)
@@ -251,6 +255,16 @@ const BOMCreatePage = () => {
     fetchInitialData();
   }, [materialCode]);
 
+  // 🌟 切換節點展開/收合
+  const toggleExpand = (path) => {
+    setExpandedRows((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  };
+
   const handleMasterChange = (e) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
@@ -268,7 +282,7 @@ const BOMCreatePage = () => {
           material_name: "",
           type: "",
           quantity: "",
-          remark: "", // 🌟 新增項目時預設備註為空
+          remark: "",
           unit: "KG",
           estimated_cost: 0,
           is_additive: false,
@@ -336,9 +350,11 @@ const BOMCreatePage = () => {
       return map[type] || type;
     };
 
+    // 把逗號換成全形逗號，避免 CSV 換格跑版
     const safeStr = (str) =>
       (str || "").toString().replace(/,/g, "，").replace(/\n/g, " ");
 
+    // 1. 單頭區塊
     const topSection = [
       ["配方代碼", safeStr(formData.code)],
       ["配方/成品名稱", safeStr(formData.name)],
@@ -346,52 +362,151 @@ const BOMCreatePage = () => {
       ["基準產量 (KG)", formData.base_quantity],
     ];
 
+    // 2. 明細表頭 (🌟 新增設定單位成本)
     const itemHeaders = [
       "物料代碼",
       "物料名稱",
       "類型",
       "使用量",
       "單位",
-      "單位成本",
+      "參考單位成本",
+      "設定單位成本",
       "小計",
-      "備註",
     ];
 
-    const itemRows = formData.items.map((item) => {
-      const qty = parseFloat(item.quantity) || 0;
-      const cost = parseFloat(item.estimated_cost) || 0;
-      const subtotal = (qty * cost).toFixed(2);
+    // 🌟 遞迴函式：展開半成品，並使用全形空白縮排
+    const getNestedRows = (parentMatId, parentQty, level) => {
+      let nestedRows = [];
+      const parentMat = materials.find((m) => m.id === parentMatId);
 
-      return [
+      if (!parentMat || !parentMat.boms || parentMat.boms.length === 0) {
+        return nestedRows;
+      }
+
+      const processedBoms = parentMat.boms.map((bom) => {
+        const childMat = materials.find((m) => m.id === bom.child) || {};
+
+        // 🌟 處理參考成本與設定成本
+        const childRefCost = parseFloat(childMat.estimated_cost) || 0;
+        const hasSetCost =
+          bom.set_cost !== null &&
+          bom.set_cost !== undefined &&
+          bom.set_cost !== "";
+        const activeCost = hasSetCost ? parseFloat(bom.set_cost) : childRefCost;
+
+        const childBaseQty = parseFloat(bom.base_quantity) || 1;
+        const childReqQty = parseFloat(bom.quantity_required) || 0;
+
+        const actualQty = precise.mul(
+          precise.div(childReqQty, childBaseQty),
+          parentQty,
+        );
+        // 🌟 小計以 activeCost 計算
+        const subtotal = precise.mul(actualQty, activeCost);
+
+        return {
+          bom,
+          childMat,
+          childRefCost,
+          hasSetCost,
+          activeCost,
+          actualQty,
+          subtotal,
+        };
+      });
+
+      processedBoms.sort((a, b) => b.actualQty - a.actualQty);
+
+      processedBoms.forEach((item) => {
+        const prefix = " ".repeat(level) + "↳ ";
+        const safeRemark = safeStr(item.bom.remark);
+        const nameWithRemark =
+          prefix +
+          safeStr(item.bom.child_name) +
+          (safeRemark ? ` (${safeRemark})` : "");
+
+        nestedRows.push([
+          safeStr(item.bom.child_code),
+          nameWithRemark,
+          getTypeLabel(item.bom.child_type),
+          `${formatNum(item.actualQty)} (KG)`,
+          `${safeStr(item.bom.child_unit)} (KG)`,
+          `$${formatNum(item.childRefCost, 2)}`,
+          item.hasSetCost ? `$${formatNum(item.bom.set_cost, 2)}` : "-",
+          `$${formatNum(item.subtotal, 2)}`,
+        ]);
+
+        if (item.childMat.type === "SEMI") {
+          nestedRows = nestedRows.concat(
+            getNestedRows(item.bom.child, item.actualQty, level + 1),
+          );
+        }
+      });
+
+      return nestedRows;
+    };
+
+    let itemRows = [];
+
+    // 3. 處理畫面上的第一層明細
+    formData.items.forEach((item) => {
+      const qty = parseFloat(item.quantity) || 0;
+
+      // 🌟 處理參考成本與設定成本
+      const refCost = parseFloat(item.estimated_cost) || 0;
+      const hasSetCost =
+        item.set_cost !== "" && item.set_cost !== null && !isNaN(item.set_cost);
+      const activeCost = hasSetCost ? parseFloat(item.set_cost) : refCost;
+
+      const subtotal = precise.mul(qty, activeCost);
+
+      const safeRemark = safeStr(item.remark);
+      const nameWithRemark =
+        safeStr(item.material_name) + (safeRemark ? ` (${safeRemark})` : "");
+
+      itemRows.push([
         safeStr(item.material_code),
-        safeStr(item.material_name) +
-          (item.remark.length > 0 ? " (" + safeStr(item.remark) + ")" : ""),
+        nameWithRemark,
         getTypeLabel(item.type),
-        qty.toString() + " (KG)",
-        item.unit + " (KG)",
-        "$" + cost.toString(),
-        "$" + subtotal.toString(),
-      ];
+        `${formatNum(qty)} (KG)`,
+        `${safeStr(item.unit)} (KG)`,
+        `$${formatNum(refCost, 2)}`,
+        hasSetCost ? `$${formatNum(item.set_cost, 2)}` : "-", // 🌟 匯出設定成本
+        `$${formatNum(subtotal, 2)}`,
+      ]);
+
+      // 若為半成品，啟動遞迴展開
+      if (item.type === "SEMI" && item.material_id) {
+        const nested = getNestedRows(item.material_id, qty, 1);
+        itemRows = itemRows.concat(nested);
+      }
     });
 
+    // 4. 底部數據匯總
     const footerSection = [
-      ["總材料成本", `$${calculations.totalCost}`],
+      ["總材料成本", `$${formatCurrency(calculations.totalCost)}`],
       [
         `每 KG 成本 (除 ${formData.base_quantity} KG 基準)`,
-        `$${formatNum(calculations.unitCost)}`,
+        `$${formatCurrency(calculations.unitCost)}`,
       ],
-      ["用料總重 (不含包材)", `${formatNum(calculations.totalWeight)} KG`],
+      ["用料總重", `${formatNum(calculations.totalWeight)} KG`],
     ];
 
+    // 5. 組合所有區塊，並加入 3 個空行產生視覺距離
     const csvLines = [
       ...topSection.map((row) => row.join(",")),
-      "", // 空行
+      "",
+      "",
+      "", // 🌟 3 個空行 (Header 與 Body 間隔)
       itemHeaders.join(","),
       ...itemRows.map((row) => row.join(",")),
-      "", // 空行
+      "",
+      "",
+      "", // 🌟 3 個空行 (Body 與 Footer 間隔)
       ...footerSection.map((row) => row.join(",")),
     ];
 
+    // 加上 BOM \uFEFF 防止 Excel 開啟時中文亂碼
     const csvContent = "\uFEFF" + csvLines.join("\n");
 
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
@@ -400,11 +515,139 @@ const BOMCreatePage = () => {
     link.href = url;
     link.setAttribute(
       "download",
-      `${formData.code || "未命名配方"}_配方表.csv`,
+      `${formData.code || "未命名配方"}_全展開配方表.csv`,
     );
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+
+  // ==========================================
+  // 🌟 遞迴渲染：支援換算、排序與 UI 呈現
+  // ==========================================
+  const renderNestedRows = (parentMatId, parentQty, level, pathPrefix) => {
+    const parentMat = materials.find((m) => m.id === parentMatId);
+    if (!parentMat || !parentMat.boms || parentMat.boms.length === 0)
+      return null;
+
+    // 1. 換算這層所有的子物料，然後依據實際用量降冪排序
+    const processedBoms = parentMat.boms.map((bom, idx) => {
+      const childMat = materials.find((m) => m.id === bom.child) || {};
+      const childCost = parseFloat(childMat.estimated_cost) || 0;
+
+      const childBaseQty = parseFloat(bom.base_quantity) || 1;
+      const childReqQty = parseFloat(bom.quantity_required) || 0;
+
+      const actualQty = precise.mul(
+        precise.div(childReqQty, childBaseQty),
+        parentQty,
+      );
+      const subtotal = precise.mul(actualQty, childCost);
+
+      return {
+        ...bom,
+        originalIdx: idx,
+        childMat,
+        childCost,
+        childBaseQty,
+        childReqQty,
+        actualQty,
+        subtotal,
+      };
+    });
+
+    // 2. 排序 (多到少)
+    processedBoms.sort((a, b) => b.actualQty - a.actualQty);
+
+    // 3. 渲染
+    return processedBoms.map((item) => {
+      const currentPath = `${pathPrefix}-${item.originalIdx}`;
+      const isExpanded = expandedRows.has(currentPath);
+      const hasChildren =
+        item.childMat.type === "SEMI" &&
+        item.childMat.boms &&
+        item.childMat.boms.length > 0;
+
+      return (
+        <React.Fragment key={currentPath}>
+          <div className="grid grid-cols-12 gap-4 px-8 py-2 items-center bg-slate-50/80 border-b border-slate-100/50 hover:bg-slate-100/50 transition-colors group">
+            {/* 名稱區塊 (包含層級縮排) */}
+            <div
+              className="col-span-4 flex items-center gap-1.5"
+              style={{ paddingLeft: `${level * 1.5 + 1.5}rem` }}
+            >
+              {hasChildren ? (
+                <button
+                  type="button"
+                  onClick={() => toggleExpand(currentPath)}
+                  className="text-slate-400 hover:text-[#007AFF] p-0.5 transition-colors"
+                >
+                  {isExpanded ? (
+                    <ChevronDown size={16} strokeWidth={3} />
+                  ) : (
+                    <ChevronRight size={16} strokeWidth={3} />
+                  )}
+                </button>
+              ) : (
+                <div className="w-[20px] flex justify-center text-slate-300">
+                  <CornerDownRight size={12} strokeWidth={2.5} />
+                </div>
+              )}
+              <div className="flex flex-col min-w-0">
+                <span className="text-xs font-bold text-slate-600 truncate flex items-center gap-1.5">
+                  <span className="bg-white border border-slate-200 text-slate-400 px-1 py-0.5 rounded text-[9px] font-mono leading-none shadow-sm">
+                    {item.child_code}
+                  </span>
+                  <span className="truncate">{item.child_name}</span>
+                </span>
+              </div>
+            </div>
+
+            {/* 備註 (Read-Only) */}
+            <div className="col-span-2 text-left pl-2">
+              <span className="text-[11px] text-slate-400 font-medium truncate block">
+                {item.remark || "-"}
+              </span>
+            </div>
+
+            {/* 🌟 換算用量 與 基準比例 (Read-Only) */}
+            <div className="col-span-2 flex flex-col justify-center">
+              <div className="flex items-baseline gap-1">
+                <span className="text-sm font-mono font-black text-slate-700">
+                  {formatNum(item.actualQty)}
+                </span>
+                <span className="text-[9px] text-slate-500 font-bold uppercase">
+                  {item.child_unit}
+                </span>
+              </div>
+            </div>
+
+            {/* 單位成本 (Read-Only) */}
+            <div className="col-span-2 text-right font-mono font-bold text-xs text-slate-400">
+              ${formatNum(item.childCost, 2)}
+            </div>
+
+            {/* 小計 (Read-Only) */}
+            <div className="col-span-2 flex justify-end items-center gap-4 pr-8">
+              <span className="font-mono text-xs font-black text-slate-500">
+                ${formatNum(item.subtotal, 2)}
+              </span>
+              <div className="w-[32px]"></div> {/* 對齊垃圾桶寬度 */}
+            </div>
+          </div>
+
+          {/* 遞迴繼續展開更底層 */}
+          {isExpanded &&
+            hasChildren &&
+            renderNestedRows(
+              item.child,
+              item.actualQty,
+              level + 1,
+              currentPath,
+            )}
+        </React.Fragment>
+      );
+    });
   };
 
   const claimsAndWarnings = useMemo(() => {
@@ -470,9 +713,6 @@ const BOMCreatePage = () => {
     };
   }, [formData.items, formData.base_quantity]);
 
-  // ==========================================
-  // 添加物法規驗算 (分組紀錄來源)
-  // ==========================================
   const additiveCalculations = useMemo(() => {
     const baseQty = parseFloat(formData.base_quantity) || 1;
     const summary = {};
@@ -549,16 +789,14 @@ const BOMCreatePage = () => {
     return { results, hasLimitError, exceededCodes };
   }, [formData.items, formData.base_quantity]);
 
-  // 🌟 計算總重與總成本 (加入計算與基準差)
   const calculations = useMemo(() => {
     let totalCost = 0;
-    let totalWeight = 0; // 不含包材的原料總重
+    let totalWeight = 0;
 
     formData.items.forEach((item) => {
       const itemQty = parseFloat(item.quantity) || 0;
       totalCost += itemQty * (parseFloat(item.estimated_cost) || 0);
 
-      // 排除包材與標籤重量
       if (item.type !== "PACK" && item.type !== "STICKER") {
         totalWeight += itemQty;
       }
@@ -575,7 +813,6 @@ const BOMCreatePage = () => {
     };
   }, [formData.items, formData.base_quantity]);
 
-  // 3. 核心存檔邏輯
   const executeSubmit = async () => {
     setIsSubmitting(true);
     closeDialog();
@@ -634,6 +871,7 @@ const BOMCreatePage = () => {
           base_quantity: parseFloat(formData.base_quantity),
           quantity_required: parseFloat(item.quantity),
           remark: item.remark || "",
+          set_cost: item.set_cost || item.estimated_cost || 0,
         };
         const url =
           isEditMode && item.id ? `/api/boms/${item.id}` : "/api/boms";
@@ -652,7 +890,7 @@ const BOMCreatePage = () => {
         "儲存成功",
         `配方已成功${isEditMode ? "更新" : "建立"}！`,
         "success",
-        () => windows.location.reload(),
+        () => window.location.reload(),
       );
     } catch (err) {
       showAlert("發生錯誤", err.message, "error");
@@ -696,9 +934,6 @@ const BOMCreatePage = () => {
     );
   };
 
-  // ==========================================
-  // 內建物料選擇器
-  // ==========================================
   const MaterialSelect = ({ value, onChange, options, excludedIds }) => {
     const [isOpen, setIsOpen] = useState(false);
     const [searchTerm, setSearchTerm] = useState("");
@@ -952,16 +1187,13 @@ const BOMCreatePage = () => {
           </div>
         </div>
 
-        {/* 🌟 行銷宣稱與法規警語判定引擎 (固定佈局版本) */}
+        {/* 行銷宣稱與法規警語判定引擎 */}
         <div className="border border-slate-200/60 bg-emerald-50/30 p-8 rounded-3xl shadow-[0_2px_10px_-4px_rgba(0,0,0,0.05)] flex flex-col gap-5">
           <h3 className="text-base font-black text-slate-800 flex items-center gap-2">
             <Tag size={18} className="text-emerald-500" strokeWidth={2.5} />
             行銷宣稱與法規預判
           </h3>
-
-          {/* 使用固定 grid 比例：左占 1 份，右占 2 份，並設定 min-h 確保高度不變 */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 min-h-[140px]">
-            {/* 左：正面行銷宣稱 (lg:col-span-1) */}
             <div className="bg-white p-5 rounded-2xl border border-emerald-100 shadow-sm flex flex-col gap-3 lg:col-span-1 h-full">
               <div className="text-[10px] font-black text-emerald-600 uppercase tracking-widest">
                 可標示行銷宣稱
@@ -992,7 +1224,6 @@ const BOMCreatePage = () => {
               </div>
             </div>
 
-            {/* 右：負面警語與法規限制提醒 (lg:col-span-2) */}
             <div
               className={`p-5 rounded-2xl border shadow-sm flex flex-col gap-3 lg:col-span-2 h-full transition-colors ${
                 claimsAndWarnings.banned.length > 0
@@ -1014,7 +1245,6 @@ const BOMCreatePage = () => {
               >
                 特定成分法規限制與警示
               </div>
-
               <div className="flex flex-col gap-2.5 flex-1 overflow-y-auto custom-scrollbar">
                 {!claimsAndWarnings.hasValidEdibleItems ||
                 (claimsAndWarnings.banned.length === 0 &&
@@ -1025,7 +1255,6 @@ const BOMCreatePage = () => {
                   </span>
                 ) : (
                   <>
-                    {/* 禁用地雷 */}
                     {claimsAndWarnings.banned.map((warn, i) => (
                       <div
                         key={`ban-${i}`}
@@ -1035,7 +1264,6 @@ const BOMCreatePage = () => {
                         <span className="leading-snug">{warn}</span>
                       </div>
                     ))}
-                    {/* 強制警語 */}
                     {claimsAndWarnings.warnings.map((warn, i) => (
                       <div
                         key={`warn-${i}`}
@@ -1045,7 +1273,6 @@ const BOMCreatePage = () => {
                         <span className="leading-snug">{warn}</span>
                       </div>
                     ))}
-                    {/* 每日限量提醒 */}
                     {claimsAndWarnings.limits.map((lim, i) => (
                       <div
                         key={`lim-${i}`}
@@ -1064,244 +1291,309 @@ const BOMCreatePage = () => {
 
         {/* 明細清單區塊 */}
         <div className="bg-white rounded-3xl border border-slate-200/60 shadow-[0_2px_10px_-4px_rgba(0,0,0,0.05)] overflow-hidden flex flex-col w-full">
-          <div className="px-8 py-5 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center bg-slate-50/50 gap-4">
-            <h3 className="text-base font-black text-slate-800">
-              2. 配方用料明細{" "}
-              <span className="text-slate-400 font-bold ml-1">
-                ({formData.items.length})
-              </span>
-            </h3>
+          <div className="bg-white rounded-3xl border border-slate-200/60 shadow-[0_2px_10px_-4px_rgba(0,0,0,0.05)] overflow-hidden flex flex-col w-full">
+            <div className="px-8 py-5 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center bg-slate-50/50 gap-4">
+              <h3 className="text-base font-black text-slate-800">
+                2. 配方用料明細{" "}
+                <span className="text-slate-400 font-bold ml-1">
+                  ({formData.items.length})
+                </span>
+              </h3>
 
-            <div className="flex flex-wrap items-center gap-3">
-              {formData.items.length > 1 && (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => handleSortItems("quantity")}
-                    className={`text-xs px-4 py-2 rounded-xl font-bold transition-all shadow-sm flex items-center gap-1.5 border ${sortConfig.key === "quantity" ? "bg-blue-50 text-blue-600 border-blue-200" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}
-                  >
-                    用量排序{" "}
-                    {sortConfig.key === "quantity" &&
-                      (sortConfig.direction === "desc" ? (
-                        <ArrowDown size={14} />
-                      ) : (
-                        <ArrowUp size={14} />
-                      ))}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleSortItems("subtotal")}
-                    className={`text-xs px-4 py-2 rounded-xl font-bold transition-all shadow-sm flex items-center gap-1.5 border ${sortConfig.key === "subtotal" ? "bg-blue-50 text-blue-600 border-blue-200" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}
-                  >
-                    小計排序{" "}
-                    {sortConfig.key === "subtotal" &&
-                      (sortConfig.direction === "desc" ? (
-                        <ArrowDown size={14} />
-                      ) : (
-                        <ArrowUp size={14} />
-                      ))}
-                  </button>
-                </>
-              )}
-              <div className="w-px h-6 bg-slate-300 mx-2 hidden sm:block"></div>
-              <button
-                type="button"
-                onClick={handleAddItem}
-                className="text-sm bg-white text-emerald-600 px-5 py-2 rounded-xl hover:bg-emerald-50 hover:border-emerald-300 font-black transition-all shadow-sm flex items-center gap-2 border border-slate-200"
-              >
-                <Plus size={16} strokeWidth={2.5} /> 加入原料
-              </button>
+              <div className="flex flex-wrap items-center gap-3">
+                {formData.items.length > 1 && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => handleSortItems("quantity")}
+                      className={`text-xs px-4 py-2 rounded-xl font-bold transition-all shadow-sm flex items-center gap-1.5 border ${sortConfig.key === "quantity" ? "bg-blue-50 text-blue-600 border-blue-200" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}
+                    >
+                      用量排序{" "}
+                      {sortConfig.key === "quantity" &&
+                        (sortConfig.direction === "desc" ? (
+                          <ArrowDown size={14} />
+                        ) : (
+                          <ArrowUp size={14} />
+                        ))}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSortItems("subtotal")}
+                      className={`text-xs px-4 py-2 rounded-xl font-bold transition-all shadow-sm flex items-center gap-1.5 border ${sortConfig.key === "subtotal" ? "bg-blue-50 text-blue-600 border-blue-200" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}
+                    >
+                      小計排序{" "}
+                      {sortConfig.key === "subtotal" &&
+                        (sortConfig.direction === "desc" ? (
+                          <ArrowDown size={14} />
+                        ) : (
+                          <ArrowUp size={14} />
+                        ))}
+                    </button>
+                  </>
+                )}
+                <div className="w-px h-6 bg-slate-300 mx-2 hidden sm:block"></div>
+                <button
+                  type="button"
+                  onClick={handleAddItem}
+                  className="text-sm bg-white text-emerald-600 px-5 py-2 rounded-xl hover:bg-emerald-50 hover:border-emerald-300 font-black transition-all shadow-sm flex items-center gap-2 border border-slate-200"
+                >
+                  <Plus size={16} strokeWidth={2.5} /> 加入原料
+                </button>
+              </div>
             </div>
-          </div>
 
-          <div className="flex-1 overflow-x-auto w-full">
-            {formData.items.length === 0 ? (
-              <div className="p-20 text-center text-slate-400 text-sm font-bold">
-                尚未加入任何原料，請點擊上方按鈕開始設計配方
-              </div>
-            ) : (
-              <div className="min-w-[950px]">
-                <div className="grid grid-cols-12 gap-4 px-8 py-3 border-b border-slate-100 bg-white text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                  <div className="col-span-4 pl-8">物料名稱</div>
-                  <div className="col-span-2 text-left pl-2">
-                    備註/用途
-                  </div>{" "}
-                  <div className="col-span-2">使用量 (依基準)</div>{" "}
-                  <div className="col-span-2">單位成本</div>{" "}
-                  <div className="col-span-2 pr-8">小計</div>
+            <div className="flex-1 overflow-x-auto w-full">
+              {formData.items.length === 0 ? (
+                <div className="p-20 text-center text-slate-400 text-sm font-bold">
+                  尚未加入任何原料，請點擊上方按鈕開始設計配方
                 </div>
-                <div className="divide-y divide-slate-50">
-                  {formData.items.map((item, index) => {
-                    const itemQty = parseFloat(item.quantity) || 0;
-                    const subtotal = formatNum(
-                      itemQty * item.estimated_cost,
-                      2,
-                    );
+              ) : (
+                <div className="min-w-[1050px]">
+                  {/* 🌟 更改為 14 欄的 Grid 配置 */}
+                  <div
+                    className="grid grid-cols-[14] gap-4 px-8 py-3 border-b border-slate-100 bg-white text-[10px] font-black text-slate-400 uppercase tracking-widest"
+                    style={{
+                      gridTemplateColumns: "repeat(14, minmax(0, 1fr))",
+                    }}
+                  >
+                    <div className="col-span-4 pl-8">物料名稱</div>
+                    <div className="col-span-2 text-left pl-2">備註</div>
+                    <div className="col-span-2">使用量</div>
+                    <div className="col-span-2 text-center">參考單位成本</div>
+                    <div className="col-span-2 text-center">設定單位成本</div>
+                    <div className="col-span-2 text-center">小計</div>
+                  </div>
+                  <div className="divide-y divide-slate-50">
+                    {formData.items.map((item, index) => {
+                      const itemQty = parseFloat(item.quantity) || 0;
 
-                    const isErrorRow = Boolean(
-                      item.material_code &&
-                      ((item.is_additive &&
-                        additiveCalculations.exceededCodes.includes(
-                          item.material_code,
-                        )) ||
-                        (item.contained_additives &&
-                          item.contained_additives.some((add) =>
-                            additiveCalculations.exceededCodes.includes(
-                              add.code,
-                            ),
-                          ))),
-                    );
+                      const hasSetCost =
+                        item.set_cost !== "" &&
+                        item.set_cost !== null &&
+                        !isNaN(item.set_cost);
+                      const activeCost = hasSetCost
+                        ? parseFloat(item.set_cost)
+                        : parseFloat(item.estimated_cost) || 0;
+                      const subtotal = formatNum(itemQty * activeCost, 2);
 
-                    const excludedIds = formData.items
-                      .filter((_, i) => i !== index)
-                      .map((i) => i.material_id)
-                      .filter(Boolean);
+                      const isErrorRow = Boolean(
+                        item.material_code &&
+                        ((item.is_additive &&
+                          additiveCalculations.exceededCodes.includes(
+                            item.material_code,
+                          )) ||
+                          (item.contained_additives &&
+                            item.contained_additives.some((add) =>
+                              additiveCalculations.exceededCodes.includes(
+                                add.code,
+                              ),
+                            ))),
+                      );
 
-                    return (
-                      <div
-                        key={index}
-                        className={`grid grid-cols-12 gap-4 px-8 py-3.5 items-center transition-colors group ${isErrorRow ? "bg-red-50/60 hover:bg-red-100/50" : "hover:bg-slate-50/50"}`}
-                      >
-                        <div className="col-span-4 flex items-center gap-3">
-                          {" "}
-                          <span className="text-slate-300 font-mono font-bold text-xs w-6 text-right shrink-0">
-                            {index + 1}.
-                          </span>
-                          <div className="flex-1">
-                            <MaterialSelect
-                              value={
-                                item.material_id
-                                  ? `[${item.material_code}] ${item.material_name}`
-                                  : ""
-                              }
-                              options={materials}
-                              excludedIds={excludedIds}
-                              onChange={async (selectedMat) => {
-                                handleItemChange(
-                                  index,
-                                  "material_id",
-                                  selectedMat.id,
-                                );
-                                handleItemChange(
-                                  index,
-                                  "material_code",
-                                  selectedMat.code,
-                                );
-                                handleItemChange(
-                                  index,
-                                  "material_name",
-                                  selectedMat.name,
-                                );
-                                handleItemChange(
-                                  index,
-                                  "type",
-                                  selectedMat.type,
-                                );
-                                handleItemChange(
-                                  index,
-                                  "unit",
-                                  selectedMat.unit || "KG",
-                                );
-                                handleItemChange(
-                                  index,
-                                  "estimated_cost",
-                                  selectedMat.estimated_cost || 0,
-                                );
-                                handleItemChange(
-                                  index,
-                                  "is_additive",
-                                  selectedMat.is_additive || false,
-                                );
-                                handleItemChange(
-                                  index,
-                                  "legal_limit_percent",
-                                  selectedMat.legal_limit_percent
-                                    ? parseFloat(
-                                        selectedMat.legal_limit_percent,
-                                      )
-                                    : null,
-                                );
-                                handleItemChange(
-                                  index,
-                                  "nutrition_fact",
-                                  selectedMat.nutrition_fact || {},
-                                );
+                      const excludedIds = formData.items
+                        .filter((_, i) => i !== index)
+                        .map((i) => i.material_id)
+                        .filter(Boolean);
 
-                                if (selectedMat.type === "SEMI") {
-                                  const contained =
-                                    await fetchContainedAdditives(
-                                      selectedMat.code,
-                                      materials,
-                                    );
-                                  handleItemChange(
-                                    index,
-                                    "contained_additives",
-                                    contained,
-                                  );
-                                } else {
-                                  handleItemChange(
-                                    index,
-                                    "contained_additives",
-                                    [],
-                                  );
-                                }
-                              }}
-                            />
-                          </div>
-                        </div>
-                        <div className="col-span-2">
-                          <input
-                            type="text"
-                            value={item.remark || ""}
-                            onChange={(e) =>
-                              handleItemChange(index, "remark", e.target.value)
-                            }
-                            className="w-full px-3 py-2 border border-slate-200 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none text-sm transition-all shadow-sm"
-                            placeholder="另秤、切碎"
-                          />
-                        </div>
+                      const isSemi = item.type === "SEMI";
+                      const currentPath = `root-${index}`;
+                      const isExpanded = expandedRows.has(currentPath);
 
-                        <div className="col-span-2 relative">
-                          <input
-                            type="text"
-                            value={item.quantity}
-                            onChange={(e) =>
-                              handleItemChange(
-                                index,
-                                "quantity",
-                                e.target.value,
-                              )
-                            }
-                            className={`w-full px-4 py-2 pr-12 border border-slate-200 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none font-mono font-bold text-sm transition-all shadow-sm ${isErrorRow ? "border-red-300 focus:border-red-500 focus:ring-red-500 bg-white" : ""}`}
-                            placeholder="0"
-                          />
-                          <span className="absolute right-4 top-2.5 text-[10px] font-black text-slate-400 pointer-events-none uppercase">
-                            {item.unit}
-                          </span>
-                        </div>
-
-                        <div className="col-span-2 text-left font-mono font-bold text-sm text-black-400">
-                          ${formatNum(item.estimated_cost, 2)}
-                        </div>
-
-                        <div className="col-span-2 flex justify-start items-center gap-4">
-                          <span className="font-mono text-sm font-black text-slate-700">
-                            ${subtotal}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveItem(index)}
-                            className="text-slate-300 hover:bg-red-50 hover:text-red-500 p-2 rounded-lg transition-all opacity-0 group-hover:opacity-100 shrink-0"
+                      return (
+                        <React.Fragment key={index}>
+                          <div
+                            className={`grid grid-cols-[14] gap-4 px-8 py-3.5 items-center transition-colors group ${isErrorRow ? "bg-red-50/60 hover:bg-red-100/50" : "hover:bg-slate-50/50"}`}
+                            style={{
+                              gridTemplateColumns: "repeat(14, minmax(0, 1fr))",
+                            }}
                           >
-                            <Trash2 size={16} strokeWidth={2.5} />
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
+                            <div className="col-span-4 flex items-center gap-1.5">
+                              <span className="text-slate-300 font-mono font-bold text-xs w-6 text-right shrink-0">
+                                {index + 1}.
+                              </span>
+                              {/* 🌟 展開收合按鈕 */}
+                              {isSemi ? (
+                                <button
+                                  type="button"
+                                  onClick={() => toggleExpand(currentPath)}
+                                  className="text-slate-400 hover:text-[#007AFF] p-0.5 transition-colors"
+                                >
+                                  {isExpanded ? (
+                                    <ChevronDown size={16} strokeWidth={3} />
+                                  ) : (
+                                    <ChevronRight size={16} strokeWidth={3} />
+                                  )}
+                                </button>
+                              ) : (
+                                <div className="w-[20px]" />
+                              )}
+                              <div className="flex-1 min-w-0">
+                                <MaterialSelect
+                                  value={
+                                    item.material_id
+                                      ? `[${item.material_code}] ${item.material_name}`
+                                      : ""
+                                  }
+                                  options={materials}
+                                  excludedIds={excludedIds}
+                                  onChange={async (selectedMat) => {
+                                    handleItemChange(
+                                      index,
+                                      "material_id",
+                                      selectedMat.id,
+                                    );
+                                    handleItemChange(
+                                      index,
+                                      "material_code",
+                                      selectedMat.code,
+                                    );
+                                    handleItemChange(
+                                      index,
+                                      "material_name",
+                                      selectedMat.name,
+                                    );
+                                    handleItemChange(
+                                      index,
+                                      "type",
+                                      selectedMat.type,
+                                    );
+                                    handleItemChange(
+                                      index,
+                                      "unit",
+                                      selectedMat.unit || "KG",
+                                    );
+                                    handleItemChange(
+                                      index,
+                                      "estimated_cost",
+                                      selectedMat.estimated_cost || 0,
+                                    );
+                                    handleItemChange(
+                                      index,
+                                      "is_additive",
+                                      selectedMat.is_additive || false,
+                                    );
+                                    handleItemChange(
+                                      index,
+                                      "legal_limit_percent",
+                                      selectedMat.legal_limit_percent
+                                        ? parseFloat(
+                                            selectedMat.legal_limit_percent,
+                                          )
+                                        : null,
+                                    );
+                                    handleItemChange(
+                                      index,
+                                      "nutrition_fact",
+                                      selectedMat.nutrition_fact || {},
+                                    );
+
+                                    if (selectedMat.type === "SEMI") {
+                                      const contained =
+                                        await fetchContainedAdditives(
+                                          selectedMat.code,
+                                          materials,
+                                        );
+                                      handleItemChange(
+                                        index,
+                                        "contained_additives",
+                                        contained,
+                                      );
+                                    } else {
+                                      handleItemChange(
+                                        index,
+                                        "contained_additives",
+                                        [],
+                                      );
+                                    }
+                                  }}
+                                />
+                              </div>
+                            </div>
+
+                            <div className="col-span-2">
+                              <input
+                                type="text"
+                                value={item.remark || ""}
+                                onChange={(e) =>
+                                  handleItemChange(
+                                    index,
+                                    "remark",
+                                    e.target.value,
+                                  )
+                                }
+                                className="w-full px-3 py-2 border border-slate-200 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none text-sm transition-all shadow-sm"
+                                placeholder="另秤、切碎"
+                              />
+                            </div>
+
+                            <div className="col-span-2 relative">
+                              <input
+                                type="text"
+                                value={formatNum(item.quantity)}
+                                onChange={(e) =>
+                                  handleItemChange(
+                                    index,
+                                    "quantity",
+                                    e.target.value,
+                                  )
+                                }
+                                className={`w-full px-4 py-2 pr-12 border border-slate-200 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none font-mono font-bold text-sm transition-all shadow-sm ${isErrorRow ? "border-red-300 focus:border-red-500 focus:ring-red-500 bg-white" : ""}`}
+                                placeholder="0"
+                              />
+                              <span className="absolute right-4 top-2.5 text-[10px] font-black text-slate-400 pointer-events-none uppercase">
+                                {item.unit}
+                              </span>
+                            </div>
+
+                            <div className="col-span-2 text-right font-mono font-bold text-sm text-slate-400">
+                              ${formatNum(item.estimated_cost, 2)}
+                            </div>
+
+                            <div className="col-span-2 relative">
+                              <input
+                                type="text"
+                                value={formatNum(item.set_cost, 2)}
+                                onChange={(e) =>
+                                  handleItemChange(
+                                    index,
+                                    "set_cost",
+                                    e.target.value,
+                                  )
+                                }
+                                className={`w-full px-4 py-2 pr-8 text-right border border-indigo-200 rounded-xl focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none font-mono font-bold text-sm text-indigo-700 bg-indigo-50/30 transition-all shadow-sm ${isErrorRow ? "border-red-300 focus:border-red-500 focus:ring-red-500 bg-white" : ""}`}
+                              />
+                            </div>
+
+                            <div className="col-span-2 flex justify-end items-center gap-4 pr-8">
+                              <span className="font-mono text-sm font-black text-slate-700">
+                                ${subtotal}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveItem(index)}
+                                className="text-right text-slate-300 hover:bg-red-50 hover:text-red-500 p-2 rounded-lg transition-all opacity-0 group-hover:opacity-100 shrink-0"
+                              >
+                                <Trash2 size={16} strokeWidth={2.5} />
+                              </button>
+                            </div>
+                          </div>
+
+                          {isExpanded &&
+                            isSemi &&
+                            item.material_id &&
+                            renderNestedRows(
+                              item.material_id,
+                              itemQty,
+                              1,
+                              currentPath,
+                            )}
+                        </React.Fragment>
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
 
           {/* 法定添加物安全試算面板 */}
@@ -1439,14 +1731,13 @@ const BOMCreatePage = () => {
           </div>
 
           <div className="bg-slate-100/50 px-8 py-6 border-t border-slate-200/60 flex flex-col md:flex-row justify-between items-center gap-6">
-            {/* 🌟 底部數據匯總區塊 (總成本、單位成本、用料總重) */}
             <div className="flex flex-wrap items-center gap-6 md:gap-10">
               <div>
                 <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mb-1.5">
                   總材料成本
                 </p>
                 <div className="text-slate-800 font-mono font-black text-2xl">
-                  ${formatCurrency(calculations.totalCost)}
+                  ${formatNum(calculations.totalCost, 2)}
                 </div>
               </div>
 
@@ -1457,7 +1748,7 @@ const BOMCreatePage = () => {
                   每 KG 成本 (除 {formData.base_quantity} KG 基準)
                 </p>
                 <div className="text-[#007AFF] font-mono font-black text-3xl">
-                  ${formatCurrency(calculations.unitCost)}
+                  ${formatNum(calculations.unitCost, 2)}
                 </div>
               </div>
 
@@ -1465,7 +1756,7 @@ const BOMCreatePage = () => {
 
               <div>
                 <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mb-1.5">
-                  用料總重 (不含包材)
+                  用料總重
                 </p>
                 <div className="flex items-baseline gap-2">
                   <div
@@ -1481,7 +1772,6 @@ const BOMCreatePage = () => {
                   </div>
                   <span className="text-slate-500 font-bold text-sm">KG</span>
 
-                  {/* 差異提示 Tag */}
                   <div
                     className={`font-mono font-bold text-sm px-2 py-0.5 rounded-lg border shadow-sm ml-1 ${
                       calculations.weightDiff < -0.001
@@ -1491,14 +1781,14 @@ const BOMCreatePage = () => {
                           : "bg-emerald-50 text-emerald-600 border-emerald-200"
                     }`}
                   >
-                    {calculations.weightDiff > 0.001 ? "+" : ""}
-                    {formatNum(calculations.weightDiff, 2)}
+                    {calculations.weightDiff > 0.001 ? "多" : "缺"}
+                    {" " + Math.abs(formatNum(calculations.weightDiff, 2))}
+                    {" KG"}
                   </div>
                 </div>
               </div>
             </div>
 
-            {/* 🌟 匯出按鈕與儲存按鈕整合 */}
             <div className="w-full md:w-auto flex flex-col sm:flex-row gap-3">
               <button
                 type="button"

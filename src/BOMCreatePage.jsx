@@ -4,7 +4,7 @@ import {
   Search,
   ChevronDown,
   ChevronRight,
-  CornerDownRight, // 🌟 新增 L 型樹狀箭頭
+  CornerDownRight,
   Trash2,
   Plus,
   Save,
@@ -15,21 +15,18 @@ import {
   FlaskConical,
   CheckCircle2,
   Tag,
-  AlertCircle,
   Download,
+  MessageSquareText,
 } from "lucide-react";
 import CustomDialog from "./components/customDialog";
 import { fetchWithAuth } from "./utils/fetchWithAuth";
-import { useAuthStore } from "./store/authStore";
 import { TFDA_INGREDIENT_RULES } from "./utils/tfdaLegalRules";
 
-// 格式化數字，移除不必要的結尾 0
 const formatNum = (num, maxDecimals = 4) => {
   if (num === null || num === undefined || isNaN(num) || num === "") return "0";
   return parseFloat(Number(num).toFixed(maxDecimals)).toString();
 };
 
-// 解決 JS IEEE 754 浮點數精準度問題的運算器
 const precise = {
   add: (a, b) => parseFloat((Number(a) + Number(b)).toPrecision(12)),
   mul: (a, b) => parseFloat((Number(a) * Number(b)).toPrecision(12)),
@@ -44,7 +41,23 @@ const formatCurrency = (num) => {
   });
 };
 
-const BOMCreatePage = () => {
+const TYPE_MAP = {
+  RAW: {
+    label: "原物料",
+    color: "bg-emerald-100 text-emerald-800 border-emerald-200",
+  },
+  SEMI: { label: "半成品", color: "bg-blue-100 text-blue-800 border-blue-200" },
+  PACK: {
+    label: "包材",
+    color: "bg-amber-100 text-amber-800 border-amber-200",
+  },
+  PRODUCT: {
+    label: "成品",
+    color: "bg-purple-100 text-purple-800 border-purple-200",
+  },
+};
+
+export default function BOMCreatePage() {
   const { materialCode } = useParams();
   const navigate = useNavigate();
   const isEditMode = Boolean(materialCode);
@@ -56,7 +69,6 @@ const BOMCreatePage = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [expandedRows, setExpandedRows] = useState(new Set());
-
   const [sortConfig, setSortConfig] = useState({
     key: "quantity",
     direction: "desc",
@@ -173,7 +185,7 @@ const BOMCreatePage = () => {
         const targetMaterial = (specificMatJson.data || specificMatJson)[0];
 
         if (!targetMaterial)
-          return showAlert("錯誤", "找不到該配方資料。", "error", () =>
+          return showAlert("錯誤", "找不到配方資料", "error", () =>
             navigate("/materials"),
           );
 
@@ -191,11 +203,12 @@ const BOMCreatePage = () => {
             const childCode = bom.child?.code || "";
 
             let containedAdditives = [];
-            if (fullMat?.type === "SEMI")
+            if (fullMat?.type === "SEMI") {
               containedAdditives = await fetchContainedAdditives(
                 childCode,
                 allMaterials,
               );
+            }
 
             return {
               id: bom.id,
@@ -205,9 +218,10 @@ const BOMCreatePage = () => {
               type: bom.child?.type || "",
               unit: bom.child?.unit || "KG",
               estimated_cost: fullMat ? fullMat.estimated_cost || 0 : 0,
+              provider_quotes: fullMat ? fullMat.provider_quotes || [] : [],
               quantity: bom.quantity_required,
               remark: bom.remark || "",
-              set_cost: bom.set_cost || 0,
+              set_cost: bom.set_cost !== null ? bom.set_cost : "",
               is_additive: fullMat ? fullMat.is_additive : false,
               legal_limit_percent: fullMat
                 ? parseFloat(fullMat.legal_limit_percent)
@@ -255,7 +269,6 @@ const BOMCreatePage = () => {
     fetchInitialData();
   }, [materialCode]);
 
-  // 🌟 切換節點展開/收合
   const toggleExpand = (path) => {
     setExpandedRows((prev) => {
       const next = new Set(prev);
@@ -285,6 +298,7 @@ const BOMCreatePage = () => {
           remark: "",
           unit: "KG",
           estimated_cost: 0,
+          provider_quotes: [],
           is_additive: false,
           legal_limit_percent: null,
           contained_additives: [],
@@ -322,10 +336,16 @@ const BOMCreatePage = () => {
           valA = parseFloat(a.quantity) || 0;
           valB = parseFloat(b.quantity) || 0;
         } else if (sortKey === "subtotal") {
-          valA =
-            (parseFloat(a.quantity) || 0) * (parseFloat(a.estimated_cost) || 0);
-          valB =
-            (parseFloat(b.quantity) || 0) * (parseFloat(b.estimated_cost) || 0);
+          const aCost =
+            a.set_cost !== "" && a.set_cost !== null
+              ? parseFloat(a.set_cost)
+              : parseFloat(a.estimated_cost) || 0;
+          const bCost =
+            b.set_cost !== "" && b.set_cost !== null
+              ? parseFloat(b.set_cost)
+              : parseFloat(b.estimated_cost) || 0;
+          valA = (parseFloat(a.quantity) || 0) * aCost;
+          valB = (parseFloat(b.quantity) || 0) * bCost;
         }
         if (valA < valB) return newDirection === "asc" ? -1 : 1;
         if (valA > valB) return newDirection === "asc" ? 1 : -1;
@@ -336,9 +356,8 @@ const BOMCreatePage = () => {
   };
 
   const handleExportExcel = () => {
-    if (formData.items.length === 0) {
+    if (formData.items.length === 0)
       return showAlert("無法匯出", "目前沒有配方明細可供匯出。", "warning");
-    }
 
     const getTypeLabel = (type) => {
       const map = {
@@ -350,11 +369,9 @@ const BOMCreatePage = () => {
       return map[type] || type;
     };
 
-    // 把逗號換成全形逗號，避免 CSV 換格跑版
     const safeStr = (str) =>
       (str || "").toString().replace(/,/g, "，").replace(/\n/g, " ");
 
-    // 1. 單頭區塊
     const topSection = [
       ["配方代碼", safeStr(formData.code)],
       ["配方/成品名稱", safeStr(formData.name)],
@@ -362,31 +379,28 @@ const BOMCreatePage = () => {
       ["基準產量 (KG)", formData.base_quantity],
     ];
 
-    // 2. 明細表頭 (🌟 新增設定單位成本)
     const itemHeaders = [
       "物料代碼",
       "物料名稱",
       "類型",
+      "備註說明",
       "使用量",
       "單位",
-      "參考單位成本",
+      "系統基準成本",
+      "各廠最新報價",
       "設定單位成本",
       "小計",
     ];
 
-    // 🌟 遞迴函式：展開半成品，並使用全形空白縮排
     const getNestedRows = (parentMatId, parentQty, level) => {
       let nestedRows = [];
       const parentMat = materials.find((m) => m.id === parentMatId);
 
-      if (!parentMat || !parentMat.boms || parentMat.boms.length === 0) {
+      if (!parentMat || !parentMat.boms || parentMat.boms.length === 0)
         return nestedRows;
-      }
 
       const processedBoms = parentMat.boms.map((bom) => {
         const childMat = materials.find((m) => m.id === bom.child) || {};
-
-        // 🌟 處理參考成本與設定成本
         const childRefCost = parseFloat(childMat.estimated_cost) || 0;
         const hasSetCost =
           bom.set_cost !== null &&
@@ -396,13 +410,19 @@ const BOMCreatePage = () => {
 
         const childBaseQty = parseFloat(bom.base_quantity) || 1;
         const childReqQty = parseFloat(bom.quantity_required) || 0;
-
         const actualQty = precise.mul(
           precise.div(childReqQty, childBaseQty),
           parentQty,
         );
-        // 🌟 小計以 activeCost 計算
         const subtotal = precise.mul(actualQty, activeCost);
+
+        const quotesStr =
+          childMat.provider_quotes
+            ?.map(
+              (q) =>
+                `${q.provider_name}:$${q.price}(${q.effective_date}~${q.valid_until || "長期"})`,
+            )
+            .join(" | ") || "-";
 
         return {
           bom,
@@ -412,6 +432,7 @@ const BOMCreatePage = () => {
           activeCost,
           actualQty,
           subtotal,
+          quotesStr,
         };
       });
 
@@ -419,19 +440,15 @@ const BOMCreatePage = () => {
 
       processedBoms.forEach((item) => {
         const prefix = " ".repeat(level) + "↳ ";
-        const safeRemark = safeStr(item.bom.remark);
-        const nameWithRemark =
-          prefix +
-          safeStr(item.bom.child_name) +
-          (safeRemark ? ` (${safeRemark})` : "");
-
         nestedRows.push([
           safeStr(item.bom.child_code),
-          nameWithRemark,
+          prefix + safeStr(item.bom.child_name),
           getTypeLabel(item.bom.child_type),
-          `${formatNum(item.actualQty)} (KG)`,
-          `${safeStr(item.bom.child_unit)} (KG)`,
+          safeStr(item.bom.remark),
+          `${formatNum(item.actualQty)}`,
+          `${safeStr(item.bom.child_unit)}`,
           `$${formatNum(item.childRefCost, 2)}`,
+          item.quotesStr,
           item.hasSetCost ? `$${formatNum(item.bom.set_cost, 2)}` : "-",
           `$${formatNum(item.subtotal, 2)}`,
         ]);
@@ -448,41 +465,41 @@ const BOMCreatePage = () => {
 
     let itemRows = [];
 
-    // 3. 處理畫面上的第一層明細
     formData.items.forEach((item) => {
       const qty = parseFloat(item.quantity) || 0;
-
-      // 🌟 處理參考成本與設定成本
       const refCost = parseFloat(item.estimated_cost) || 0;
       const hasSetCost =
         item.set_cost !== "" && item.set_cost !== null && !isNaN(item.set_cost);
       const activeCost = hasSetCost ? parseFloat(item.set_cost) : refCost;
-
       const subtotal = precise.mul(qty, activeCost);
-
       const safeRemark = safeStr(item.remark);
-      const nameWithRemark =
-        safeStr(item.material_name) + (safeRemark ? ` (${safeRemark})` : "");
+      const quotesStr =
+        item.provider_quotes
+          ?.map(
+            (q) =>
+              `${q.provider_name}:$${q.price}(${q.effective_date}~${q.valid_until || "長期"})`,
+          )
+          .join(" | ") || "-";
 
       itemRows.push([
         safeStr(item.material_code),
-        nameWithRemark,
+        safeStr(item.material_name),
         getTypeLabel(item.type),
-        `${formatNum(qty)} (KG)`,
-        `${safeStr(item.unit)} (KG)`,
+        safeRemark,
+        `${formatNum(qty)}`,
+        `${safeStr(item.unit)}`,
         `$${formatNum(refCost, 2)}`,
-        hasSetCost ? `$${formatNum(item.set_cost, 2)}` : "-", // 🌟 匯出設定成本
+        quotesStr,
+        hasSetCost ? `$${formatNum(item.set_cost, 2)}` : "-",
         `$${formatNum(subtotal, 2)}`,
       ]);
 
-      // 若為半成品，啟動遞迴展開
       if (item.type === "SEMI" && item.material_id) {
         const nested = getNestedRows(item.material_id, qty, 1);
         itemRows = itemRows.concat(nested);
       }
     });
 
-    // 4. 底部數據匯總
     const footerSection = [
       ["總材料成本", `$${formatCurrency(calculations.totalCost)}`],
       [
@@ -492,58 +509,142 @@ const BOMCreatePage = () => {
       ["用料總重", `${formatNum(calculations.totalWeight)} KG`],
     ];
 
-    // 5. 組合所有區塊，並加入 3 個空行產生視覺距離
     const csvLines = [
       ...topSection.map((row) => row.join(",")),
       "",
       "",
-      "", // 🌟 3 個空行 (Header 與 Body 間隔)
+      "",
       itemHeaders.join(","),
       ...itemRows.map((row) => row.join(",")),
       "",
       "",
-      "", // 🌟 3 個空行 (Body 與 Footer 間隔)
+      "",
       ...footerSection.map((row) => row.join(",")),
     ];
 
-    // 加上 BOM \uFEFF 防止 Excel 開啟時中文亂碼
     const csvContent = "\uFEFF" + csvLines.join("\n");
-
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
     link.setAttribute(
       "download",
-      `${formData.code || "未命名配方"}_全展開配方表.csv`,
+      `${formData.code || "未命名配方"}_配方表.csv`,
     );
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
   };
 
-  // ==========================================
-  // 🌟 遞迴渲染：支援換算、排序與 UI 呈現
-  // ==========================================
+  // 🌟 極簡白盒化設計：廠商報價 Sub-row (純白底板、文字色彩、不依賴雜訊背景)
+  const renderProviderQuotesSubRow = (
+    refCost,
+    providerQuotes,
+    isNested = false,
+  ) => {
+    if (!providerQuotes || providerQuotes.length === 0) return null;
+
+    // 與上層表單欄位切齊 (縮排 w-8 + gap-4 + w-[64px] + gap-4)
+    const paddingLeftClass = isNested ? "" : "pl-[116px]";
+
+    return (
+      <div
+        className={`w-full ${paddingLeftClass} pr-6 pb-4 flex flex-col gap-1.5`}
+      >
+        <div className="flex items-center gap-1.5 pl-2 mb-0.5">
+          <CornerDownRight
+            size={12}
+            className="text-slate-300"
+            strokeWidth={3}
+          />
+          <span className="text-[11px] font-black text-slate-800 tracking-widest">
+            廠商報價
+          </span>
+        </div>
+
+        <div className="flex flex-col gap-1.5 w-fit">
+          {providerQuotes.map((pq, i) => {
+            const diff = pq.price - refCost;
+            const diffPct = refCost > 0 ? (diff / refCost) * 100 : 0;
+            const isUp = diff > 0;
+            const isDown = diff < 0;
+
+            return (
+              <div
+                key={i}
+                className="flex items-center gap-4 px-4 py-2 bg-white rounded-lg border border-slate-200 shadow-sm transition-all hover:border-slate-300 hover:shadow"
+              >
+                {/* 1. 廠商名稱 (固定寬) */}
+                <span
+                  className="text-xs font-bold text-slate-800 w-[140px] truncate"
+                  title={pq.provider_name}
+                >
+                  {pq.provider_name}
+                </span>
+
+                {/* 2. 起迄日 (極簡文字化，無多餘底色，防斷行) */}
+                <div className="w-[200px] shrink-0 flex items-center justify-center gap-2">
+                  <div className="flex items-center gap-1">
+                    <span className="text-[10px] text-slate-400 font-bold bg-slate-50 px-1.5 py-0.5 rounded border border-slate-100 shrink-0">
+                      起
+                    </span>
+                    <span className="text-[10px] font-mono font-semibold text-slate-600 whitespace-nowrap">
+                      {pq.effective_date}
+                    </span>
+                  </div>
+                  <span className="text-slate-300 text-[10px]">-</span>
+                  <div className="flex items-center gap-1">
+                    <span className="text-[10px] text-slate-400 font-bold bg-slate-50 px-1.5 py-0.5 rounded border border-slate-100 shrink-0">
+                      迄
+                    </span>
+                    <span className="text-[10px] font-mono font-semibold text-slate-600 whitespace-nowrap">
+                      {pq.valid_until || "無期限"}
+                    </span>
+                  </div>
+                </div>
+
+                {/* 3. 報價 (固定寬，左對齊) */}
+                <span className="text-[13px] font-mono font-black text-slate-900 w-[70px] text-left">
+                  ${formatNum(pq.price, 2)}
+                </span>
+
+                {/* 4. 漲幅 (固定寬，右對齊，直接以顏色文字取代背景色塊) */}
+                <div
+                  className={`w-[140px] text-right font-mono text-[11px] font-bold ${isUp ? "text-rose-500" : isDown ? "text-emerald-500" : "text-slate-400"}`}
+                >
+                  {diff !== 0 ? (
+                    <span className="whitespace-nowrap">
+                      {isUp ? "+" : "-"} ${formatNum(Math.abs(diff), 2)} (
+                      {formatNum(Math.abs(diffPct), 1)}%)
+                    </span>
+                  ) : (
+                    <span>-</span>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  // 🌟 半成品階層式展開渲染
   const renderNestedRows = (parentMatId, parentQty, level, pathPrefix) => {
     const parentMat = materials.find((m) => m.id === parentMatId);
     if (!parentMat || !parentMat.boms || parentMat.boms.length === 0)
       return null;
 
-    // 1. 換算這層所有的子物料，然後依據實際用量降冪排序
     const processedBoms = parentMat.boms.map((bom, idx) => {
       const childMat = materials.find((m) => m.id === bom.child) || {};
       const childCost = parseFloat(childMat.estimated_cost) || 0;
-
       const childBaseQty = parseFloat(bom.base_quantity) || 1;
       const childReqQty = parseFloat(bom.quantity_required) || 0;
-
       const actualQty = precise.mul(
         precise.div(childReqQty, childBaseQty),
         parentQty,
       );
       const subtotal = precise.mul(actualQty, childCost);
-
       return {
         ...bom,
         originalIdx: idx,
@@ -556,10 +657,8 @@ const BOMCreatePage = () => {
       };
     });
 
-    // 2. 排序 (多到少)
     processedBoms.sort((a, b) => b.actualQty - a.actualQty);
 
-    // 3. 渲染
     return processedBoms.map((item) => {
       const currentPath = `${pathPrefix}-${item.originalIdx}`;
       const isExpanded = expandedRows.has(currentPath);
@@ -568,75 +667,103 @@ const BOMCreatePage = () => {
         item.childMat.boms &&
         item.childMat.boms.length > 0;
 
+      const nestedPaddingLeft = level * 1.5 + 1.5;
+
       return (
         <React.Fragment key={currentPath}>
-          <div className="grid grid-cols-12 gap-4 px-8 py-2 items-center bg-slate-50/80 border-b border-slate-100/50 hover:bg-slate-100/50 transition-colors group">
-            {/* 名稱區塊 (包含層級縮排) */}
-            <div
-              className="col-span-4 flex items-center gap-1.5"
-              style={{ paddingLeft: `${level * 1.5 + 1.5}rem` }}
-            >
-              {hasChildren ? (
-                <button
-                  type="button"
-                  onClick={() => toggleExpand(currentPath)}
-                  className="text-slate-400 hover:text-[#007AFF] p-0.5 transition-colors"
-                >
-                  {isExpanded ? (
-                    <ChevronDown size={16} strokeWidth={3} />
-                  ) : (
-                    <ChevronRight size={16} strokeWidth={3} />
-                  )}
-                </button>
-              ) : (
-                <div className="w-[20px] flex justify-center text-slate-300">
-                  <CornerDownRight size={12} strokeWidth={2.5} />
-                </div>
-              )}
-              <div className="flex flex-col min-w-0">
-                <span className="text-xs font-bold text-slate-600 truncate flex items-center gap-1.5">
-                  <span className="bg-white border border-slate-200 text-slate-400 px-1 py-0.5 rounded text-[9px] font-mono leading-none shadow-sm">
-                    {item.child_code}
+          <div className="flex flex-col border-b border-slate-100/50 bg-slate-50/30 hover:bg-slate-50 transition-colors group">
+            <div className="flex items-start md:items-center gap-4 px-4 py-2 w-full min-w-[900px]">
+              <div
+                className="w-8 shrink-0 flex flex-col items-end pt-1"
+                style={{ paddingRight: `${level * 0.5}rem` }}
+              >
+                {hasChildren ? (
+                  <button
+                    type="button"
+                    onClick={() => toggleExpand(currentPath)}
+                    className="text-slate-400 hover:text-[#007AFF] p-0.5 rounded transition-colors bg-white border border-slate-200 shadow-sm"
+                  >
+                    {isExpanded ? (
+                      <ChevronDown size={14} strokeWidth={3} />
+                    ) : (
+                      <ChevronRight size={14} strokeWidth={3} />
+                    )}
+                  </button>
+                ) : (
+                  <CornerDownRight
+                    size={12}
+                    className="text-slate-300"
+                    strokeWidth={2.5}
+                  />
+                )}
+              </div>
+
+              <div className="w-[64px] flex justify-center pt-0.5 shrink-0">
+                {item.childMat.type && (
+                  <span
+                    className={`px-2 py-1 text-[9px] font-black rounded-md uppercase tracking-widest ${TYPE_MAP[item.childMat.type]?.color || "bg-slate-100 text-slate-500 border-slate-200"}`}
+                  >
+                    {TYPE_MAP[item.childMat.type]?.label || item.childMat.type}
                   </span>
-                  <span className="truncate">{item.child_name}</span>
+                )}
+              </div>
+
+              <div className="w-[280px] shrink-0 flex flex-col gap-0.5 pt-0.5">
+                <span className="text-sm font-bold text-slate-700 truncate">
+                  {item.child_name}
+                </span>
+                <span className="text-[10px] font-mono text-slate-400 font-semibold">
+                  {item.child_code}
                 </span>
               </div>
-            </div>
 
-            {/* 備註 (Read-Only) */}
-            <div className="col-span-2 text-left pl-2">
-              <span className="text-[11px] text-slate-400 font-medium truncate block">
-                {item.remark || "-"}
-              </span>
-            </div>
+              <div className="flex-1 min-w-[120px]">
+                {item.remark ? (
+                  <span className="text-xs text-slate-500 font-medium truncate block bg-white px-2 py-1 rounded border border-slate-100">
+                    {item.remark}
+                  </span>
+                ) : (
+                  <span className="text-slate-300 block text-center">-</span>
+                )}
+              </div>
 
-            {/* 🌟 換算用量 與 基準比例 (Read-Only) */}
-            <div className="col-span-2 flex flex-col justify-center">
-              <div className="flex items-baseline gap-1">
-                <span className="text-sm font-mono font-black text-slate-700">
+              <div className="w-[130px] shrink-0 flex items-baseline gap-1 pt-1 pl-1">
+                <span className="text-[15px] font-mono font-black text-slate-700">
                   {formatNum(item.actualQty)}
                 </span>
-                <span className="text-[9px] text-slate-500 font-bold uppercase">
+                <span className="text-[9px] text-slate-400 font-bold uppercase">
                   {item.child_unit}
                 </span>
               </div>
+
+              <div className="w-[100px] shrink-0 text-right">
+                <span className="text-[13px] font-mono font-bold text-slate-500">
+                  ${formatNum(item.childCost, 2)}
+                </span>
+              </div>
+
+              <div className="w-[110px] shrink-0"></div>
+
+              <div className="w-[100px] shrink-0 text-right pr-2">
+                <span className="font-mono text-sm font-black text-slate-600">
+                  ${formatNum(item.subtotal, 2)}
+                </span>
+              </div>
+
+              <div className="w-8 shrink-0"></div>
             </div>
 
-            {/* 單位成本 (Read-Only) */}
-            <div className="col-span-2 text-right font-mono font-bold text-xs text-slate-400">
-              ${formatNum(item.childCost, 2)}
-            </div>
-
-            {/* 小計 (Read-Only) */}
-            <div className="col-span-2 flex justify-end items-center gap-4 pr-8">
-              <span className="font-mono text-xs font-black text-slate-500">
-                ${formatNum(item.subtotal, 2)}
-              </span>
-              <div className="w-[32px]"></div> {/* 對齊垃圾桶寬度 */}
-            </div>
+            {item.childMat.provider_quotes &&
+              item.childMat.provider_quotes.length > 0 && (
+                <div style={{ paddingLeft: `${nestedPaddingLeft + 8.5}rem` }}>
+                  {renderProviderQuotesSubRow(
+                    item.childCost,
+                    item.childMat.provider_quotes,
+                    true,
+                  )}
+                </div>
+              )}
           </div>
-
-          {/* 遞迴繼續展開更底層 */}
           {isExpanded &&
             hasChildren &&
             renderNestedRows(
@@ -655,7 +782,6 @@ const BOMCreatePage = () => {
     let totalSugar = 0;
     let totalFat = 0;
     let hasValidEdibleItems = false;
-
     const triggeredWarnings = new Set();
     const triggeredLimits = new Set();
     const bannedItems = new Set();
@@ -678,18 +804,16 @@ const BOMCreatePage = () => {
         precise.mul(parseFloat(nut.fat) || 0, ratio),
       );
 
-      // 掃描 Static 法規規則檔
       TFDA_INGREDIENT_RULES.forEach((rule) => {
         const isMatch = rule.keywords.some((keyword) =>
           item.material_name.toLowerCase().includes(keyword.toLowerCase()),
         );
-
         if (isMatch) {
-          if (rule.type === "BANNED") {
+          if (rule.type === "BANNED")
             bannedItems.add(
               `包含禁用成分「${item.material_name}」：${rule.warningText}`,
             );
-          } else {
+          else {
             if (rule.warningText)
               triggeredWarnings.add(
                 `含有「${item.material_name}」：應標示「${rule.warningText}」`,
@@ -723,7 +847,7 @@ const BOMCreatePage = () => {
       const currentItemRatio = precise.div(itemQty, baseQty);
 
       if (item.is_additive && item.legal_limit_percent) {
-        if (!summary[item.material_code]) {
+        if (!summary[item.material_code])
           summary[item.material_code] = {
             code: item.material_code,
             name: item.material_name,
@@ -731,7 +855,6 @@ const BOMCreatePage = () => {
             ratio: 0,
             sources: [],
           };
-        }
         summary[item.material_code].ratio = precise.add(
           summary[item.material_code].ratio,
           currentItemRatio,
@@ -745,7 +868,7 @@ const BOMCreatePage = () => {
 
       if (item.contained_additives && item.contained_additives.length > 0) {
         item.contained_additives.forEach((add) => {
-          if (!summary[add.code]) {
+          if (!summary[add.code])
             summary[add.code] = {
               code: add.code,
               name: add.name,
@@ -753,7 +876,6 @@ const BOMCreatePage = () => {
               ratio: 0,
               sources: [],
             };
-          }
           const contributedRatio = precise.mul(currentItemRatio, add.ratio);
           const contributedQty = precise.mul(itemQty, add.ratio);
 
@@ -781,12 +903,11 @@ const BOMCreatePage = () => {
       };
     });
 
-    const hasLimitError = results.some((r) => r.isExceeded);
-    const exceededCodes = results
-      .filter((r) => r.isExceeded)
-      .map((r) => r.code);
-
-    return { results, hasLimitError, exceededCodes };
+    return {
+      results,
+      hasLimitError: results.some((r) => r.isExceeded),
+      exceededCodes: results.filter((r) => r.isExceeded).map((r) => r.code),
+    };
   }, [formData.items, formData.base_quantity]);
 
   const calculations = useMemo(() => {
@@ -795,16 +916,18 @@ const BOMCreatePage = () => {
 
     formData.items.forEach((item) => {
       const itemQty = parseFloat(item.quantity) || 0;
-      totalCost += itemQty * (parseFloat(item.estimated_cost) || 0);
+      const activeCost =
+        item.set_cost !== "" && item.set_cost !== null
+          ? parseFloat(item.set_cost)
+          : parseFloat(item.estimated_cost) || 0;
+      totalCost += itemQty * activeCost;
 
-      if (item.type !== "PACK" && item.type !== "STICKER") {
+      if (item.type !== "PACK" && item.type !== "STICKER")
         totalWeight += itemQty;
-      }
     });
 
     const baseQty = parseFloat(formData.base_quantity) || 1;
     const weightDiff = totalWeight - baseQty;
-
     return {
       totalCost,
       unitCost: baseQty > 0 ? totalCost / baseQty : 0,
@@ -816,10 +939,8 @@ const BOMCreatePage = () => {
   const executeSubmit = async () => {
     setIsSubmitting(true);
     closeDialog();
-
     try {
       let currentParentId = originalMaterialId;
-
       const materialPayload = {
         code: formData.code,
         name: formData.name,
@@ -871,7 +992,7 @@ const BOMCreatePage = () => {
           base_quantity: parseFloat(formData.base_quantity),
           quantity_required: parseFloat(item.quantity),
           remark: item.remark || "",
-          set_cost: item.set_cost || item.estimated_cost || 0,
+          set_cost: item.set_cost !== "" ? parseFloat(item.set_cost) : null,
         };
         const url =
           isEditMode && item.id ? `/api/boms/${item.id}` : "/api/boms";
@@ -901,35 +1022,34 @@ const BOMCreatePage = () => {
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (!formData.code)
-      return showAlert("資料不完整", "請輸入配方代碼", "warning");
-    if (!formData.name)
-      return showAlert("資料不完整", "請輸入配方名稱", "warning");
+    if (!formData.code || !formData.name)
+      return showAlert("資料不完整", "請輸入代碼與名稱", "warning");
     if (!formData.base_quantity || formData.base_quantity <= 0)
       return showAlert("資料錯誤", "基準產量必須大於 0", "warning");
-    if (formData.items.length === 0)
-      return showAlert("資料不完整", "請至少新增一筆配方物料", "warning");
-    if (formData.items.some((item) => !item.material_id))
-      return showAlert("資料不完整", "有明細尚未選擇物料", "warning");
+    if (
+      formData.items.length === 0 ||
+      formData.items.some((item) => !item.material_id)
+    )
+      return showAlert("資料不完整", "請完整選擇物料", "warning");
 
     if (additiveCalculations.hasLimitError)
       return showAlert(
         "法規上限警示",
-        "配方中有添加物總量超過法規安全上限，無法儲存。",
+        "添加物超過法規安全上限，無法儲存。",
         "error",
       );
     if (claimsAndWarnings.banned.length > 0)
       return showAlert(
         "禁用原料警示",
-        "配方中含有台灣法規明令禁用的食品原料，無法儲存。請更換配方！",
+        "含有台灣法規禁用原料，無法儲存。",
         "error",
       );
 
     showConfirm(
-      isEditMode ? "更新配方確認" : "建立配方確認",
+      isEditMode ? "更新確認" : "建立確認",
       isEditMode
-        ? `確定要覆蓋更新配方「${formData.name}」嗎？`
-        : `確定要建立配方「${formData.name}」嗎？\n系統將會同步在物料庫建立這筆配方主檔。`,
+        ? `確定更新配方「${formData.name}」？`
+        : `確定建立配方「${formData.name}」？`,
       executeSubmit,
     );
   };
@@ -937,7 +1057,6 @@ const BOMCreatePage = () => {
   const MaterialSelect = ({ value, onChange, options, excludedIds }) => {
     const [isOpen, setIsOpen] = useState(false);
     const [searchTerm, setSearchTerm] = useState("");
-    const [dropdownStyle, setDropdownStyle] = useState({});
     const selectRef = useRef(null);
     const dropdownMenuRef = useRef(null);
 
@@ -947,30 +1066,7 @@ const BOMCreatePage = () => {
         m.code.toLowerCase().includes(searchTerm.toLowerCase()),
     );
 
-    const handleToggle = () => {
-      if (!isOpen && selectRef.current) {
-        const rect = selectRef.current.getBoundingClientRect();
-        const spaceBelow = window.innerHeight - rect.bottom;
-        const dropdownHeight = 260;
-
-        if (spaceBelow < dropdownHeight && rect.top > dropdownHeight) {
-          setDropdownStyle({
-            bottom: `${window.innerHeight - rect.top + 4}px`,
-            top: "auto",
-            left: `${rect.left}px`,
-            width: `${rect.width}px`,
-          });
-        } else {
-          setDropdownStyle({
-            top: `${rect.bottom + 4}px`,
-            bottom: "auto",
-            left: `${rect.left}px`,
-            width: `${rect.width}px`,
-          });
-        }
-      }
-      setIsOpen(!isOpen);
-    };
+    const handleToggle = () => setIsOpen(!isOpen);
 
     useEffect(() => {
       const handleScroll = (e) => {
@@ -981,58 +1077,51 @@ const BOMCreatePage = () => {
           return;
         if (isOpen) setIsOpen(false);
       };
-      if (isOpen) {
-        window.addEventListener("scroll", handleScroll, true);
-        window.addEventListener("resize", () => setIsOpen(false), true);
-      }
-      return () => {
-        window.removeEventListener("scroll", handleScroll, true);
-        window.removeEventListener("resize", () => setIsOpen(false), true);
-      };
+      if (isOpen) window.addEventListener("scroll", handleScroll, true);
+      return () => window.removeEventListener("scroll", handleScroll, true);
     }, [isOpen]);
 
     return (
-      <>
+      <div className="relative w-full">
         <div
           ref={selectRef}
           onClick={handleToggle}
-          className={`w-full h-[40px] px-3 py-1.5 border rounded-xl text-sm cursor-pointer bg-white flex justify-between items-center transition-colors shadow-sm ${isOpen ? "border-blue-500 ring-2 ring-blue-500/20" : "border-slate-200 hover:border-slate-300"}`}
+          className={`w-full h-[40px] px-3 py-1 border rounded-lg text-[13px] cursor-pointer bg-white flex justify-between items-center transition-all shadow-sm ${isOpen ? "border-[#007AFF] ring-2 ring-[#007AFF]/20 bg-white" : "border-slate-200 hover:border-slate-300"}`}
         >
           <div className="flex items-center gap-2 overflow-hidden w-full">
             <Search size={14} className="text-slate-400 flex-shrink-0" />
             <span
-              className={`truncate font-bold ${value ? "text-slate-700" : "text-slate-400"}`}
+              className={`truncate font-bold ${value ? "text-slate-800" : "text-slate-400"}`}
             >
-              {value || "搜尋代碼或名稱..."}
+              {value || "搜尋代碼/名稱..."}
             </span>
           </div>
           <ChevronDown
             size={14}
-            className="text-slate-400 flex-shrink-0 ml-1"
+            className={`text-slate-400 flex-shrink-0 transition-transform ${isOpen ? "rotate-180" : ""}`}
           />
         </div>
 
         {isOpen && (
           <>
             <div
-              className="fixed inset-0 z-[9998]"
+              className="fixed inset-0 z-[98]"
               onClick={() => setIsOpen(false)}
             ></div>
             <div
               ref={dropdownMenuRef}
-              style={dropdownStyle}
-              className="fixed z-[9999] bg-white border border-slate-200 rounded-2xl shadow-xl flex flex-col max-h-64 overflow-hidden animate-in fade-in zoom-in-95 duration-100"
+              className="absolute top-full left-0 w-full min-w-[280px] mt-2 z-[99] bg-white border border-slate-200 rounded-2xl shadow-xl flex flex-col max-h-[300px] overflow-hidden animate-in fade-in zoom-in-95 duration-200"
             >
-              <div className="p-3 border-b border-slate-100 bg-slate-50/50 shrink-0">
+              <div className="p-2 border-b border-slate-100 bg-slate-50/80 shrink-0 backdrop-blur-md">
                 <input
                   autoFocus
-                  className="w-full border border-slate-200 rounded-xl px-4 py-2 text-sm font-bold focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 shadow-sm"
+                  className="w-full border border-slate-200 rounded-xl px-3 py-1.5 text-sm font-bold focus:outline-none focus:border-[#007AFF] focus:ring-2 focus:ring-[#007AFF]/20 shadow-sm transition-all"
                   placeholder="輸入關鍵字..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                 />
               </div>
-              <div className="overflow-y-auto flex-1 p-2 custom-scrollbar">
+              <div className="overflow-y-auto flex-1 p-1 custom-scrollbar">
                 {filtered.length > 0 ? (
                   filtered.map((m) => {
                     const isDisabled = excludedIds.includes(m.id);
@@ -1040,31 +1129,29 @@ const BOMCreatePage = () => {
                       <div
                         key={m.id}
                         onClick={() => {
-                          if (isDisabled) return;
-                          onChange(m);
-                          setIsOpen(false);
-                          setSearchTerm("");
+                          if (!isDisabled) {
+                            onChange(m);
+                            setIsOpen(false);
+                            setSearchTerm("");
+                          }
                         }}
-                        className={`px-3 py-2.5 text-sm rounded-xl flex items-center gap-3 transition-colors ${isDisabled ? "bg-slate-50 text-slate-400 cursor-not-allowed opacity-60" : "text-slate-700 hover:bg-slate-100 cursor-pointer"}`}
+                        className={`px-3 py-2 text-xs rounded-lg flex items-center gap-2.5 transition-colors ${isDisabled ? "bg-slate-50 text-slate-400 cursor-not-allowed opacity-60" : "text-slate-700 hover:bg-[#007AFF]/10 cursor-pointer"}`}
                       >
                         <span
-                          className={`text-[10px] font-mono px-2 py-0.5 rounded-md border whitespace-nowrap font-bold ${isDisabled ? "bg-slate-100 text-slate-400 border-slate-200" : "bg-white text-slate-500 border-slate-200 shadow-sm"}`}
+                          className={`text-[9px] font-mono px-1.5 py-0.5 rounded border whitespace-nowrap font-bold ${isDisabled ? "bg-slate-100 text-slate-400 border-slate-200" : "bg-white text-slate-500 border-slate-200 shadow-sm"}`}
                         >
                           {m.code}
                         </span>
                         <span className="truncate font-black">{m.name}</span>
-                        <div className="flex-1 flex items-center justify-end gap-2">
+                        <div className="flex-1 flex items-center justify-end gap-1.5">
                           {isDisabled && (
-                            <span className="text-xs text-slate-400 font-bold">
-                              (已選擇)
+                            <span className="text-[10px] text-slate-400 font-bold">
+                              (已選)
                             </span>
                           )}
                           {m.is_additive && (
-                            <div
-                              className="flex items-center justify-center bg-orange-500 text-white p-1 rounded-md shadow-sm border border-orange-600 shrink-0"
-                              title="法定添加物"
-                            >
-                              <FlaskConical size={12} strokeWidth={3} />
+                            <div className="bg-orange-500 text-white p-0.5 rounded shadow-sm">
+                              <FlaskConical size={10} strokeWidth={3} />
                             </div>
                           )}
                         </div>
@@ -1072,19 +1159,19 @@ const BOMCreatePage = () => {
                     );
                   })
                 ) : (
-                  <div className="px-3 py-8 text-center text-slate-400 text-sm font-bold">
-                    查無符合的物料
+                  <div className="p-6 text-center text-slate-400 text-xs font-bold">
+                    查無符合物料
                   </div>
                 )}
               </div>
             </div>
           </>
         )}
-      </>
+      </div>
     );
   };
 
-  if (loading) {
+  if (loading)
     return (
       <div className="flex justify-center items-center h-full min-h-screen bg-slate-50">
         <div className="text-lg font-bold text-slate-400 animate-pulse">
@@ -1092,42 +1179,27 @@ const BOMCreatePage = () => {
         </div>
       </div>
     );
-  }
 
   return (
     <div className="p-6 md:p-8 max-w-7xl mx-auto bg-slate-50 min-h-screen font-sans text-slate-800 w-full">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
-        <div>
-          <h2 className="text-3xl font-black text-slate-900 tracking-tight flex items-center gap-3">
-            {isEditMode ? "調整配方內容" : "配方建立與成本估算"}
-          </h2>
-        </div>
-      </div>
-
-      <div className="bg-blue-50/80 text-blue-800 text-sm p-4 rounded-2xl mb-6 border border-blue-100/50 shadow-sm">
-        <p className="flex items-center gap-2 font-bold mb-2">
-          <span className="text-lg leading-none">💡</span> 系統功能說明
-        </p>
-        <ul className="list-disc list-inside space-y-1 ml-6 text-slate-700 font-medium">
-          <li>此頁面專注於「配方比例設計」與「打料基數成本試算」。</li>
-          <li>
-            加入法定添加物或含添加物的半成品時，系統會自動攤平計算全配方的佔比，嚴格把關法規上限。
-          </li>
-        </ul>
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
+        <h2 className="text-3xl font-black text-slate-900 tracking-tight flex items-center gap-3">
+          {isEditMode ? "調整配方內容" : "配方建立與成本估算"}
+        </h2>
       </div>
 
       <form
         onSubmit={handleSubmit}
-        className="flex flex-col gap-8 mb-10 w-full md:w-auto"
+        className="flex flex-col gap-8 mb-10 w-full"
       >
-        {/* 單頭區塊 */}
-        <div className="bg-white p-8 rounded-3xl border border-slate-200/60 shadow-[0_2px_10px_-4px_rgba(0,0,0,0.05)] w-full">
-          <h3 className="text-[11px] font-black text-blue-500 uppercase tracking-widest mb-4 border-b border-slate-100 pb-2">
+        {/* 基本資訊 */}
+        <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm w-full transition-shadow hover:shadow-md">
+          <h3 className="text-xs font-black text-[#007AFF] uppercase tracking-widest mb-6 border-b border-slate-100 pb-3">
             1. 基本資訊
           </h3>
           <div className="grid grid-cols-1 md:grid-cols-5 gap-6">
             <div className="md:col-span-1">
-              <label className="block text-[11px] font-bold text-slate-500 mb-1.5 uppercase tracking-wider">
+              <label className="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">
                 配方代碼 <span className="text-red-500">*</span>
               </label>
               <input
@@ -1136,12 +1208,12 @@ const BOMCreatePage = () => {
                 value={formData.code}
                 onChange={handleMasterChange}
                 disabled={isEditMode}
-                placeholder="如：P9202020"
-                className="w-full h-[44px] px-4 py-2 border border-slate-200 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none font-mono font-bold transition-all shadow-sm disabled:bg-slate-50 disabled:text-slate-400"
+                placeholder="P9202020"
+                className="w-full h-[48px] px-4 py-2 border border-slate-200 rounded-xl focus:border-[#007AFF] focus:ring-2 focus:ring-[#007AFF]/20 outline-none font-mono font-bold transition-all shadow-sm disabled:bg-slate-50 disabled:text-slate-400"
               />
             </div>
             <div className="md:col-span-2">
-              <label className="block text-[11px] font-bold text-slate-500 mb-1.5 uppercase tracking-wider">
+              <label className="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">
                 配方/成品名稱 <span className="text-red-500">*</span>
               </label>
               <input
@@ -1149,30 +1221,27 @@ const BOMCreatePage = () => {
                 name="name"
                 value={formData.name}
                 onChange={handleMasterChange}
-                placeholder="例如：泰式打拋豬肉B"
-                className="w-full h-[44px] px-4 py-2 border border-slate-200 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none font-bold transition-all shadow-sm"
+                placeholder="泰式打拋豬肉B"
+                className="w-full h-[48px] px-4 py-2 border border-slate-200 rounded-xl focus:border-[#007AFF] focus:ring-2 focus:ring-[#007AFF]/20 outline-none font-bold text-[15px] transition-all shadow-sm"
               />
             </div>
             <div className="md:col-span-1">
-              <label className="block text-[11px] font-bold text-slate-500 mb-1.5 uppercase tracking-wider">
+              <label className="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">
                 物料類型
               </label>
               <select
                 name="type"
                 value={formData.type}
                 onChange={handleMasterChange}
-                className="w-full h-[44px] px-4 py-2 border border-slate-200 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none font-bold transition-all shadow-sm bg-white appearance-none cursor-pointer"
+                className="w-full h-[48px] px-4 py-2 border border-slate-200 rounded-xl focus:border-[#007AFF] focus:ring-2 focus:ring-[#007AFF]/20 outline-none font-bold transition-all shadow-sm bg-white appearance-none cursor-pointer"
               >
                 <option value="PRODUCT">成品 (PRODUCT)</option>
                 <option value="SEMI">半成品 (SEMI)</option>
               </select>
             </div>
             <div className="md:col-span-1">
-              <label className="block text-[11px] font-black text-blue-600 mb-1.5 uppercase tracking-wider flex items-center gap-1">
+              <label className="block text-xs font-black text-[#007AFF] mb-2 uppercase tracking-wider flex items-center gap-1">
                 基準產量 (KG) <span className="text-red-500">*</span>
-                <span title="配方原料總合應等於此重量" className="cursor-help">
-                  <Info size={14} />
-                </span>
               </label>
               <input
                 type="number"
@@ -1181,336 +1250,257 @@ const BOMCreatePage = () => {
                 step="0.01"
                 value={formData.base_quantity}
                 onChange={handleMasterChange}
-                className="w-full h-[44px] px-4 py-2 border-2 border-blue-200 bg-blue-50/50 text-blue-800 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none font-mono font-black transition-all shadow-sm"
+                className="w-full h-[48px] px-4 py-2 border-2 border-blue-200 bg-blue-50/50 text-[#007AFF] rounded-xl focus:border-[#007AFF] focus:ring-2 focus:ring-[#007AFF]/20 outline-none font-mono font-black text-lg transition-all shadow-sm"
               />
             </div>
           </div>
         </div>
 
-        {/* 行銷宣稱與法規警語判定引擎 */}
-        <div className="border border-slate-200/60 bg-emerald-50/30 p-8 rounded-3xl shadow-[0_2px_10px_-4px_rgba(0,0,0,0.05)] flex flex-col gap-5">
-          <h3 className="text-base font-black text-slate-800 flex items-center gap-2">
-            <Tag size={18} className="text-emerald-500" strokeWidth={2.5} />
-            行銷宣稱與法規預判
-          </h3>
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 min-h-[140px]">
-            <div className="bg-white p-5 rounded-2xl border border-emerald-100 shadow-sm flex flex-col gap-3 lg:col-span-1 h-full">
-              <div className="text-[10px] font-black text-emerald-600 uppercase tracking-widest">
-                可標示行銷宣稱
-              </div>
-              <div className="flex flex-wrap gap-2 flex-1 items-start">
-                {!claimsAndWarnings.hasValidEdibleItems ? (
-                  <span className="text-sm font-bold text-slate-400">
-                    目前無可宣稱之營養標示
-                  </span>
-                ) : claimsAndWarnings.sugarFree || claimsAndWarnings.lowFat ? (
-                  <>
-                    {claimsAndWarnings.sugarFree && (
-                      <span className="inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-100/50 text-emerald-800 border border-emerald-200">
-                        ✅ 可宣稱無糖
-                      </span>
-                    )}
-                    {claimsAndWarnings.lowFat && (
-                      <span className="inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-100/50 text-emerald-800 border border-emerald-200">
-                        ✅ 可宣稱低脂
-                      </span>
-                    )}
-                  </>
-                ) : (
-                  <span className="text-sm font-bold text-slate-400">
-                    目前配方無特殊營養宣稱
-                  </span>
-                )}
-              </div>
+        {/* 🌟 核心：高密度、全橫排對齊資料列 (Data Grid) */}
+        <div className="bg-white rounded-3xl border border-slate-200 shadow-sm flex flex-col w-full overflow-hidden">
+          <div className="px-6 py-4 md:px-6 md:py-5 border-b border-slate-100 flex flex-col md:flex-row justify-between items-start md:items-center bg-slate-50/50 gap-4">
+            <div className="flex items-center gap-3">
+              <h3 className="text-base font-black text-slate-800">
+                2. 配方用料明細
+              </h3>
+              <span className="text-[#007AFF] bg-blue-50 font-black px-2.5 py-0.5 rounded-full border border-blue-100 shadow-sm text-sm">
+                {formData.items.length}
+              </span>
             </div>
 
-            <div
-              className={`p-5 rounded-2xl border shadow-sm flex flex-col gap-3 lg:col-span-2 h-full transition-colors ${
-                claimsAndWarnings.banned.length > 0
-                  ? "bg-red-50/50 border-red-200"
-                  : claimsAndWarnings.warnings.length > 0 ||
-                      claimsAndWarnings.limits.length > 0
-                    ? "bg-amber-50/50 border-amber-200"
-                    : "bg-white border-slate-100"
-              }`}
-            >
-              <div
-                className={`text-[10px] font-black uppercase tracking-widest ${
-                  claimsAndWarnings.banned.length > 0
-                    ? "text-red-600"
-                    : claimsAndWarnings.warnings.length > 0
-                      ? "text-amber-600"
-                      : "text-slate-400"
-                }`}
+            <div className="flex flex-wrap items-center gap-3">
+              {formData.items.length > 1 && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => handleSortItems("quantity")}
+                    className={`text-[11px] px-3 py-1.5 rounded-lg font-bold transition-all shadow-sm flex items-center gap-1 border ${sortConfig.key === "quantity" ? "bg-blue-50 text-blue-600 border-blue-200" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}
+                  >
+                    用量排序{" "}
+                    {sortConfig.key === "quantity" &&
+                      (sortConfig.direction === "desc" ? (
+                        <ArrowDown size={12} />
+                      ) : (
+                        <ArrowUp size={12} />
+                      ))}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSortItems("subtotal")}
+                    className={`text-[11px] px-3 py-1.5 rounded-lg font-bold transition-all shadow-sm flex items-center gap-1 border ${sortConfig.key === "subtotal" ? "bg-blue-50 text-blue-600 border-blue-200" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}
+                  >
+                    小計排序{" "}
+                    {sortConfig.key === "subtotal" &&
+                      (sortConfig.direction === "desc" ? (
+                        <ArrowDown size={12} />
+                      ) : (
+                        <ArrowUp size={12} />
+                      ))}
+                  </button>
+                  <div className="w-px h-4 bg-slate-300 mx-1 hidden sm:block"></div>
+                </>
+              )}
+              <button
+                type="button"
+                onClick={handleAddItem}
+                className="text-xs bg-white text-[#007AFF] px-4 py-1.5 rounded-lg hover:bg-blue-50 font-black transition-all shadow-sm flex items-center gap-1.5 border border-slate-200 hover:border-blue-200"
               >
-                特定成分法規限制與警示
-              </div>
-              <div className="flex flex-col gap-2.5 flex-1 overflow-y-auto custom-scrollbar">
-                {!claimsAndWarnings.hasValidEdibleItems ||
-                (claimsAndWarnings.banned.length === 0 &&
-                  claimsAndWarnings.warnings.length === 0 &&
-                  claimsAndWarnings.limits.length === 0) ? (
-                  <span className="text-sm font-bold text-slate-400">
-                    系統未偵測到特殊強制警語或限量原料
-                  </span>
-                ) : (
-                  <>
-                    {claimsAndWarnings.banned.map((warn, i) => (
-                      <div
-                        key={`ban-${i}`}
-                        className="flex items-start gap-1.5 text-red-700 text-xs font-bold bg-red-100/50 p-2 rounded-lg"
-                      >
-                        <AlertTriangle size={14} className="mt-0.5 shrink-0" />
-                        <span className="leading-snug">{warn}</span>
-                      </div>
-                    ))}
-                    {claimsAndWarnings.warnings.map((warn, i) => (
-                      <div
-                        key={`warn-${i}`}
-                        className="flex items-start gap-1.5 text-amber-700 text-xs font-bold"
-                      >
-                        <AlertCircle size={14} className="mt-0.5 shrink-0" />
-                        <span className="leading-snug">{warn}</span>
-                      </div>
-                    ))}
-                    {claimsAndWarnings.limits.map((lim, i) => (
-                      <div
-                        key={`lim-${i}`}
-                        className="flex items-start gap-1.5 text-blue-700 text-xs font-bold"
-                      >
-                        <Info size={14} className="mt-0.5 shrink-0" />
-                        <span className="leading-snug">{lim}</span>
-                      </div>
-                    ))}
-                  </>
-                )}
-              </div>
+                <Plus size={14} strokeWidth={3} /> 加入原料
+              </button>
             </div>
           </div>
-        </div>
 
-        {/* 明細清單區塊 */}
-        <div className="bg-white rounded-3xl border border-slate-200/60 shadow-[0_2px_10px_-4px_rgba(0,0,0,0.05)] overflow-hidden flex flex-col w-full">
-          <div className="bg-white rounded-3xl border border-slate-200/60 shadow-[0_2px_10px_-4px_rgba(0,0,0,0.05)] overflow-hidden flex flex-col w-full">
-            <div className="px-8 py-5 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center bg-slate-50/50 gap-4">
-              <h3 className="text-base font-black text-slate-800">
-                2. 配方用料明細{" "}
-                <span className="text-slate-400 font-bold ml-1">
-                  ({formData.items.length})
-                </span>
-              </h3>
-
-              <div className="flex flex-wrap items-center gap-3">
-                {formData.items.length > 1 && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => handleSortItems("quantity")}
-                      className={`text-xs px-4 py-2 rounded-xl font-bold transition-all shadow-sm flex items-center gap-1.5 border ${sortConfig.key === "quantity" ? "bg-blue-50 text-blue-600 border-blue-200" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}
-                    >
-                      用量排序{" "}
-                      {sortConfig.key === "quantity" &&
-                        (sortConfig.direction === "desc" ? (
-                          <ArrowDown size={14} />
-                        ) : (
-                          <ArrowUp size={14} />
-                        ))}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleSortItems("subtotal")}
-                      className={`text-xs px-4 py-2 rounded-xl font-bold transition-all shadow-sm flex items-center gap-1.5 border ${sortConfig.key === "subtotal" ? "bg-blue-50 text-blue-600 border-blue-200" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}
-                    >
-                      小計排序{" "}
-                      {sortConfig.key === "subtotal" &&
-                        (sortConfig.direction === "desc" ? (
-                          <ArrowDown size={14} />
-                        ) : (
-                          <ArrowUp size={14} />
-                        ))}
-                    </button>
-                  </>
-                )}
-                <div className="w-px h-6 bg-slate-300 mx-2 hidden sm:block"></div>
-                <button
-                  type="button"
-                  onClick={handleAddItem}
-                  className="text-sm bg-white text-emerald-600 px-5 py-2 rounded-xl hover:bg-emerald-50 hover:border-emerald-300 font-black transition-all shadow-sm flex items-center gap-2 border border-slate-200"
-                >
-                  <Plus size={16} strokeWidth={2.5} /> 加入原料
-                </button>
+          <div className="overflow-x-auto w-full">
+            {formData.items.length === 0 ? (
+              <div className="p-16 text-center text-slate-400 text-sm font-bold bg-white">
+                尚未加入任何原料，請點擊上方「加入原料」開始設計。
               </div>
-            </div>
-
-            <div className="flex-1 overflow-x-auto w-full">
-              {formData.items.length === 0 ? (
-                <div className="p-20 text-center text-slate-400 text-sm font-bold">
-                  尚未加入任何原料，請點擊上方按鈕開始設計配方
-                </div>
-              ) : (
-                <div className="min-w-[1050px]">
-                  {/* 🌟 更改為 14 欄的 Grid 配置 */}
-                  <div
-                    className="grid grid-cols-[14] gap-4 px-8 py-3 border-b border-slate-100 bg-white text-[10px] font-black text-slate-400 uppercase tracking-widest"
-                    style={{
-                      gridTemplateColumns: "repeat(14, minmax(0, 1fr))",
-                    }}
-                  >
-                    <div className="col-span-4 pl-8">物料名稱</div>
-                    <div className="col-span-2 text-left pl-2">備註</div>
-                    <div className="col-span-2">使用量</div>
-                    <div className="col-span-2 text-center">參考單位成本</div>
-                    <div className="col-span-2 text-center">設定單位成本</div>
-                    <div className="col-span-2 text-center">小計</div>
+            ) : (
+              <div className="min-w-[1100px] flex flex-col w-full">
+                {/* 🌟 嚴格對齊的表頭 */}
+                <div className="flex items-center px-4 py-2 bg-slate-100/50 border-b border-slate-200 text-[10px] font-black text-slate-500 uppercase tracking-widest gap-4">
+                  <div className="w-8 text-center shrink-0">#</div>
+                  <div className="w-[64px] text-center shrink-0">類型</div>
+                  <div className="w-[280px] shrink-0">物料</div>
+                  <div className="flex-1 min-w-[120px]">備註</div>
+                  <div className="w-[120px] shrink-0 pl-1">
+                    用量(KG) <span className="text-red-500">*</span>
                   </div>
-                  <div className="divide-y divide-slate-50">
-                    {formData.items.map((item, index) => {
-                      const itemQty = parseFloat(item.quantity) || 0;
+                  <div className="w-[100px] shrink-0 text-right">系統均價</div>
+                  <div className="w-[110px] shrink-0 text-center">設定成本</div>
+                  <div className="w-[100px] shrink-0 text-right pr-2">小計</div>
+                  <div className="w-8 shrink-0"></div>
+                </div>
 
-                      const hasSetCost =
-                        item.set_cost !== "" &&
-                        item.set_cost !== null &&
-                        !isNaN(item.set_cost);
-                      const activeCost = hasSetCost
-                        ? parseFloat(item.set_cost)
-                        : parseFloat(item.estimated_cost) || 0;
-                      const subtotal = formatNum(itemQty * activeCost, 2);
+                <div className="flex flex-col">
+                  {formData.items.map((item, index) => {
+                    const itemQty = parseFloat(item.quantity) || 0;
+                    const refCost = parseFloat(item.estimated_cost) || 0;
+                    const hasSetCost =
+                      item.set_cost !== "" &&
+                      item.set_cost !== null &&
+                      !isNaN(item.set_cost);
+                    const activeCost = hasSetCost
+                      ? parseFloat(item.set_cost)
+                      : refCost;
+                    const subtotal = formatNum(itemQty * activeCost, 2);
 
-                      const isErrorRow = Boolean(
-                        item.material_code &&
-                        ((item.is_additive &&
-                          additiveCalculations.exceededCodes.includes(
-                            item.material_code,
-                          )) ||
-                          (item.contained_additives &&
-                            item.contained_additives.some((add) =>
-                              additiveCalculations.exceededCodes.includes(
-                                add.code,
-                              ),
-                            ))),
-                      );
+                    const excludedIds = formData.items
+                      .filter((_, i) => i !== index)
+                      .map((i) => i.material_id)
+                      .filter(Boolean);
+                    const isSemi = item.type === "SEMI";
+                    const currentPath = `root-${index}`;
+                    const isExpanded = expandedRows.has(currentPath);
 
-                      const excludedIds = formData.items
-                        .filter((_, i) => i !== index)
-                        .map((i) => i.material_id)
-                        .filter(Boolean);
+                    const isErrorRow = Boolean(
+                      item.material_code &&
+                      ((item.is_additive &&
+                        additiveCalculations.exceededCodes.includes(
+                          item.material_code,
+                        )) ||
+                        (item.contained_additives &&
+                          item.contained_additives.some((add) =>
+                            additiveCalculations.exceededCodes.includes(
+                              add.code,
+                            ),
+                          ))),
+                    );
 
-                      const isSemi = item.type === "SEMI";
-                      const currentPath = `root-${index}`;
-                      const isExpanded = expandedRows.has(currentPath);
-
-                      return (
-                        <React.Fragment key={index}>
-                          <div
-                            className={`grid grid-cols-[14] gap-4 px-8 py-3.5 items-center transition-colors group ${isErrorRow ? "bg-red-50/60 hover:bg-red-100/50" : "hover:bg-slate-50/50"}`}
-                            style={{
-                              gridTemplateColumns: "repeat(14, minmax(0, 1fr))",
-                            }}
-                          >
-                            <div className="col-span-4 flex items-center gap-1.5">
-                              <span className="text-slate-300 font-mono font-bold text-xs w-6 text-right shrink-0">
-                                {index + 1}.
+                    return (
+                      <React.Fragment key={index}>
+                        <div
+                          className={`flex flex-col border-b border-slate-100 transition-colors group ${isErrorRow ? "bg-red-50 hover:bg-red-100/50" : "bg-white hover:bg-slate-50/50"}`}
+                        >
+                          {/* 🌟 1. 主資料列 (絕對水平對齊) */}
+                          <div className="flex items-start md:items-center gap-4 px-4 py-3 w-full">
+                            {/* 序號與展開 */}
+                            <div className="w-8 flex flex-col items-center justify-center pt-1.5 shrink-0">
+                              <span
+                                className={`text-xs font-black ${isErrorRow ? "text-red-500" : "text-slate-400"}`}
+                              >
+                                {index + 1}
                               </span>
-                              {/* 🌟 展開收合按鈕 */}
-                              {isSemi ? (
+                              {isSemi && (
                                 <button
                                   type="button"
                                   onClick={() => toggleExpand(currentPath)}
-                                  className="text-slate-400 hover:text-[#007AFF] p-0.5 transition-colors"
+                                  className="mt-1 text-[#007AFF] hover:bg-blue-50 p-1 rounded-md transition-colors border border-blue-100 shadow-sm bg-white"
                                 >
                                   {isExpanded ? (
-                                    <ChevronDown size={16} strokeWidth={3} />
+                                    <ChevronDown size={14} strokeWidth={3} />
                                   ) : (
-                                    <ChevronRight size={16} strokeWidth={3} />
+                                    <ChevronRight size={14} strokeWidth={3} />
                                   )}
                                 </button>
-                              ) : (
-                                <div className="w-[20px]" />
                               )}
-                              <div className="flex-1 min-w-0">
-                                <MaterialSelect
-                                  value={
-                                    item.material_id
-                                      ? `[${item.material_code}] ${item.material_name}`
-                                      : ""
-                                  }
-                                  options={materials}
-                                  excludedIds={excludedIds}
-                                  onChange={async (selectedMat) => {
-                                    handleItemChange(
-                                      index,
-                                      "material_id",
-                                      selectedMat.id,
-                                    );
-                                    handleItemChange(
-                                      index,
-                                      "material_code",
-                                      selectedMat.code,
-                                    );
-                                    handleItemChange(
-                                      index,
-                                      "material_name",
-                                      selectedMat.name,
-                                    );
-                                    handleItemChange(
-                                      index,
-                                      "type",
-                                      selectedMat.type,
-                                    );
-                                    handleItemChange(
-                                      index,
-                                      "unit",
-                                      selectedMat.unit || "KG",
-                                    );
-                                    handleItemChange(
-                                      index,
-                                      "estimated_cost",
-                                      selectedMat.estimated_cost || 0,
-                                    );
-                                    handleItemChange(
-                                      index,
-                                      "is_additive",
-                                      selectedMat.is_additive || false,
-                                    );
-                                    handleItemChange(
-                                      index,
-                                      "legal_limit_percent",
-                                      selectedMat.legal_limit_percent
-                                        ? parseFloat(
-                                            selectedMat.legal_limit_percent,
-                                          )
-                                        : null,
-                                    );
-                                    handleItemChange(
-                                      index,
-                                      "nutrition_fact",
-                                      selectedMat.nutrition_fact || {},
-                                    );
-
-                                    if (selectedMat.type === "SEMI") {
-                                      const contained =
-                                        await fetchContainedAdditives(
-                                          selectedMat.code,
-                                          materials,
-                                        );
-                                      handleItemChange(
-                                        index,
-                                        "contained_additives",
-                                        contained,
-                                      );
-                                    } else {
-                                      handleItemChange(
-                                        index,
-                                        "contained_additives",
-                                        [],
-                                      );
-                                    }
-                                  }}
-                                />
-                              </div>
                             </div>
 
-                            <div className="col-span-2">
+                            {/* 類型 */}
+                            <div className="w-[64px] flex justify-center pt-1.5 shrink-0">
+                              {item.type && (
+                                <span
+                                  className={`px-2 py-1 text-[10px] font-black rounded-md uppercase tracking-widest ${TYPE_MAP[item.type]?.color || "bg-slate-100 text-slate-500 border-slate-200"}`}
+                                >
+                                  {TYPE_MAP[item.type]?.label || item.type}
+                                </span>
+                              )}
+                            </div>
+
+                            {/* 物料選擇 */}
+                            <div className="w-[280px] shrink-0 pt-0.5">
+                              <MaterialSelect
+                                value={
+                                  item.material_id
+                                    ? `[${item.material_code}] ${item.material_name}`
+                                    : ""
+                                }
+                                options={materials}
+                                excludedIds={excludedIds}
+                                onChange={async (selectedMat) => {
+                                  handleItemChange(
+                                    index,
+                                    "material_id",
+                                    selectedMat.id,
+                                  );
+                                  handleItemChange(
+                                    index,
+                                    "material_code",
+                                    selectedMat.code,
+                                  );
+                                  handleItemChange(
+                                    index,
+                                    "material_name",
+                                    selectedMat.name,
+                                  );
+                                  handleItemChange(
+                                    index,
+                                    "type",
+                                    selectedMat.type,
+                                  );
+                                  handleItemChange(
+                                    index,
+                                    "unit",
+                                    selectedMat.unit || "KG",
+                                  );
+                                  handleItemChange(
+                                    index,
+                                    "estimated_cost",
+                                    selectedMat.estimated_cost || 0,
+                                  );
+                                  handleItemChange(
+                                    index,
+                                    "provider_quotes",
+                                    selectedMat.provider_quotes || [],
+                                  );
+                                  handleItemChange(
+                                    index,
+                                    "is_additive",
+                                    selectedMat.is_additive || false,
+                                  );
+                                  handleItemChange(
+                                    index,
+                                    "legal_limit_percent",
+                                    selectedMat.legal_limit_percent
+                                      ? parseFloat(
+                                          selectedMat.legal_limit_percent,
+                                        )
+                                      : null,
+                                  );
+                                  handleItemChange(
+                                    index,
+                                    "nutrition_fact",
+                                    selectedMat.nutrition_fact || {},
+                                  );
+
+                                  if (selectedMat.type === "SEMI") {
+                                    const contained =
+                                      await fetchContainedAdditives(
+                                        selectedMat.code,
+                                        materials,
+                                      );
+                                    handleItemChange(
+                                      index,
+                                      "contained_additives",
+                                      contained,
+                                    );
+                                  } else {
+                                    handleItemChange(
+                                      index,
+                                      "contained_additives",
+                                      [],
+                                    );
+                                  }
+                                }}
+                              />
+                            </div>
+
+                            {/* 備註 */}
+                            <div className="flex-1 min-w-[120px] pt-1 relative">
+                              <MessageSquareText
+                                size={13}
+                                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-300"
+                              />
                               <input
                                 type="text"
                                 value={item.remark || ""}
@@ -1521,12 +1511,13 @@ const BOMCreatePage = () => {
                                     e.target.value,
                                   )
                                 }
-                                className="w-full px-3 py-2 border border-slate-200 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none text-sm transition-all shadow-sm"
-                                placeholder="另秤、切碎"
+                                className="w-full h-[40px] pl-8 pr-3 border border-slate-200 rounded-lg focus:border-[#007AFF] focus:ring-2 focus:ring-[#007AFF]/20 outline-none text-[13px] transition-all bg-white focus:bg-white placeholder:text-slate-300"
+                                placeholder="備註..."
                               />
                             </div>
 
-                            <div className="col-span-2 relative">
+                            {/* 用量 */}
+                            <div className="w-[120px] shrink-0 relative pt-1">
                               <input
                                 type="text"
                                 value={formatNum(item.quantity)}
@@ -1537,22 +1528,31 @@ const BOMCreatePage = () => {
                                     e.target.value,
                                   )
                                 }
-                                className={`w-full px-4 py-2 pr-12 border border-slate-200 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none font-mono font-bold text-sm transition-all shadow-sm ${isErrorRow ? "border-red-300 focus:border-red-500 focus:ring-red-500 bg-white" : ""}`}
+                                className={`w-full h-[40px] pl-3 pr-8 border border-slate-200 rounded-lg focus:border-[#007AFF] focus:ring-2 focus:ring-[#007AFF]/20 outline-none font-mono font-bold text-sm text-[#007AFF] bg-blue-50/30 transition-all ${isErrorRow ? "border-red-300 text-red-600 bg-white" : "bg-white"}`}
                                 placeholder="0"
                               />
-                              <span className="absolute right-4 top-2.5 text-[10px] font-black text-slate-400 pointer-events-none uppercase">
+                              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[9px] font-black text-blue-300 uppercase pointer-events-none">
                                 {item.unit}
                               </span>
                             </div>
 
-                            <div className="col-span-2 text-right font-mono font-bold text-sm text-slate-400">
-                              ${formatNum(item.estimated_cost, 2)}
+                            {/* 系統均價 */}
+                            <div className="w-[100px] shrink-0 text-right pt-2">
+                              <span className="font-mono font-bold text-slate-500 text-[13px]">
+                                ${formatNum(refCost, 2)}
+                              </span>
                             </div>
 
-                            <div className="col-span-2 relative">
+                            {/* 自訂成本 */}
+                            <div className="w-[110px] shrink-0 relative pt-0.5">
+                              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs font-bold text-indigo-300">
+                                $
+                              </span>
                               <input
                                 type="text"
-                                value={formatNum(item.set_cost, 2)}
+                                value={
+                                  item.set_cost !== null ? item.set_cost : ""
+                                }
                                 onChange={(e) =>
                                   handleItemChange(
                                     index,
@@ -1560,279 +1560,248 @@ const BOMCreatePage = () => {
                                     e.target.value,
                                   )
                                 }
-                                className={`w-full px-4 py-2 pr-8 text-right border border-indigo-200 rounded-xl focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none font-mono font-bold text-sm text-indigo-700 bg-indigo-50/30 transition-all shadow-sm ${isErrorRow ? "border-red-300 focus:border-red-500 focus:ring-red-500 bg-white" : ""}`}
+                                className="w-full h-[40px] pl-6 pr-2 text-left border border-indigo-200 bg-indigo-50/20 text-indigo-700 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none font-mono font-bold text-sm transition-all placeholder:text-indigo-200 placeholder:font-sans placeholder:text-center"
+                                placeholder="自訂"
                               />
                             </div>
 
-                            <div className="col-span-2 flex justify-end items-center gap-4 pr-8">
-                              <span className="font-mono text-sm font-black text-slate-700">
+                            {/* 小計 */}
+                            <div className="w-[100px] shrink-0 text-right pt-2.5 pr-2 flex flex-col items-end">
+                              <span className="font-mono text-[15px] font-black text-slate-700">
                                 ${subtotal}
                               </span>
+                            </div>
+
+                            {/* Action */}
+                            <div className="w-8 shrink-0 flex justify-end pt-1">
                               <button
                                 type="button"
                                 onClick={() => handleRemoveItem(index)}
-                                className="text-right text-slate-300 hover:bg-red-50 hover:text-red-500 p-2 rounded-lg transition-all opacity-0 group-hover:opacity-100 shrink-0"
+                                className="text-slate-300 hover:text-red-500 hover:bg-red-50 p-1.5 rounded-lg transition-colors"
                               >
                                 <Trash2 size={16} strokeWidth={2.5} />
                               </button>
                             </div>
                           </div>
 
-                          {isExpanded &&
-                            isSemi &&
-                            item.material_id &&
-                            renderNestedRows(
+                          {/* 🌟 2. 獨立的廠商報價情報列 (Sub-row) */}
+                          {renderProviderQuotesSubRow(
+                            refCost,
+                            item.provider_quotes,
+                          )}
+                        </div>
+
+                        {/* 🌟 3. 半成品展開區塊 */}
+                        {isExpanded && isSemi && item.material_id && (
+                          <div className="bg-slate-50/40 border-b border-slate-200 pb-2">
+                            {renderNestedRows(
                               item.material_id,
                               itemQty,
                               1,
                               currentPath,
                             )}
-                        </React.Fragment>
-                      );
-                    })}
-                  </div>
+                          </div>
+                        )}
+                      </React.Fragment>
+                    );
+                  })}
                 </div>
-              )}
-            </div>
-          </div>
-
-          {/* 法定添加物安全試算面板 */}
-          <div className="border-t border-slate-200/60 bg-slate-50/50 p-8 min-h-[220px] flex flex-col gap-6">
-            <h3 className="text-base font-black text-slate-800 flex items-center gap-2">
-              <FlaskConical
-                size={18}
-                className="text-orange-500"
-                strokeWidth={2.5}
-              />
-              法定添加物安全試算面板
-            </h3>
-
-            {additiveCalculations.results.length === 0 ? (
-              <div className="flex-1 flex flex-col items-center justify-center text-slate-400 border-2 border-dashed border-slate-200 rounded-2xl p-8 bg-white/50">
-                <FlaskConical size={32} className="mb-3 opacity-20" />
-                <span className="text-sm font-bold">
-                  目前配方中尚無法定添加物
-                </span>
               </div>
-            ) : (
-              <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
-                {additiveCalculations.results.map((add) => {
-                  const baseQty = parseFloat(formData.base_quantity) || 1;
-                  const maxAllowedQty = baseQty * (add.limit / 100);
+            )}
+          </div>
+        </div>
 
-                  return (
-                    <div
-                      key={add.code}
-                      className={`flex flex-col bg-white rounded-2xl border shadow-sm overflow-hidden transition-all duration-300 ${add.isExceeded ? "border-red-300 ring-4 ring-red-500/10" : "border-slate-200"}`}
-                    >
-                      <div className="px-5 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/80">
-                        <h4 className="font-black text-slate-800 text-base truncate pr-2">
-                          {add.name}
-                        </h4>
-                        <span className="bg-white text-slate-500 text-[10px] uppercase tracking-widest px-3 py-1.5 rounded-lg font-black shrink-0 shadow-sm border border-slate-200">
-                          上限 {formatNum(add.limit)}%
+        {/* 法規面板 (保持原邏輯) */}
+        <div className="border border-slate-200/60 bg-slate-50/50 p-8 rounded-3xl shadow-[0_2px_10px_-4px_rgba(0,0,0,0.05)] min-h-[220px] flex flex-col gap-6">
+          <h3 className="text-base font-black text-slate-800 flex items-center gap-2">
+            <FlaskConical
+              size={18}
+              className="text-orange-500"
+              strokeWidth={2.5}
+            />
+            法定添加物安全試算面板
+          </h3>
+          {additiveCalculations.results.length === 0 ? (
+            <div className="flex-1 flex flex-col items-center justify-center text-slate-400 border-2 border-dashed border-slate-200 rounded-2xl p-8 bg-white/50">
+              <FlaskConical size={32} className="mb-3 opacity-20" />
+              <span className="text-sm font-bold">
+                目前配方中尚無法定添加物
+              </span>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
+              {additiveCalculations.results.map((add) => {
+                const baseQty = parseFloat(formData.base_quantity) || 1;
+                const maxAllowedQty = baseQty * (add.limit / 100);
+                return (
+                  <div
+                    key={add.code}
+                    className={`flex flex-col bg-white rounded-2xl border shadow-sm overflow-hidden transition-all duration-300 ${add.isExceeded ? "border-red-300 ring-4 ring-red-500/10" : "border-slate-200"}`}
+                  >
+                    <div className="px-5 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/80">
+                      <h4 className="font-black text-slate-800 text-base truncate pr-2">
+                        {add.name}
+                      </h4>
+                      <span className="bg-white text-slate-500 text-[10px] uppercase tracking-widest px-3 py-1.5 rounded-lg font-black shrink-0 shadow-sm border border-slate-200">
+                        上限 {formatNum(add.limit)}%
+                      </span>
+                    </div>
+                    <div className="p-5 flex-1 flex flex-col">
+                      <div className="text-[10px] text-slate-400 font-black mb-3 uppercase tracking-widest">
+                        配方貢獻來源
+                      </div>
+                      <div className="space-y-2.5 flex-1">
+                        {add.sources.map((src, i) => (
+                          <div
+                            key={i}
+                            className="flex justify-between items-baseline text-sm"
+                          >
+                            <span className="text-slate-700 truncate pr-4 text-xs font-bold">
+                              <span className="text-slate-400 mr-2 font-medium">
+                                [{src.type === "DIRECT" ? "原料" : "半成品"}]
+                              </span>
+                              {src.name}
+                            </span>
+                            <span className="font-mono text-slate-600 font-bold shrink-0">
+                              {formatNum(src.qty)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="mt-5 pt-3 border-t-[3px] border-slate-800 flex justify-between items-end">
+                        <span className="text-xs font-black text-slate-800">
+                          合計總重 (KG)
+                        </span>
+                        <span className="text-2xl font-mono font-black text-slate-800 leading-none tracking-tight">
+                          {formatNum(add.totalQty)}
                         </span>
                       </div>
-
-                      <div className="p-5 flex-1 flex flex-col">
-                        <div className="text-[10px] text-slate-400 font-black mb-3 uppercase tracking-widest">
-                          配方貢獻來源
-                        </div>
-                        <div className="space-y-2.5 flex-1">
-                          {add.sources.map((src, i) => (
-                            <div
-                              key={i}
-                              className="flex justify-between items-baseline text-sm"
-                            >
-                              <span className="text-slate-700 truncate pr-4 text-xs font-bold">
-                                <span className="text-slate-400 mr-2 font-medium">
-                                  [{src.type === "DIRECT" ? "原料" : "半成品"}]
-                                </span>
-                                {src.name}
-                              </span>
-                              <span className="font-mono text-slate-600 font-bold shrink-0">
-                                {formatNum(src.qty)}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-
-                        <div className="mt-5 pt-3 border-t-[3px] border-slate-800 flex justify-between items-end">
-                          <span className="text-xs font-black text-slate-800">
-                            合計總重 (KG)
+                    </div>
+                    <div className="p-5 border-t border-slate-100 bg-slate-50/80 flex flex-col gap-5">
+                      <div className="flex bg-white rounded-xl border border-slate-200/80 shadow-sm p-1.5">
+                        <div className="flex-1 flex flex-col items-center justify-center py-2.5 border-r border-slate-100">
+                          <span className="text-[9px] font-black text-slate-400 mb-1.5 uppercase tracking-widest">
+                            安全上限 (KG)
                           </span>
-                          <span className="text-2xl font-mono font-black text-slate-800 leading-none tracking-tight">
-                            {formatNum(add.totalQty)}
+                          <span className="font-mono font-black text-slate-700 text-sm">
+                            {formatNum(maxAllowedQty)}
+                          </span>
+                        </div>
+                        <div className="flex-1 flex flex-col items-center justify-center py-2.5">
+                          <span
+                            className={`text-[9px] font-black mb-1.5 uppercase tracking-widest ${add.isExceeded ? "text-red-500" : "text-slate-400"}`}
+                          >
+                            {add.isExceeded ? "已超標量 (KG)" : "還可新增 (KG)"}
+                          </span>
+                          <span
+                            className={`font-mono font-black text-sm ${add.isExceeded ? "text-red-600" : "text-slate-700"}`}
+                          >
+                            {formatNum(Math.abs(maxAllowedQty - add.totalQty))}
                           </span>
                         </div>
                       </div>
-
-                      <div className="p-5 border-t border-slate-100 bg-slate-50/80 flex flex-col gap-5">
-                        <div className="flex bg-white rounded-xl border border-slate-200/80 shadow-sm p-1.5">
-                          <div className="flex-1 flex flex-col items-center justify-center py-2.5 border-r border-slate-100">
-                            <span className="text-[9px] font-black text-slate-400 mb-1.5 uppercase tracking-widest">
-                              安全上限 (KG)
-                            </span>
-                            <span className="font-mono font-black text-slate-700 text-sm">
-                              {formatNum(maxAllowedQty)}
-                            </span>
-                          </div>
-                          <div className="flex-1 flex flex-col items-center justify-center py-2.5">
-                            <span
-                              className={`text-[9px] font-black mb-1.5 uppercase tracking-widest ${add.isExceeded ? "text-red-500" : "text-slate-400"}`}
-                            >
-                              {add.isExceeded
-                                ? "已超標量 (KG)"
-                                : "還可新增 (KG)"}
-                            </span>
-                            <span
-                              className={`font-mono font-black text-sm ${add.isExceeded ? "text-red-600" : "text-slate-700"}`}
-                            >
-                              {formatNum(
-                                Math.abs(maxAllowedQty - add.totalQty),
-                              )}
-                            </span>
-                          </div>
+                      <div className="flex justify-between items-center mt-1">
+                        <div
+                          className={`flex items-center gap-2 font-bold text-sm tracking-wide ${add.isExceeded ? "text-red-500" : "text-emerald-500"}`}
+                        >
+                          {add.isExceeded ? (
+                            <AlertTriangle size={20} strokeWidth={2.5} />
+                          ) : (
+                            <CheckCircle2 size={20} strokeWidth={2.5} />
+                          )}
+                          <span>
+                            {add.isExceeded ? "佔比已超標" : "符合安全"}
+                          </span>
                         </div>
-
-                        <div className="flex justify-between items-center mt-1">
-                          <div
-                            className={`flex items-center gap-2 font-bold text-sm tracking-wide ${add.isExceeded ? "text-red-500" : "text-emerald-500"}`}
-                          >
-                            {add.isExceeded ? (
-                              <AlertTriangle size={20} strokeWidth={2.5} />
-                            ) : (
-                              <CheckCircle2 size={20} strokeWidth={2.5} />
-                            )}
-                            <span>
-                              {add.isExceeded ? "佔比已超標" : "符合法規安全"}
-                            </span>
+                        <div className="text-right flex flex-col justify-center">
+                          <div className="text-[9px] font-black tracking-widest text-slate-400 uppercase mb-1">
+                            目前佔比
                           </div>
-                          <div className="text-right flex flex-col justify-center">
-                            <div className="text-[9px] font-black tracking-widest text-slate-400 uppercase mb-1">
-                              目前佔比
-                            </div>
-                            <div
-                              className={`text-3xl font-black font-mono leading-none tracking-tighter flex items-baseline justify-end ${add.isExceeded ? "text-red-500" : "text-slate-800"}`}
-                            >
-                              {formatNum(add.usagePercent, 2)}
-                              <span className="text-lg ml-1 font-bold opacity-40 text-slate-500">
-                                %
-                              </span>
-                            </div>
+                          <div
+                            className={`text-3xl font-black font-mono leading-none tracking-tighter flex items-baseline justify-end ${add.isExceeded ? "text-red-500" : "text-slate-800"}`}
+                          >
+                            {formatNum(add.usagePercent, 2)}
+                            <span className="text-lg ml-1 font-bold opacity-40 text-slate-500">
+                              %
+                            </span>
                           </div>
                         </div>
                       </div>
                     </div>
-                  );
-                })}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* 底部總計 */}
+        <div className="bg-white px-8 py-6 rounded-3xl border border-slate-200/60 shadow-sm flex flex-col md:flex-row justify-between items-center gap-6">
+          <div className="flex flex-wrap items-center gap-6 md:gap-10">
+            <div>
+              <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mb-1.5">
+                總材料成本
+              </p>
+              <div className="text-slate-800 font-mono font-black text-2xl">
+                ${formatNum(calculations.totalCost, 2)}
               </div>
-            )}
+            </div>
+            <div className="w-px h-10 bg-slate-300 hidden md:block"></div>
+            <div>
+              <p className="text-[#007AFF] text-[10px] font-black uppercase tracking-widest mb-1.5">
+                每 KG 成本 (除 {formData.base_quantity} 基準)
+              </p>
+              <div className="text-[#007AFF] font-mono font-black text-3xl">
+                ${formatNum(calculations.unitCost, 2)}
+              </div>
+            </div>
+            <div className="w-px h-10 bg-slate-300 hidden md:block"></div>
+            <div>
+              <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mb-1.5">
+                用料總重
+              </p>
+              <div className="flex items-baseline gap-2">
+                <div
+                  className={`font-mono font-black text-3xl ${calculations.weightDiff < -0.001 ? "text-red-500" : calculations.weightDiff > 0.001 ? "text-amber-500" : "text-emerald-500"}`}
+                >
+                  {formatNum(calculations.totalWeight, 2)}
+                </div>
+                <span className="text-slate-500 font-bold text-sm">KG</span>
+                <div
+                  className={`font-mono font-bold text-sm px-2.5 py-1 rounded-lg border shadow-sm ml-1 ${calculations.weightDiff < -0.001 ? "bg-red-50 text-red-600 border-red-200" : calculations.weightDiff > 0.001 ? "bg-amber-50 text-amber-600 border-amber-200" : "bg-emerald-50 text-emerald-600 border-emerald-200"}`}
+                >
+                  {calculations.weightDiff > 0.001 ? "多" : "缺"}{" "}
+                  {Math.abs(formatNum(calculations.weightDiff, 2))} KG
+                </div>
+              </div>
+            </div>
           </div>
 
-          <div className="bg-slate-100/50 px-8 py-6 border-t border-slate-200/60 flex flex-col md:flex-row justify-between items-center gap-6">
-            <div className="flex flex-wrap items-center gap-6 md:gap-10">
-              <div>
-                <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mb-1.5">
-                  總材料成本
-                </p>
-                <div className="text-slate-800 font-mono font-black text-2xl">
-                  ${formatNum(calculations.totalCost, 2)}
-                </div>
-              </div>
-
-              <div className="w-px h-10 bg-slate-300 hidden md:block"></div>
-
-              <div>
-                <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mb-1.5">
-                  每 KG 成本 (除 {formData.base_quantity} KG 基準)
-                </p>
-                <div className="text-[#007AFF] font-mono font-black text-3xl">
-                  ${formatNum(calculations.unitCost, 2)}
-                </div>
-              </div>
-
-              <div className="w-px h-10 bg-slate-300 hidden md:block"></div>
-
-              <div>
-                <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mb-1.5">
-                  用料總重
-                </p>
-                <div className="flex items-baseline gap-2">
-                  <div
-                    className={`font-mono font-black text-3xl ${
-                      calculations.weightDiff < -0.001
-                        ? "text-red-500" // 少於基準: 紅燈
-                        : calculations.weightDiff > 0.001
-                          ? "text-amber-500" // 超過基準: 黃燈
-                          : "text-emerald-500" // 剛剛好: 綠燈
-                    }`}
-                  >
-                    {formatNum(calculations.totalWeight, 2)}
-                  </div>
-                  <span className="text-slate-500 font-bold text-sm">KG</span>
-
-                  <div
-                    className={`font-mono font-bold text-sm px-2 py-0.5 rounded-lg border shadow-sm ml-1 ${
-                      calculations.weightDiff < -0.001
-                        ? "bg-red-50 text-red-600 border-red-200"
-                        : calculations.weightDiff > 0.001
-                          ? "bg-amber-50 text-amber-600 border-amber-200"
-                          : "bg-emerald-50 text-emerald-600 border-emerald-200"
-                    }`}
-                  >
-                    {calculations.weightDiff > 0.001 ? "多" : "缺"}
-                    {" " + Math.abs(formatNum(calculations.weightDiff, 2))}
-                    {" KG"}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="w-full md:w-auto flex flex-col sm:flex-row gap-3">
-              <button
-                type="button"
-                onClick={handleExportExcel}
-                className="w-full md:w-auto px-6 py-3.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl shadow-[0_2px_8px_rgba(16,185,129,0.3)] transition-all font-black text-sm flex items-center justify-center gap-2 hover:-translate-y-0.5"
-              >
-                <Download size={18} strokeWidth={2.5} />
-                匯出 EXCEL
-              </button>
-              <button
-                type="submit"
-                disabled={
-                  isSubmitting ||
-                  additiveCalculations.hasLimitError ||
-                  claimsAndWarnings.banned.length > 0
-                }
-                title={
-                  additiveCalculations.hasLimitError
-                    ? "請先修正超標的添加物再行儲存"
-                    : claimsAndWarnings.banned.length > 0
-                      ? "配方含有禁用原料"
-                      : ""
-                }
-                className="w-full md:w-auto px-12 py-3.5 bg-[#007AFF] hover:bg-[#0056b3] text-white rounded-xl shadow-[0_2px_8px_rgba(0,122,255,0.3)] transition-all font-black text-sm flex items-center justify-center gap-2 hover:-translate-y-0.5 disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed disabled:shadow-none disabled:transform-none"
-              >
-                <Save size={18} strokeWidth={2.5} />
-                {isSubmitting ? "儲存中..." : "儲存配方"}
-              </button>
-            </div>
+          <div className="w-full md:w-auto flex flex-col sm:flex-row gap-3">
+            <button
+              type="button"
+              onClick={handleExportExcel}
+              className="w-full md:w-auto px-6 py-3.5 bg-white border border-slate-200 hover:bg-slate-50 hover:border-slate-300 text-slate-700 rounded-xl shadow-sm transition-all font-black text-sm flex items-center justify-center gap-2"
+            >
+              <Download size={18} strokeWidth={2.5} />
+              匯出 EXCEL
+            </button>
+            <button
+              type="submit"
+              disabled={
+                isSubmitting ||
+                additiveCalculations.hasLimitError ||
+                claimsAndWarnings.banned.length > 0
+              }
+              className="w-full md:w-auto px-12 py-3.5 bg-[#007AFF] hover:bg-[#0056b3] text-white rounded-xl shadow-[0_4px_12px_rgba(0,122,255,0.3)] transition-all font-black text-sm flex items-center justify-center gap-2 hover:-translate-y-0.5 disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed disabled:shadow-none disabled:transform-none"
+            >
+              <Save size={18} strokeWidth={2.5} />
+              {isSubmitting ? "儲存中..." : "儲存配方"}
+            </button>
           </div>
         </div>
       </form>
-
-      <CustomDialog
-        isOpen={dialog.isOpen}
-        type={dialog.type}
-        status={dialog.status}
-        title={dialog.title}
-        message={dialog.message}
-        onClose={closeDialog}
-        onConfirm={dialog.onConfirm}
-      />
+      <CustomDialog isOpen={dialog.isOpen} {...dialog} onClose={closeDialog} />
     </div>
   );
-};
-
-export default BOMCreatePage;
+}

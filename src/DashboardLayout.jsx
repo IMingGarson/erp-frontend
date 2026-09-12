@@ -29,6 +29,11 @@ const MENU_GROUPS = [
         label: "物料報價管理",
         icon: Truck,
       },
+      {
+        path: "/impact-analysis",
+        label: "物料成本影響列表",
+        icon: Truck,
+      },
     ],
   },
   {

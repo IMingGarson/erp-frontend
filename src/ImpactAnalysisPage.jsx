@@ -582,9 +582,6 @@ export default function ImpactAnalysisPage() {
             impactData.provider_quotes.length > 0 && (
               <div className="flex flex-col gap-5">
                 <div className="flex items-center gap-2 overflow-x-auto custom-scrollbar pb-2">
-                  <span className="text-[10px] font-black text-slate-400 mr-2 uppercase tracking-widest whitespace-nowrap">
-                    模擬報價來源：
-                  </span>
                   {impactData.provider_quotes.map((quote, idx) => (
                     <button
                       key={quote.provider_id}

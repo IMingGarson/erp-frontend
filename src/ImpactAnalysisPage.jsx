@@ -27,9 +27,9 @@ const formatDisplayNum = (val) => {
 
 const formatDiffCurrency = (val) => {
   const num = parseFloat(val) || 0;
-  if (num > 0) return `+ $ ${num.toFixed(2)}`;
-  if (num < 0) return `- $ ${Math.abs(num).toFixed(2)}`;
-  return `$ 0.00`;
+  if (num > 0) return `+ $${num.toFixed(2)}`;
+  if (num < 0) return `- $${Math.abs(num).toFixed(2)}`;
+  return `$0.00`;
 };
 
 const TYPE_MAP = {
@@ -45,7 +45,7 @@ const TYPE_MAP = {
   PACK: { label: "包材", color: "bg-amber-50 text-amber-700 border-amber-200" },
 };
 
-// 🌟 通用的 Searchable Dropdown 元件 (用於供應商與原料搜尋)
+// 🌟 通用的 Searchable Dropdown 元件
 const SearchableSelect = ({
   value,
   onChange,
@@ -345,13 +345,19 @@ export default function ImpactAnalysisPage() {
   const runImpactAnalysis = async (materialId, sourceItem = null) => {
     setIsAnalyzing(true);
     setImpactData(null);
-    setActiveAnalysisSource(sourceItem); // 紀錄當下是由哪張卡片(哪家廠商)點擊進來的
+    setActiveAnalysisSource(sourceItem);
     try {
       const res = await fetchWithAuth(
         `/api/materials/${materialId}/impact_analysis`,
       );
       if (!res.ok) throw new Error("無法取得影響資料");
       const json = await res.json();
+
+      // 🌟 若是手動搜尋且沒有帶 sourceItem，預設將 activeTabIdx 指向最低價廠商
+      if (!sourceItem && json.data?.provider_quotes?.length > 0) {
+        setActiveTabIdx(0); // API 預設已經依新報價由低到高排好
+      }
+
       setImpactData(json.data || json);
     } catch (error) {
       showAlert("分析失敗", "無法取得此物料的評估資料，請稍後再試。", "error");
@@ -360,7 +366,6 @@ export default function ImpactAnalysisPage() {
     }
   };
 
-  // 🌟 智慧判斷當前要分析的報價：如果有來源，直接抓，否則預設抓最低價
   const currentProviderQuote = useMemo(() => {
     if (
       !impactData ||
@@ -373,11 +378,19 @@ export default function ImpactAnalysisPage() {
       const matchedQuote = impactData.provider_quotes.find(
         (q) => q.provider_name === activeAnalysisSource.provider_name,
       );
-      if (matchedQuote) return matchedQuote;
+      if (matchedQuote) {
+        // 確保畫面上被選中的 Tab 也同步跳轉過去
+        const idx = impactData.provider_quotes.findIndex(
+          (q) => q.provider_name === activeAnalysisSource.provider_name,
+        );
+        if (activeTabIdx !== idx) setActiveTabIdx(idx !== -1 ? idx : 0);
+        return matchedQuote;
+      }
     }
-
-    return impactData.provider_quotes[0];
-  }, [impactData, activeAnalysisSource]);
+    return (
+      impactData.provider_quotes[activeTabIdx] || impactData.provider_quotes[0]
+    );
+  }, [impactData, activeAnalysisSource, activeTabIdx]);
 
   return (
     <div className="p-6 md:p-8 max-w-7xl mx-auto bg-slate-50 min-h-screen font-sans text-slate-900 w-full">
@@ -408,11 +421,10 @@ export default function ImpactAnalysisPage() {
               className="text-rose-500"
               size={20}
               strokeWidth={2.5}
-            />
+            />{" "}
             近期報價異動預警
           </h3>
 
-          {/* 🌟 頂部搜尋化：供應商過濾 Dropdown */}
           <div className="w-full md:w-[280px]">
             <SearchableSelect
               icon={Building}
@@ -421,7 +433,7 @@ export default function ImpactAnalysisPage() {
                 activeAlertProvider === "全部供應商" ? "" : activeAlertProvider
               }
               options={providerOptions}
-              onChange={(val) => setActiveAlertProvider(val)} // 🌟 修復 ReferenceError
+              onChange={(val) => setActiveAlertProvider(val)}
             />
           </div>
         </div>
@@ -447,7 +459,7 @@ export default function ImpactAnalysisPage() {
                     });
                     runImpactAnalysis(item.material_id, item);
                   }}
-                  className={`p-5 rounded-3xl border transition-all cursor-pointer shadow-sm hover:shadow-md ${
+                  className={`p-5 rounded-3xl border transition-all cursor-pointer shadow-sm hover:shadow-md flex flex-col justify-between ${
                     isSelected
                       ? "bg-blue-50/30 border-[#007AFF] ring-2 ring-[#007AFF]/20"
                       : "bg-slate-50/50 border-slate-200 hover:border-[#007AFF]/50"
@@ -475,7 +487,7 @@ export default function ImpactAnalysisPage() {
                     effectiveDate={item.effective_date}
                   />
 
-                  <div className="flex items-center justify-between pt-4 mt-5 border-t border-slate-200 text-xs font-bold">
+                  <div className="flex items-center justify-between pt-4 mt-5 border-t border-slate-200 text-xs font-bold mt-auto">
                     <span className="text-slate-600 flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm">
                       <Package size={14} className="text-[#007AFF]" />
                       波及配方：
@@ -503,13 +515,13 @@ export default function ImpactAnalysisPage() {
               size={40}
               className="text-emerald-400 opacity-50"
               strokeWidth={2}
-            />
+            />{" "}
             目前無近期異動預警
           </div>
         )}
       </div>
 
-      {/* 🌟 區塊 B：手動搜尋 (Searchable Dropdown 升級版) */}
+      {/* 🌟 區塊 B：手動搜尋 */}
       <div className="bg-white rounded-3xl shadow-sm border border-slate-200 p-6 md:p-8 mb-8 relative z-20 flex flex-col md:flex-row items-start md:items-center gap-4 border-l-4 border-l-[#007AFF]">
         <label className="text-base font-black text-slate-800 tracking-wide flex items-center gap-2 shrink-0">
           <Search size={20} className="text-[#007AFF]" strokeWidth={3} />{" "}
@@ -533,6 +545,7 @@ export default function ImpactAnalysisPage() {
                 name: mat.name,
                 code: mat.code,
               });
+              setActiveAnalysisSource(null); // 手動搜尋清除 source
               runImpactAnalysis(mat.id, null);
             }}
             renderItem={(opt) => (
@@ -564,7 +577,36 @@ export default function ImpactAnalysisPage() {
         </div>
       ) : impactData ? (
         <div className="space-y-8 animate-in fade-in duration-300">
-          {/* 如果沒有供應商報價，顯示提示 */}
+          {/* 供應商切換 Tabs (當有多家廠商時) */}
+          {impactData.provider_quotes &&
+            impactData.provider_quotes.length > 0 && (
+              <div className="flex flex-col gap-5">
+                <div className="flex items-center gap-2 overflow-x-auto custom-scrollbar pb-2">
+                  <span className="text-[10px] font-black text-slate-400 mr-2 uppercase tracking-widest whitespace-nowrap">
+                    模擬報價來源：
+                  </span>
+                  {impactData.provider_quotes.map((quote, idx) => (
+                    <button
+                      key={quote.provider_id}
+                      onClick={() => {
+                        setActiveTabIdx(idx);
+                        setActiveAnalysisSource({
+                          provider_name: quote.provider_name,
+                        });
+                      }}
+                      className={`px-4 py-2 rounded-xl font-bold text-sm transition-all whitespace-nowrap border shadow-sm ${
+                        activeTabIdx === idx
+                          ? "bg-slate-800 text-white border-slate-800 shadow-md transform -translate-y-0.5"
+                          : "bg-white text-slate-600 border-slate-200 hover:border-slate-300 hover:bg-slate-50"
+                      }`}
+                    >
+                      {quote.provider_name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
           {!currentProviderQuote && (
             <div className="bg-white rounded-3xl p-10 border border-slate-200 text-center shadow-sm">
               <p className="text-sm font-bold text-slate-600">
@@ -575,8 +617,8 @@ export default function ImpactAnalysisPage() {
 
           {/* 🌟 1. 受影響配方產品 (小學直式算式) */}
           {currentProviderQuote && (
-            <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
-              <div className="bg-slate-50/80 border-b border-slate-200 px-6 py-4 flex items-center gap-2">
+            <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+              <div className="bg-slate-50/80 border-b border-slate-200 px-6 py-4 flex items-center gap-2 shrink-0">
                 <Package
                   size={18}
                   className="text-[#007AFF]"
@@ -597,10 +639,10 @@ export default function ImpactAnalysisPage() {
                 </span>
               </div>
 
-              <div className="p-6 md:p-8 bg-slate-50/30">
+              <div className="p-6 md:p-8 bg-slate-50/30 flex-1">
                 {impactData.affected_products &&
                 impactData.affected_products.length > 0 ? (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 h-full items-stretch">
                     {impactData.affected_products.map((prod) => {
                       const oldContrib =
                         impactData.material_base_cost * prod.accumulated_ratio;
@@ -609,14 +651,13 @@ export default function ImpactAnalysisPage() {
                       const costDiff =
                         currentProviderQuote.price_diff *
                         prod.accumulated_ratio;
-
                       const isUp = costDiff > 0;
                       const isDown = costDiff < 0;
 
                       return (
                         <div
                           key={prod.id}
-                          className="bg-white border border-slate-200 p-5 rounded-[24px] flex flex-col shadow-[0_2px_8px_rgba(0,0,0,0.04)] relative transition-all hover:shadow-md hover:border-slate-300"
+                          className="bg-white border border-slate-200 p-5 rounded-[24px] flex flex-col shadow-[0_2px_8px_rgba(0,0,0,0.04)] relative transition-all hover:shadow-md hover:border-slate-300 h-full"
                         >
                           <button
                             onClick={() =>
@@ -625,10 +666,10 @@ export default function ImpactAnalysisPage() {
                             className="absolute top-5 right-5 px-3 py-1.5 bg-slate-50 text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-100 transition-all duration-200 text-[10px] font-black flex items-center justify-center gap-1.5 shadow-sm whitespace-nowrap"
                             title="另開視窗編輯配方"
                           >
-                            <Edit2 size={12} strokeWidth={2.5} /> 修改配方
+                            <Edit2 size={12} strokeWidth={2.5} /> 編輯配方
                           </button>
 
-                          <div className="flex flex-col gap-1.5 mb-5 pr-24">
+                          <div className="flex flex-col gap-1.5 mb-5 pr-24 shrink-0">
                             <div className="flex items-center gap-2">
                               <span
                                 className={`px-1.5 py-0.5 border text-[9px] font-bold rounded uppercase whitespace-nowrap ${TYPE_MAP[prod.type]?.color || "bg-slate-100 text-slate-500 border-slate-200"}`}
@@ -644,9 +685,9 @@ export default function ImpactAnalysisPage() {
                             </span>
                           </div>
 
-                          {/* 🌟 核心：直式算式引擎 */}
+                          {/* 🌟 核心修復：強制撐開容器並將總計區推到底部 */}
                           {prod.paths && prod.paths.length > 0 && (
-                            <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-4 flex flex-col shadow-inner mt-auto">
+                            <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-4 flex flex-col shadow-inner mt-auto flex-grow justify-between">
                               <div className="w-full flex flex-col font-mono text-sm gap-2">
                                 {/* 貢獻來源拆解 */}
                                 {prod.paths.map((path, i) => {
@@ -669,26 +710,26 @@ export default function ImpactAnalysisPage() {
                                     </div>
                                   );
                                 })}
+                              </div>
 
-                                {/* 原本總額 */}
+                              {/* 底部總計區 (固定在算式卡片的最下方) */}
+                              <div className="flex flex-col font-mono text-sm gap-2 mt-4 pt-2">
                                 <div className="flex justify-between items-center px-2 mt-1">
                                   <span className="text-slate-500 text-[11px] font-sans font-bold">
-                                    歷史均價總貢獻
+                                    原總成本
                                   </span>
                                   <span className="text-slate-700 font-bold">
                                     ${formatDisplayNum(oldContrib)}
                                   </span>
                                 </div>
-
-                                {/* 漲跌額外加上 */}
                                 <div
                                   className={`flex justify-between items-center px-2 ${isUp ? "text-rose-500" : isDown ? "text-emerald-500" : "text-slate-400"}`}
                                 >
                                   <span className="text-[11px] font-sans font-bold flex items-center gap-1">
                                     {isUp
-                                      ? "加: 報價調漲"
+                                      ? "報價調漲"
                                       : isDown
-                                        ? "減: 報價調降"
+                                        ? "報價調降"
                                         : "報價持平"}
                                   </span>
                                   <span className="font-bold flex items-center gap-1">
@@ -696,14 +737,10 @@ export default function ImpactAnalysisPage() {
                                     {formatDisplayNum(Math.abs(costDiff))}
                                   </span>
                                 </div>
-
-                                {/* 加總分隔線 */}
                                 <div className="w-full border-t border-slate-300 mt-1 mb-1"></div>
-
-                                {/* 最終結果 */}
                                 <div className="flex justify-between items-end px-2">
                                   <span className="text-slate-800 text-xs font-sans font-black mb-0.5">
-                                    預估新貢獻成本
+                                    預估成本
                                   </span>
                                   <span
                                     className={`text-[22px] font-black tracking-tight leading-none ${isUp ? "text-rose-600" : isDown ? "text-emerald-600" : "text-slate-800"}`}
@@ -727,7 +764,7 @@ export default function ImpactAnalysisPage() {
             </div>
           )}
 
-          {/* 2. 關聯客戶報價單 (商業決策報表) */}
+          {/* 2. 關聯客戶報價單 */}
           {currentProviderQuote && (
             <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
               <div className="bg-slate-50/80 border-b border-slate-200 px-6 py-4 flex items-center gap-2">
@@ -774,7 +811,6 @@ export default function ImpactAnalysisPage() {
                               </span>
                             </div>
                           </div>
-
                           <div className="flex items-center gap-4">
                             <span className="text-[11px] font-bold text-slate-500 bg-white px-2 py-1 rounded border border-slate-200 shadow-sm">
                               開立日：{quote.date}
@@ -788,43 +824,40 @@ export default function ImpactAnalysisPage() {
                               }
                               className="px-3 py-1.5 bg-white text-[#007AFF] border border-slate-200 rounded-lg hover:bg-blue-50 transition-all text-[10px] font-black flex items-center justify-center gap-1.5 shadow-sm whitespace-nowrap"
                             >
-                              <Edit2 size={12} strokeWidth={2.5} /> 審視報價單
+                              <Edit2 size={12} strokeWidth={2.5} /> 編輯報價單
                             </button>
                           </div>
                         </div>
 
                         <div className="overflow-x-auto">
                           <table className="w-full text-left table-fixed border-collapse">
-                            <thead className="bg-slate-50/30 border-b border-slate-100 text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                            <thead className="bg-slate-50/30 border-b border-slate-100 text-[10px] font-black text-slate-800 uppercase tracking-widest">
                               <tr>
                                 <th className="py-3 px-5 w-28">產品代碼</th>
                                 <th className="py-3 px-5">受影響合約品項</th>
                                 <th className="py-3 px-5 text-center w-28">
                                   報價常數
                                   <br />
-                                  <span className="text-[9px] font-semibold tracking-normal text-slate-300">
-                                    (客戶級別)
-                                  </span>
                                 </th>
                                 <th className="py-3 px-5 text-right w-36 border-l border-slate-100">
-                                  原原料成本貢獻
+                                  原總成本
                                   <br />
-                                  <span className="text-[9px] font-semibold tracking-normal text-slate-300">
+                                  <span className="text-[9px] font-semibold tracking-normal text-slate-500">
                                     (元/KG)
                                   </span>
                                 </th>
                                 <th className="py-3 px-5 text-right w-36">
-                                  新原料成本貢獻
+                                  預估成本
                                   <br />
-                                  <span className="text-[9px] font-semibold tracking-normal text-slate-300">
+                                  <span className="text-[9px] font-semibold tracking-normal text-slate-500">
                                     (元/KG)
                                   </span>
                                 </th>
                                 <th className="py-3 px-5 text-right w-40 bg-slate-50/50">
-                                  理論報價調幅
+                                  成本調幅
                                   <br />
-                                  <span className="text-[9px] font-semibold tracking-normal text-slate-300">
-                                    (建議調漲額)
+                                  <span className="text-[9px] font-semibold tracking-normal text-slate-500">
+                                    (建議報價)
                                   </span>
                                 </th>
                               </tr>

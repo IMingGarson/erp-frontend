@@ -282,7 +282,7 @@ export default function ImpactAnalysisPage() {
   const fetchMaterials = async () => {
     setIsFetchingMaterials(true);
     try {
-      const response = await fetchWithAuth("/api/materials");
+      const response = await fetchWithAuth("/api/materials?lite=true");
       const json = await response.json();
       const rawList = json.data || json || [];
       setMaterials(
@@ -525,7 +525,7 @@ export default function ImpactAnalysisPage() {
       <div className="bg-white rounded-3xl shadow-sm border border-slate-200 p-6 md:p-8 mb-8 relative z-20 flex flex-col md:flex-row items-start md:items-center gap-4 border-l-4 border-l-[#007AFF]">
         <label className="text-base font-black text-slate-800 tracking-wide flex items-center gap-2 shrink-0">
           <Search size={20} className="text-[#007AFF]" strokeWidth={3} />{" "}
-          強制分析特定原料
+          分析特定原料
         </label>
 
         <div className="w-full md:flex-1 max-w-lg">

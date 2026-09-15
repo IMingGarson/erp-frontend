@@ -353,7 +353,8 @@ export default function BOMCreatePage() {
               bom.selected_price_readonly ||
               bom.selected_quote_info?.id ||
               null;
-            let isExpired = false;
+            const isBound = !!boundId;
+            let isExpired = bom.selected_quote_info?.is_expired === true;
             let boundPrice = null;
 
             if (boundId && fullMat?.provider_quotes) {
@@ -362,7 +363,10 @@ export default function BOMCreatePage() {
               );
               if (matchedQuote) {
                 isExpired =
-                  matchedQuote.valid_until && matchedQuote.valid_until < today;
+                  isExpired ||
+                  matchedQuote.is_expired === true ||
+                  (matchedQuote.valid_until &&
+                    matchedQuote.valid_until < today);
                 if (!isExpired) {
                   boundPrice = matchedQuote.price;
                 }
@@ -394,7 +398,7 @@ export default function BOMCreatePage() {
               selected_price_id: boundId,
               selected_quote_info: bom.selected_quote_info || null,
               estimated_cost:
-                boundId && boundPrice !== null && !isExpired
+                isBound && boundPrice !== null && !isExpired
                   ? parseFloat(boundPrice)
                   : fullMat
                     ? fullMat.estimated_cost || 0
@@ -597,7 +601,8 @@ export default function BOMCreatePage() {
           );
           if (matchedQuote) {
             const isQuoteExpired =
-              matchedQuote.valid_until && matchedQuote.valid_until < today;
+              matchedQuote.is_expired ||
+              (matchedQuote.valid_until && matchedQuote.valid_until < today);
             if (!isQuoteExpired) {
               childRefCost = parseFloat(matchedQuote.price);
             }
@@ -664,12 +669,10 @@ export default function BOMCreatePage() {
     let itemRows = [];
     formData.items.forEach((item) => {
       const qty = parseFloat(item.quantity) || 0;
-
       const isExpired = item.selected_quote_info?.is_expired === true;
       const refCost = isExpired
         ? parseFloat(item.base_estimated_cost) || 0
         : parseFloat(item.estimated_cost) || 0;
-
       const hasSetCost =
         item.set_cost !== "" && item.set_cost !== null && !isNaN(item.set_cost);
       const activeCost = hasSetCost ? parseFloat(item.set_cost) : refCost;
@@ -737,7 +740,7 @@ export default function BOMCreatePage() {
     document.body.removeChild(link);
   };
 
-  // 🌟 廠商報價 Sub-row (UI 更新：純文字起迄、移除跳動、唯讀隔離)
+  // 🌟 廠商報價 Sub-row
   const renderProviderQuotesSubRow = (
     baseRefCost,
     providerQuotes,
@@ -775,13 +778,16 @@ export default function BOMCreatePage() {
             const isThisSelected = currentSelectedId === pq.id;
 
             const today = new Date().toISOString().split("T")[0];
-            const isQuoteExpired = pq.valid_until && pq.valid_until < today;
+            const isQuoteExpired =
+              pq.is_expired || (pq.valid_until && pq.valid_until < today);
 
             return (
               <div
                 key={i}
                 onClick={() => {
-                  if (!isReadOnly) {
+                  if (isReadOnly || isQuoteExpired) return;
+
+                  if (itemIndex !== undefined && itemIndex !== null) {
                     if (isThisSelected) {
                       handleItemChange(itemIndex, "selected_price_id", null);
                       const originalCost =
@@ -802,23 +808,29 @@ export default function BOMCreatePage() {
                   }
                 }}
                 className={`flex items-center justify-between gap-4 px-4 py-2 rounded-xl border transition-colors duration-200 w-full ${
-                  isThisSelected
-                    ? "bg-emerald-50/60 border-emerald-400 shadow-sm"
-                    : isReadOnly
-                      ? "bg-slate-50/50 border-slate-200/60"
-                      : "bg-white border-slate-200 hover:border-[#007AFF] hover:bg-blue-50/20 cursor-pointer group/quote"
+                  isQuoteExpired && isThisSelected
+                    ? "bg-amber-50/50 border-amber-300 ring-2 ring-amber-300/40 shadow-sm cursor-not-allowed"
+                    : isQuoteExpired
+                      ? "bg-slate-50 border-slate-200 opacity-60 cursor-not-allowed"
+                      : isThisSelected
+                        ? "bg-emerald-50/60 border-emerald-400 shadow-sm cursor-pointer"
+                        : isReadOnly
+                          ? "bg-slate-50/50 border-slate-200/60"
+                          : "bg-white border-slate-200 hover:border-[#007AFF] hover:bg-blue-50/20 cursor-pointer group/quote"
                 }`}
                 title={
-                  !isReadOnly
-                    ? isThisSelected
-                      ? "點擊解除綁定"
-                      : "點擊將此報價設為系統均價基準"
-                    : ""
+                  isQuoteExpired
+                    ? "此報價已過期"
+                    : !isReadOnly
+                      ? isThisSelected
+                        ? "點擊解除綁定"
+                        : "點擊將此報價設為系統均價基準"
+                      : ""
                 }
               >
                 {/* 1. 廠商名稱 */}
                 <div className="flex-[2] flex items-center gap-1.5 min-w-[120px] truncate relative">
-                  {isThisSelected && (
+                  {isThisSelected && !isQuoteExpired && (
                     <CheckCircle2
                       size={14}
                       className="text-emerald-500 shrink-0"
@@ -834,24 +846,44 @@ export default function BOMCreatePage() {
                     />
                   )}
                   <span
-                    className={`text-xs font-bold truncate ${isThisSelected ? "text-emerald-700" : "text-slate-800"} ${isQuoteExpired ? "line-through decoration-amber-500/50" : ""}`}
+                    className={`text-xs font-bold truncate ${
+                      isQuoteExpired
+                        ? "text-amber-700 line-through decoration-amber-500/50"
+                        : isThisSelected
+                          ? "text-emerald-700"
+                          : "text-slate-800"
+                    }`}
                     title={pq.provider_name}
                   >
                     {pq.provider_name}
                   </span>
+
+                  {isThisSelected && isQuoteExpired && (
+                    <span className="ml-2 text-[10px] font-black text-amber-600 bg-amber-100/80 px-1.5 py-0.5 rounded whitespace-nowrap">
+                      報價過期
+                    </span>
+                  )}
                 </div>
 
-                {/* 2. 起迄日 (UI優化：移除框框，改為純文字) */}
+                {/* 2. 起迄日 */}
                 <div className="flex-[3] flex items-center justify-center gap-2 min-w-[180px]">
                   <div className="flex items-center gap-1.5">
-                    <span className="text-xs text-slate-500 font-bold shrink-0">
+                    <span
+                      className={`text-xs font-bold shrink-0 ${isQuoteExpired ? "text-amber-500/70" : "text-slate-500"}`}
+                    >
                       起
                     </span>
-                    <span className="text-[11px] font-mono font-semibold text-slate-600 whitespace-nowrap">
+                    <span
+                      className={`text-[11px] font-mono font-semibold whitespace-nowrap ${isQuoteExpired ? "text-amber-600/70" : "text-slate-600"}`}
+                    >
                       {pq.effective_date}
                     </span>
                   </div>
-                  <span className="text-slate-300 text-[10px]">-</span>
+                  <span
+                    className={`text-[10px] ${isQuoteExpired ? "text-amber-300" : "text-slate-300"}`}
+                  >
+                    -
+                  </span>
                   <div className="flex items-center gap-1.5">
                     <span
                       className={`text-xs font-bold shrink-0 ${isQuoteExpired ? "text-amber-500" : "text-slate-500"}`}
@@ -868,14 +900,28 @@ export default function BOMCreatePage() {
 
                 {/* 3. 報價 */}
                 <span
-                  className={`flex-[1] text-[13px] font-mono font-black min-w-[70px] text-left ${isThisSelected ? "text-emerald-700" : "text-slate-900"}`}
+                  className={`flex-[1] text-[13px] font-mono font-black min-w-[70px] text-left ${
+                    isQuoteExpired
+                      ? "text-amber-700"
+                      : isThisSelected
+                        ? "text-emerald-700"
+                        : "text-slate-900"
+                  }`}
                 >
                   ${formatNum(pq.price, 2)}
                 </span>
 
                 {/* 4. 漲幅 */}
                 <div
-                  className={`flex-[2] text-right font-mono text-[11px] font-bold min-w-[100px] ${isUp ? "text-rose-500" : isDown ? "text-emerald-500" : "text-slate-400"}`}
+                  className={`flex-[2] text-right font-mono text-[11px] font-bold min-w-[100px] ${
+                    isQuoteExpired
+                      ? "text-amber-500/70"
+                      : isUp
+                        ? "text-rose-500"
+                        : isDown
+                          ? "text-emerald-500"
+                          : "text-slate-400"
+                  }`}
                 >
                   {diff !== 0 ? (
                     <span className="whitespace-nowrap">
@@ -887,8 +933,8 @@ export default function BOMCreatePage() {
                   )}
                 </div>
 
-                {/* 5. 游標 Hover 提示，僅在非唯讀時出現 */}
-                {!isReadOnly && !isThisSelected && (
+                {/* 5. 游標 Hover 提示，僅在非唯讀且未過期時出現 */}
+                {!isReadOnly && !isThisSelected && !isQuoteExpired && (
                   <div className="w-8 shrink-0 flex justify-end opacity-0 group-hover/quote:opacity-100 transition-opacity">
                     <div className="text-[#007AFF] p-1.5">
                       <MousePointerClick size={14} />
@@ -914,7 +960,6 @@ export default function BOMCreatePage() {
       let childRefCost = parseFloat(childMat.estimated_cost) || 0;
       const today = new Date().toISOString().split("T")[0];
 
-      // 🌟 讀取半成品當初儲存的報價 ID
       const boundId = bom.selected_price_readonly || null;
       if (boundId && childMat.provider_quotes) {
         const matchedQuote = childMat.provider_quotes.find(
@@ -922,7 +967,8 @@ export default function BOMCreatePage() {
         );
         if (matchedQuote) {
           const isQuoteExpired =
-            matchedQuote.valid_until && matchedQuote.valid_until < today;
+            matchedQuote.is_expired ||
+            (matchedQuote.valid_until && matchedQuote.valid_until < today);
           if (!isQuoteExpired) {
             childRefCost = parseFloat(matchedQuote.price);
           }
@@ -936,12 +982,11 @@ export default function BOMCreatePage() {
         parentQty,
       );
 
-      const activeCost =
+      const hasSetCost =
         bom.set_cost !== null &&
         bom.set_cost !== undefined &&
-        bom.set_cost !== ""
-          ? parseFloat(bom.set_cost)
-          : childRefCost;
+        bom.set_cost !== "";
+      const activeCost = hasSetCost ? parseFloat(bom.set_cost) : childRefCost;
 
       const subtotal = precise.mul(actualQty, activeCost);
       return {
@@ -953,7 +998,8 @@ export default function BOMCreatePage() {
         childReqQty,
         actualQty,
         subtotal,
-        boundId, // 🌟 傳入下層做 Highlight
+        boundId,
+        hasSetCost, // 🌟 傳入 UI 供判斷
       };
     });
 
@@ -1040,7 +1086,17 @@ export default function BOMCreatePage() {
                 </span>
               </div>
 
-              <div className="w-[110px] shrink-0"></div>
+              {/* 🌟 修改此處：顯示唯讀的 Set Cost 標籤 */}
+              <div className="w-[110px] shrink-0 flex justify-center">
+                {item.hasSetCost ? (
+                  <span className="font-mono text-[13px] font-bold text-indigo-600 bg-indigo-50 px-2.5 py-0.5 rounded-md border border-indigo-100">
+                    ${formatNum(item.set_cost, 2)}
+                  </span>
+                ) : (
+                  <span className="text-slate-300">-</span>
+                )}
+              </div>
+
               <div className="w-[100px] shrink-0 text-right pr-2">
                 <span className="font-mono text-sm font-black text-slate-600">
                   ${formatNum(item.subtotal, 2)}
@@ -1057,7 +1113,7 @@ export default function BOMCreatePage() {
                     item.childMat.provider_quotes,
                     undefined,
                     true,
-                    item.boundId, // 🌟 唯讀層，帶入當初的綁定 ID 顯示綠色高亮
+                    item.boundId, // 🌟 傳入下層做 Highlight
                   )}
                 </div>
               )}
@@ -1226,7 +1282,19 @@ export default function BOMCreatePage() {
     formData.items.forEach((item) => {
       const itemQty = parseFloat(item.quantity) || 0;
 
-      const isExpired = item.selected_quote_info?.is_expired === true;
+      const today = new Date().toISOString().split("T")[0];
+      let isExpired = false;
+      if (item.selected_price_id && item.provider_quotes) {
+        const matchedQuote = item.provider_quotes.find(
+          (q) => q.id === item.selected_price_id,
+        );
+        if (matchedQuote) {
+          isExpired =
+            matchedQuote.is_expired ||
+            (matchedQuote.valid_until && matchedQuote.valid_until < today);
+        }
+      }
+
       const refCost = isExpired
         ? parseFloat(item.base_estimated_cost) || 0
         : parseFloat(item.estimated_cost) || 0;
@@ -1457,8 +1525,8 @@ export default function BOMCreatePage() {
         </div>
 
         {/* 🌟 核心：高密度、全橫排對齊資料列 (Data Grid) */}
-        <div className="bg-white rounded-3xl border border-slate-200 shadow-sm flex flex-col w-full">
-          <div className="px-6 py-4 md:px-6 md:py-5 border-b border-slate-100 flex flex-col md:flex-row justify-between items-start md:items-center bg-slate-50/50 gap-4 rounded-t-3xl">
+        <div className="bg-white rounded-3xl border border-slate-200 shadow-sm flex flex-col w-full overflow-hidden">
+          <div className="px-6 py-4 md:px-6 md:py-5 border-b border-slate-100 flex flex-col md:flex-row justify-between items-start md:items-center bg-slate-50/50 gap-4">
             <div className="flex items-center gap-3">
               <h3 className="text-base font-black text-slate-800">
                 2. 配方用料明細
@@ -1815,7 +1883,7 @@ export default function BOMCreatePage() {
                               </span>
                             </div>
 
-                            {/* 🌟 系統均價 (若過期則提示) */}
+                            {/* 🌟 系統均價 (顯示過期警告) */}
                             <div className="w-[100px] shrink-0 text-right pt-2 relative group/price">
                               <span
                                 className={`font-mono font-bold text-[13px] transition-colors ${item.selected_price_id && !isExpired ? "text-emerald-600" : "text-slate-500"}`}

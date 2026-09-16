@@ -10,7 +10,7 @@ const formatNum = (num, type) => {
   return parseFloat(Number(num).toFixed(5)).toString();
 };
 
-const ProductionOrderEditPage = () => {
+export default function ProductionOrderEditPage() {
   const { production_order_id } = useParams();
   const navigate = useNavigate();
 
@@ -41,6 +41,27 @@ const ProductionOrderEditPage = () => {
       onConfirm: null,
     });
 
+  const getUsedBatches = (mat) => {
+    let usedBatches = (mat.batches || []).filter((b) => {
+      const usedVal = parseFloat(b.used);
+      return !isNaN(usedVal) && usedVal > 0;
+    });
+
+    if (
+      usedBatches.length === 0 &&
+      ["SEMI", "CHILD_PRODUCT", "PRODUCT"].includes(mat.type)
+    ) {
+      usedBatches = [
+        {
+          id: mat.code,
+          batch_number: mat.code,
+          used: mat.requiredQty || mat.quantity || "0",
+        },
+      ];
+    }
+    return usedBatches;
+  };
+
   useEffect(() => {
     fetchOrderDetails();
   }, [production_order_id]);
@@ -56,18 +77,17 @@ const ProductionOrderEditPage = () => {
 
       const orderData = json.data || json;
       setMainOrder(orderData);
-      setChildrenOrders(orderData.children_orders || []);
+
+      // 🌟 編輯頁不需要樹狀，我們直接把所有階層的子單攤平顯示
+      const allChildren = orderData.children_orders || [];
+      setChildrenOrders(allChildren);
 
       const initialForm = {};
       const processOrderMaterials = (order) => {
         if (!order.materials_info) return;
         order.materials_info.forEach((mat) => {
           if (mat.type === "CHILD_PRODUCT") return;
-
-          const usedBatches = (mat.batches || []).filter((b) => {
-            const usedVal = parseFloat(b.used);
-            return !isNaN(usedVal) && usedVal > 0;
-          });
+          const usedBatches = getUsedBatches(mat);
 
           usedBatches.forEach((b) => {
             const key = `${order.id}_${mat.code}_${b.id}`;
@@ -85,7 +105,7 @@ const ProductionOrderEditPage = () => {
       };
 
       processOrderMaterials(orderData);
-      (orderData.children_orders || []).forEach(processOrderMaterials);
+      allChildren.forEach(processOrderMaterials);
       setEditForm(initialForm);
     } catch (err) {
       showAlert("錯誤", err.message, "error");
@@ -108,7 +128,7 @@ const ProductionOrderEditPage = () => {
       type: "confirm",
       status: "warning",
       title: "確認儲存",
-      message: "確定要更新此生產單與關聯子單的批號耗損及用量細節嗎？",
+      message: "確定要更新此生產單與所有關聯子單的批號細節嗎？",
       onConfirm: executeUpdate,
     });
   };
@@ -121,7 +141,8 @@ const ProductionOrderEditPage = () => {
       return order.materials_info.map((mat) => {
         if (mat.type === "CHILD_PRODUCT") return mat;
 
-        const updatedBatches = mat.batches?.map((b) => {
+        const usedBatches = getUsedBatches(mat);
+        const updatedBatches = usedBatches.map((b) => {
           const key = `${order.id}_${mat.code}_${b.id}`;
           const formData = editForm[key];
 
@@ -147,11 +168,13 @@ const ProductionOrderEditPage = () => {
     const extractAdjustmentBatches = (materials) => {
       const batches = [];
       for (const row of materials) {
+        if (row.type === "CHILD_PRODUCT") continue;
         for (const bat of row.batches) {
           if (
             bat.batch_number &&
             bat?.adjustment_type?.length &&
-            bat?.adjustment_qty > 0
+            bat?.adjustment_qty > 0 &&
+            bat.adjustment_type !== "NONE"
           ) {
             batches.push({
               batch_number: bat.batch_number,
@@ -173,8 +196,7 @@ const ProductionOrderEditPage = () => {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ materials_info: updatedMainMaterials }),
         }).then((res) => {
-          if (!res.ok)
-            throw new Error(`母單 [${mainOrder.order_number}] 儲存失敗`);
+          if (!res.ok) throw new Error(`主單儲存失敗`);
         }),
       );
 
@@ -185,11 +207,6 @@ const ProductionOrderEditPage = () => {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(mainBatches),
-          }).then((res) => {
-            if (!res.ok)
-              throw new Error(
-                `母單 [${mainOrder.order_number}] 批號庫存調整失敗`,
-              );
           }),
         );
       }
@@ -203,8 +220,7 @@ const ProductionOrderEditPage = () => {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ materials_info: updatedChildMaterials }),
           }).then((res) => {
-            if (!res.ok)
-              throw new Error(`子單 [${child.order_number}] 儲存失敗`);
+            if (!res.ok) throw new Error(`子單 ${child.order_number} 儲存失敗`);
           }),
         );
 
@@ -215,17 +231,12 @@ const ProductionOrderEditPage = () => {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify(childBatches),
-            }).then((res) => {
-              if (!res.ok)
-                throw new Error(
-                  `子單 [${child.order_number}] 批號庫存調整失敗`,
-                );
             }),
           );
         }
-
-        await Promise.all(promises);
       }
+
+      await Promise.all(promises);
 
       setDialog({
         isOpen: true,
@@ -242,233 +253,244 @@ const ProductionOrderEditPage = () => {
     }
   };
 
+  // 🌟 移除 depth，全部平坦化顯示
   const renderEditableTable = (order, labelTitle, isMain = false) => {
     const unitLabel = order.product_unit || "kg";
 
     return (
-      <div
-        key={order.id}
-        className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden mb-8 w-full"
-      >
-        <div className="p-4 bg-slate-100 border-b border-slate-200">
-          <h3 className="font-bold text-slate-800 text-base flex items-center gap-2">
-            <span
-              className={`w-2.5 h-2.5 rounded-full ${isMain ? "bg-blue-600" : "bg-indigo-500"}`}
-            ></span>
-            {labelTitle}：{order.order_number} {order.product_name}
-          </h3>
-        </div>
+      <div key={order.id} className="w-full mb-8">
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden w-full">
+          <div className="p-4 bg-slate-100 border-b border-slate-200">
+            <h3 className="font-bold text-slate-800 text-base flex items-center gap-2">
+              <span
+                className={`w-2.5 h-2.5 rounded-full ${isMain ? "bg-blue-600" : "bg-indigo-500"}`}
+              ></span>
+              {labelTitle}：{order.order_number}{" "}
+              {order.product_profile?.name || order.product_name}
+            </h3>
+          </div>
 
-        <div className="overflow-x-auto w-full">
-          <table className="w-full text-left border-collapse table-fixed text-xs">
-            <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
-              <tr>
-                <th className="p-3 text-left w-[22%]">原料編號/名稱</th>
-                <th className="p-3 text-center w-[12%]">原料批號</th>
-                <th className="p-3 text-right w-[8%]">投入包數</th>
-                <th className="p-3 text-right w-[8%]">空袋數量</th>
-                <th className="p-3 text-right w-[11%]">
-                  配方用量({unitLabel})
-                </th>
-                <th className="p-3 text-right w-[10%]">耗損量({unitLabel})</th>
-                <th className="p-3 text-right w-[10%]">
-                  實際用量({unitLabel})
-                </th>
-                <th className="p-3 text-center w-[9%]">盤盈/盤虧</th>
-                <th className="p-3 text-right w-[11%]">
-                  盈虧數量({unitLabel})
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {order.materials_info?.flatMap((mat) => {
-                if (mat.type === "CHILD_PRODUCT" && isMain) {
-                  return null;
-                }
-                const usedBatches = (mat.batches || []).filter((b) => {
-                  const usedVal = parseFloat(b.used);
-                  return !isNaN(usedVal) && usedVal > 0;
-                });
+          <div className="overflow-x-auto w-full">
+            <table className="w-full text-left border-collapse table-fixed text-xs">
+              <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
+                <tr>
+                  <th className="p-3 text-left w-[22%]">原料編號/名稱</th>
+                  <th className="p-3 text-center w-[12%]">原料批號</th>
+                  <th className="p-3 text-right w-[8%]">投入包數</th>
+                  <th className="p-3 text-right w-[8%]">空袋數量</th>
+                  <th className="p-3 text-right w-[11%]">
+                    配方用量({unitLabel})
+                  </th>
+                  <th className="p-3 text-right w-[10%]">
+                    耗損量({unitLabel})
+                  </th>
+                  <th className="p-3 text-right w-[10%]">
+                    實際用量({unitLabel})
+                  </th>
+                  <th className="p-3 text-center w-[9%]">盤盈/盤虧</th>
+                  <th className="p-3 text-right w-[11%]">
+                    盈虧數量({unitLabel})
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {order.materials_info?.flatMap((mat) => {
+                  if (mat.type === "CHILD_PRODUCT") return null;
 
-                if (usedBatches.length === 0) {
-                  return (
-                    <tr key={mat.code} className="text-slate-400 italic">
-                      <td className="p-3 font-medium text-slate-700 truncate">
-                        {mat.materialName}
-                      </td>
-                      <td
-                        className="p-3 text-center text-red-500 font-bold"
-                        colSpan="8"
-                      >
-                        無批號投入紀錄（未指派）
-                      </td>
-                    </tr>
-                  );
-                }
+                  const usedBatches = getUsedBatches(mat);
 
-                return usedBatches.map((b, idx) => {
-                  const key = `${order.id}_${mat.code}_${b.id}`;
-                  const rowData = editForm[key] || {};
-                  return (
-                    <tr
-                      key={`${mat.code}_${b.id}`}
-                      className="hover:bg-slate-50/80 transition-colors h-12"
-                    >
-                      {idx === 0 ? (
-                        <td
-                          className="p-3 font-medium text-slate-800 border-r border-slate-100 align-middle"
-                          rowSpan={usedBatches.length}
-                        >
-                          <div className="font-mono text-[10px] text-slate-400">
-                            {mat.code}
-                          </div>
-                          <div className="text-slate-700 font-bold truncate">
-                            {mat.materialName}
-                          </div>
+                  if (usedBatches.length === 0) {
+                    return (
+                      <tr key={mat.code} className="text-slate-400 italic">
+                        <td className="p-3 font-medium text-slate-700 truncate">
+                          {mat.materialName}
+                          {mat.remark && mat.remark.length > 0 && (
+                            <span className="ml-1.5 px-2 font-mono text-[12px] bg-slate-100 rounded-md border border-slate-200 text-slate-500">
+                              {mat.remark}
+                            </span>
+                          )}
                         </td>
-                      ) : null}
-
-                      <td className="p-3 text-center font-mono font-bold text-blue-700 bg-blue-50/10 align-middle">
-                        {b.batch_number}
-                      </td>
-
-                      <td className="p-2 align-middle">
-                        <input
-                          type="number"
-                          value={rowData.input_bags || ""}
-                          onChange={(e) =>
-                            handleInputChange(
-                              order.id,
-                              mat.code,
-                              b.id,
-                              "input_bags",
-                              e.target.value,
-                            )
-                          }
-                          className="w-full px-2 py-1 border border-slate-300 rounded text-right focus:ring-1 focus:ring-blue-500 focus:outline-none"
-                          placeholder="0"
-                        />
-                      </td>
-
-                      <td className="p-2 align-middle">
-                        <input
-                          type="number"
-                          value={rowData.empty_bags || ""}
-                          onChange={(e) =>
-                            handleInputChange(
-                              order.id,
-                              mat.code,
-                              b.id,
-                              "empty_bags",
-                              e.target.value,
-                            )
-                          }
-                          className="w-full px-2 py-1 border border-slate-300 rounded text-right focus:ring-1 focus:ring-blue-500 focus:outline-none"
-                          placeholder="0"
-                        />
-                      </td>
-
-                      <td className="p-3 text-right font-mono font-bold text-slate-600 align-middle pr-4">
-                        {formatNum(b.used, "RAW")}
-                      </td>
-
-                      <td className="p-2 align-middle">
-                        <input
-                          type="number"
-                          step="0.0001"
-                          value={rowData.loss_qty || ""}
-                          onChange={(e) =>
-                            handleInputChange(
-                              order.id,
-                              mat.code,
-                              b.id,
-                              "loss_qty",
-                              e.target.value,
-                            )
-                          }
-                          className="w-full px-2 py-1 border border-slate-300 rounded text-right font-mono text-amber-700 focus:ring-1 focus:ring-amber-500 focus:outline-none"
-                          placeholder="0.0"
-                        />
-                      </td>
-
-                      <td className="p-2 align-middle">
-                        <input
-                          type="number"
-                          step="0.0001"
-                          value={rowData.actual_used}
-                          onChange={(e) =>
-                            handleInputChange(
-                              order.id,
-                              mat.code,
-                              b.id,
-                              "actual_used",
-                              e.target.value,
-                            )
-                          }
-                          className="w-full px-2 py-1 border border-blue-300 bg-blue-50/20 rounded text-right font-mono font-bold text-blue-800 focus:ring-1 focus:ring-blue-500 focus:outline-none"
-                          placeholder="0.00"
-                        />
-                      </td>
-
-                      <td className="p-2 align-middle">
-                        <select
-                          value={rowData.adjustment_type || "NONE"}
-                          onChange={(e) =>
-                            handleInputChange(
-                              order.id,
-                              mat.code,
-                              b.id,
-                              "adjustment_type",
-                              e.target.value,
-                            )
-                          }
-                          className={`w-full px-1 py-1 border rounded text-xs font-bold focus:outline-none text-center ${
-                            rowData.adjustment_type === "PROFIT"
-                              ? "border-emerald-300 text-emerald-700 bg-emerald-50/40"
-                              : rowData.adjustment_type === "LOSS"
-                                ? "border-red-300 text-red-700 bg-red-50/40"
-                                : "border-slate-300 text-slate-500"
-                          }`}
+                        <td
+                          className="p-3 text-center text-red-500 font-bold"
+                          colSpan="8"
                         >
-                          <option value="NONE">無調整</option>
-                          <option value="PROFIT">盤盈</option>
-                          <option value="LOSS">盤虧</option>
-                        </select>
-                      </td>
+                          無批號投入紀錄（未指派）
+                        </td>
+                      </tr>
+                    );
+                  }
 
-                      <td className="p-2 align-middle">
-                        <input
-                          type="number"
-                          step="0.0001"
-                          disabled={rowData.adjustment_type === "NONE"}
-                          value={
-                            rowData.adjustment_type === "NONE"
-                              ? "0"
-                              : rowData.adjustment_qty || ""
-                          }
-                          onChange={(e) =>
-                            handleInputChange(
-                              order.id,
-                              mat.code,
-                              b.id,
-                              "adjustment_qty",
-                              e.target.value,
-                            )
-                          }
-                          className={`w-full px-2 py-1 border rounded text-right font-mono focus:outline-none ${
-                            rowData.adjustment_type === "NONE"
-                              ? "bg-slate-100 text-slate-400 border-slate-200"
-                              : "border-slate-300 text-slate-800"
-                          }`}
-                          placeholder="0.0"
-                        />
-                      </td>
-                    </tr>
-                  );
-                });
-              })}
-            </tbody>
-          </table>
+                  return usedBatches.map((b, idx) => {
+                    const key = `${order.id}_${mat.code}_${b.id}`;
+                    const rowData = editForm[key] || {};
+                    return (
+                      <tr
+                        key={`${mat.code}_${b.id}`}
+                        className="hover:bg-slate-50/80 transition-colors h-12"
+                      >
+                        {idx === 0 ? (
+                          <td
+                            className="p-3 font-medium text-slate-800 border-r border-slate-100 align-middle"
+                            rowSpan={usedBatches.length}
+                          >
+                            <div className="font-mono text-[10px] text-slate-400">
+                              {mat.code}
+                            </div>
+                            <div className="text-slate-700 font-bold truncate">
+                              {mat.materialName}
+                              {mat.remark && mat.remark.length > 0 && (
+                                <span className="ml-1.5 px-2 py-0.5 font-mono text-[12px] bg-slate-100 rounded-md border border-slate-200 text-slate-500">
+                                  {mat.remark}
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                        ) : null}
+
+                        <td
+                          className={`p-3 text-center font-mono font-bold align-middle ${mat.type === "SEMI" || mat.type === "CHILD_PRODUCT" ? "text-purple-700 bg-purple-50/20" : "text-blue-700 bg-blue-50/10"}`}
+                        >
+                          {b.batch_number}
+                        </td>
+
+                        <td className="p-2 align-middle">
+                          <input
+                            type="number"
+                            value={rowData.input_bags || ""}
+                            onChange={(e) =>
+                              handleInputChange(
+                                order.id,
+                                mat.code,
+                                b.id,
+                                "input_bags",
+                                e.target.value,
+                              )
+                            }
+                            className="w-full px-2 py-1 border border-slate-300 rounded text-right focus:ring-1 focus:ring-blue-500 focus:outline-none"
+                            placeholder="0"
+                          />
+                        </td>
+
+                        <td className="p-2 align-middle">
+                          <input
+                            type="number"
+                            value={rowData.empty_bags || ""}
+                            onChange={(e) =>
+                              handleInputChange(
+                                order.id,
+                                mat.code,
+                                b.id,
+                                "empty_bags",
+                                e.target.value,
+                              )
+                            }
+                            className="w-full px-2 py-1 border border-slate-300 rounded text-right focus:ring-1 focus:ring-blue-500 focus:outline-none"
+                            placeholder="0"
+                          />
+                        </td>
+
+                        <td className="p-3 text-right font-mono font-bold text-slate-600 align-middle pr-4">
+                          {formatNum(b.used, mat.type)}
+                        </td>
+
+                        <td className="p-2 align-middle">
+                          <input
+                            type="number"
+                            step="0.0001"
+                            value={rowData.loss_qty || ""}
+                            onChange={(e) =>
+                              handleInputChange(
+                                order.id,
+                                mat.code,
+                                b.id,
+                                "loss_qty",
+                                e.target.value,
+                              )
+                            }
+                            className="w-full px-2 py-1 border border-slate-300 rounded text-right font-mono text-amber-700 focus:ring-1 focus:ring-amber-500 focus:outline-none"
+                            placeholder="0.0"
+                          />
+                        </td>
+
+                        <td className="p-2 align-middle">
+                          <input
+                            type="number"
+                            step="0.0001"
+                            value={rowData.actual_used}
+                            onChange={(e) =>
+                              handleInputChange(
+                                order.id,
+                                mat.code,
+                                b.id,
+                                "actual_used",
+                                e.target.value,
+                              )
+                            }
+                            className="w-full px-2 py-1 border border-blue-300 bg-blue-50/20 rounded text-right font-mono font-bold text-blue-800 focus:ring-1 focus:ring-blue-500 focus:outline-none"
+                            placeholder="0.00"
+                          />
+                        </td>
+
+                        <td className="p-2 align-middle">
+                          <select
+                            value={rowData.adjustment_type || "NONE"}
+                            onChange={(e) =>
+                              handleInputChange(
+                                order.id,
+                                mat.code,
+                                b.id,
+                                "adjustment_type",
+                                e.target.value,
+                              )
+                            }
+                            className={`w-full px-1 py-1 border rounded text-xs font-bold focus:outline-none text-center ${
+                              rowData.adjustment_type === "PROFIT"
+                                ? "border-emerald-300 text-emerald-700 bg-emerald-50/40"
+                                : rowData.adjustment_type === "LOSS"
+                                  ? "border-red-300 text-red-700 bg-red-50/40"
+                                  : "border-slate-300 text-slate-500"
+                            }`}
+                          >
+                            <option value="NONE">無調整</option>
+                            <option value="PROFIT">盤盈</option>
+                            <option value="LOSS">盤虧</option>
+                          </select>
+                        </td>
+
+                        <td className="p-2 align-middle">
+                          <input
+                            type="number"
+                            step="0.0001"
+                            disabled={rowData.adjustment_type === "NONE"}
+                            value={
+                              rowData.adjustment_type === "NONE"
+                                ? "0"
+                                : rowData.adjustment_qty || ""
+                            }
+                            onChange={(e) =>
+                              handleInputChange(
+                                order.id,
+                                mat.code,
+                                b.id,
+                                "adjustment_qty",
+                                e.target.value,
+                              )
+                            }
+                            className={`w-full px-2 py-1 border rounded text-right font-mono focus:outline-none ${
+                              rowData.adjustment_type === "NONE"
+                                ? "bg-slate-100 text-slate-400 border-slate-200"
+                                : "border-slate-300 text-slate-800"
+                            }`}
+                            placeholder="0.0"
+                          />
+                        </td>
+                      </tr>
+                    );
+                  });
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     );
@@ -514,11 +536,14 @@ const ProductionOrderEditPage = () => {
           儲存
         </button>
       </div>
+
+      {/* 🌟 不再需要遞迴深度，全部攤平 */}
       {mainOrder && renderEditableTable(mainOrder, "【主母單】", true)}
+
       {childrenOrders.length > 0 && (
-        <div className="mt-8 border-t-2 border-dashed border-slate-300 pt-6 w-full">
-          <div className="text-center mb-4">
-            <span className="bg-slate-200 text-slate-600 px-6 py-1 rounded-full text-xs font-black tracking-widest shadow-sm">
+        <div className="mt-8 border-t-[3px] border-slate-300 pt-8 w-full">
+          <div className="text-center mb-6">
+            <span className="bg-slate-200 text-slate-600 px-6 py-1.5 rounded-full text-xs font-black tracking-widest shadow-sm">
               ▼ 關聯子生產單物料細節回填 ▼
             </span>
           </div>
@@ -539,6 +564,4 @@ const ProductionOrderEditPage = () => {
       />
     </div>
   );
-};
-
-export default ProductionOrderEditPage;
+}

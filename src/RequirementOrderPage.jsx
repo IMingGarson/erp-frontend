@@ -13,11 +13,9 @@ import {
   ChevronDown,
   FlaskConical,
   AlertTriangle,
-  Info,
-  CheckCircle2,
+  Check,
   Database,
   Package,
-  Check,
 } from "lucide-react";
 import { useAuthStore } from "./store/authStore";
 
@@ -491,10 +489,12 @@ const BatchRow = ({
 };
 
 // ==========================================
-// 庫存分配列表 Component
+// 🌟 核心：支援無限遞迴展開的 庫存分配列表 Component
 // ==========================================
 const MaterialAllocationList = ({
   itemId,
+  mrpId,
+  mrpPlans = [],
   readyOnly = false,
   allocations,
   materials,
@@ -502,6 +502,12 @@ const MaterialAllocationList = ({
   expandedMaterials,
   toggleMaterialExpanded,
   handleBatchUsageSave,
+  handlePreviewOrder,
+  handlePrintOrder,
+  handleConvertToProduction,
+  handleDeleteDraft,
+  isSubmitting,
+  mrpAdditiveErrors = {},
 }) => {
   const itemAlloc = allocations[itemId];
   if (!itemAlloc)
@@ -561,6 +567,17 @@ const MaterialAllocationList = ({
           }
 
           const isSemi = mat.type?.toUpperCase() === "SEMI";
+
+          // 🌟 判斷此半成品是否有對應的子單據可供展開
+          const childPlan = isSemi
+            ? mrpPlans.find(
+                (p) =>
+                  p.parent_id === mrpId &&
+                  String(p.product_id) === String(matId),
+              )
+            : null;
+          const canExpand = !isSemi || (isSemi && childPlan);
+
           const isUnder = !isSemi && totalAllocated < mat.requiredQty - 0.0001;
           const isOver = totalAllocated > mat.maxQty + 0.0001;
           const expandedKey = `${itemId}-${matId}`;
@@ -591,14 +608,14 @@ const MaterialAllocationList = ({
               className={`border rounded-2xl overflow-hidden transition-all shadow-sm ${borderColor}`}
             >
               <div
-                className={`p-5 flex flex-col md:flex-row justify-between items-start md:items-center ${!isSemi ? "cursor-pointer hover:bg-slate-50/80" : ""} transition-colors ${bgColor}`}
+                className={`p-5 flex flex-col md:flex-row justify-between items-start md:items-center ${canExpand ? "cursor-pointer hover:bg-slate-50/80" : ""} transition-colors ${bgColor}`}
                 onClick={() => {
-                  if (!isSemi) toggleMaterialExpanded(expandedKey);
+                  if (canExpand) toggleMaterialExpanded(expandedKey);
                 }}
               >
                 <div className="flex flex-wrap items-center gap-3 flex-1 min-w-0">
                   <span className="text-slate-400 text-base w-5 flex-shrink-0 font-medium">
-                    {!isSemi ? (isExpanded ? "▼" : "▶") : ""}
+                    {canExpand ? (isExpanded ? "▼" : "▶") : ""}
                   </span>
                   <TypeTag type={mat.type} />
                   {isAdditive && (
@@ -609,6 +626,11 @@ const MaterialAllocationList = ({
                   <span className="font-semibold text-slate-800 truncate text-base">
                     {mat.materialName}
                   </span>
+                  {mat.remark && mat.remark.length > 0 && (
+                    <span className="text-sm text-slate-500 font-medium whitespace-nowrap ml-1 bg-white border border-slate-200 px-2 py-0.5 rounded-lg shadow-sm">
+                      {mat.remark}
+                    </span>
+                  )}
                 </div>
 
                 <div className="flex flex-wrap items-center justify-end gap-3 text-sm w-full md:w-auto mt-3 md:mt-0">
@@ -643,6 +665,7 @@ const MaterialAllocationList = ({
                 </div>
               </div>
 
+              {/* 原物料的批號展開 */}
               {isExpanded && !isSemi && (
                 <div className="bg-slate-50/50 p-6 border-t border-slate-100 w-full min-w-0">
                   <div className="mb-4 flex flex-col md:flex-row justify-between items-start md:items-center border-b border-slate-200 pb-3 gap-3">
@@ -679,6 +702,91 @@ const MaterialAllocationList = ({
                   </div>
                 </div>
               )}
+
+              {/* 🌟 半成品的子單據遞迴展開 */}
+              {isExpanded &&
+                isSemi &&
+                childPlan &&
+                (() => {
+                  const childDisplayId =
+                    childPlan.frontend_temp_id || childPlan.id;
+                  const hasChildAdditiveError =
+                    mrpAdditiveErrors[childDisplayId];
+
+                  return (
+                    <div className="bg-slate-50/80 p-6 border-t border-slate-200 w-full min-w-0 shadow-inner">
+                      <div className="mb-5 flex flex-col md:flex-row justify-between items-start md:items-center border-b border-slate-200 pb-4 gap-3">
+                        <div className="flex items-center gap-3">
+                          <span className="text-sm bg-purple-100 text-purple-800 px-3 py-1.5 rounded-lg font-bold tracking-wide border border-purple-200 shadow-sm flex items-center gap-2">
+                            <span className="w-2 h-2 rounded-full bg-purple-500"></span>
+                            子單據: {childPlan.mrp_id}
+                          </span>
+                          {hasChildAdditiveError && (
+                            <span className="text-red-600 text-sm tracking-wide font-semibold bg-red-100 px-2.5 py-1 rounded-md border border-red-300 shadow-sm">
+                              ⚠️ 法規超標
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex flex-nowrap items-center justify-end gap-2">
+                          <button
+                            onClick={(e) => handlePreviewOrder?.(childPlan, e)}
+                            className="px-3 py-2 bg-white text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-50 transition-all text-sm font-semibold shadow-sm flex items-center gap-1.5"
+                          >
+                            <FileText size={14} strokeWidth={2.5} /> 預覽
+                          </button>
+                          <button
+                            onClick={(e) => handlePrintOrder?.(childPlan, e)}
+                            className="px-3 py-2 bg-white text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50 transition-all text-sm font-semibold shadow-sm flex items-center gap-1.5"
+                          >
+                            <Printer size={14} strokeWidth={2.5} /> 列印
+                          </button>
+                          <button
+                            onClick={(e) =>
+                              handleConvertToProduction?.(childPlan.id, e)
+                            }
+                            disabled={
+                              isSubmitting ||
+                              childPlan.status.toUpperCase() === "CONVERTED"
+                            }
+                            className="px-3 py-2 bg-emerald-50 text-emerald-600 border border-emerald-200 rounded-lg hover:bg-emerald-500 hover:text-white transition-all text-sm font-semibold shadow-sm disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                          >
+                            轉生產單
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteDraft?.(childPlan.id);
+                            }}
+                            disabled={isSubmitting}
+                            className="px-3 py-2 bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-500 hover:text-white transition-all text-sm font-semibold shadow-sm disabled:opacity-50 whitespace-nowrap"
+                          >
+                            刪除
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* 遞迴呼叫！ */}
+                      <MaterialAllocationList
+                        itemId={childDisplayId}
+                        mrpId={childPlan.mrp_id}
+                        mrpPlans={mrpPlans}
+                        allocations={allocations}
+                        materials={materials}
+                        boms={boms}
+                        expandedMaterials={expandedMaterials}
+                        toggleMaterialExpanded={toggleMaterialExpanded}
+                        handleBatchUsageSave={handleBatchUsageSave}
+                        readyOnly={readyOnly}
+                        handlePreviewOrder={handlePreviewOrder}
+                        handlePrintOrder={handlePrintOrder}
+                        handleConvertToProduction={handleConvertToProduction}
+                        handleDeleteDraft={handleDeleteDraft}
+                        isSubmitting={isSubmitting}
+                        mrpAdditiveErrors={mrpAdditiveErrors}
+                      />
+                    </div>
+                  );
+                })()}
             </div>
           );
         })}
@@ -1020,7 +1128,6 @@ const RequirementOrderPage = () => {
         );
         if (!product) return item;
 
-        // 如果選擇「自製規格」
         if (profileId === "custom") {
           return {
             ...item,
@@ -1036,7 +1143,6 @@ const RequirementOrderPage = () => {
           };
         }
 
-        // 未選擇時 (預設)
         if (!profileId) {
           return {
             ...item,
@@ -1120,14 +1226,51 @@ const RequirementOrderPage = () => {
       const motherId = fItem.id;
       const generatedItems = [];
 
-      const buildDrafts = (matId, currentQty, currentDraftId) => {
-        const mat = materials.find((m) => String(m.id) === String(matId));
-        if (!mat) return null;
+      // 🌟 全域計數器：確保子單的 ID 呈現為 PXXXXX-1, PXXXXX-2
+      let childDraftSeq = 1;
 
-        let childSeq = 1;
+      // 🌟 將 parentDraftId 納入記憶，取代原本使用字串切割 (-1-1) 尋找父親的邏輯
+      const buildDrafts = (
+        matId,
+        currentQty,
+        currentDraftId,
+        parentDraftId = null,
+      ) => {
+        const mat = materials.find((m) => String(m.id) === String(matId));
+        if (!mat) return;
+
         const children = boms.filter(
           (b) => String(b.parent?.id) === String(matId),
         );
+
+        let currentRemark = "";
+        if (parentDraftId) {
+          const parentItem = generatedItems.find(
+            (gi) => gi.id === parentDraftId,
+          );
+          if (parentItem) {
+            const relatedBom = boms.find(
+              (b) =>
+                String(b.parent?.id) === String(parentItem.productId) &&
+                String(b.child?.id) === String(matId),
+            );
+            if (relatedBom) {
+              currentRemark = relatedBom.remark || "";
+            }
+          }
+        }
+
+        generatedItems.push({
+          id: currentDraftId,
+          parentDraftId: parentDraftId, // 🌟 記錄真實的父親 Draft ID
+          productId: mat.id,
+          name: mat.name,
+          type: mat.type,
+          qty: parseFloat(Number(currentQty).toFixed(5)),
+          unit: "KG",
+          productCode: mat.code,
+          remark: currentRemark,
+        });
 
         children.forEach((c) => {
           const childMat = c.child;
@@ -1138,24 +1281,14 @@ const RequirementOrderPage = () => {
             const baseQty = parseFloat(c.base_quantity || 1);
             const childQty =
               currentQty * (parseFloat(c.quantity_required) / baseQty);
-            const childDraftId = `${currentDraftId}-${childSeq++}`;
-            buildDrafts(childMat.id, childQty, childDraftId);
+            // 🌟 單號直接使用 MotherId-累加數字
+            const childDraftId = `${motherId}-${childDraftSeq++}`;
+            buildDrafts(childMat.id, childQty, childDraftId, currentDraftId);
           }
-        });
-
-        generatedItems.push({
-          id: currentDraftId,
-          productId: mat.id,
-          name: mat.name,
-          type: mat.type,
-          qty: parseFloat(Number(currentQty).toFixed(5)),
-          unit: "KG",
-          productCode: mat.code,
         });
       };
 
-      buildDrafts(fItem.product_id, totalWeightKG, motherId);
-      generatedItems.reverse();
+      buildDrafts(fItem.product_id, totalWeightKG, motherId, null);
       newOrderItems = [...newOrderItems, ...generatedItems];
 
       if (generatedItems.length > 0)
@@ -1271,7 +1404,7 @@ const RequirementOrderPage = () => {
       );
 
       if (directChildren.length === 0) {
-        itemReqs[productId] = qtyValue;
+        itemReqs[productId] = { qty: qtyValue, remark: "" };
       } else {
         directChildren.forEach((c) => {
           const childMat = c.child;
@@ -1279,8 +1412,10 @@ const RequirementOrderPage = () => {
             const baseQty = parseFloat(c.base_quantity || 1);
             const reqQty =
               qtyValue * (parseFloat(c.quantity_required) / baseQty);
-            if (!itemReqs[childMat.id]) itemReqs[childMat.id] = 0;
-            itemReqs[childMat.id] += reqQty;
+            if (!itemReqs[childMat.id]) {
+              itemReqs[childMat.id] = { qty: 0, remark: c.remark || "" };
+            }
+            itemReqs[childMat.id].qty += reqQty;
           }
         });
       }
@@ -1292,7 +1427,8 @@ const RequirementOrderPage = () => {
           (m) => String(m.id) === String(matIdStr),
         );
         const isPack = matInfo?.type === "PACK";
-        let requiredQty = itemReqs[matIdStr];
+        let requiredQty = itemReqs[matIdStr].qty;
+        let remark = itemReqs[matIdStr].remark;
         if (isPack) requiredQty = Math.ceil(requiredQty);
 
         const availableBatches = globalVirtualBatches
@@ -1339,6 +1475,7 @@ const RequirementOrderPage = () => {
           maxQty: requiredQty * USEAGE_THRESHOLD,
           batches: batchAllocations,
           isShortage: remainingToFulfill > 0.0001,
+          remark: remark,
         };
       });
 
@@ -1544,11 +1681,16 @@ const RequirementOrderPage = () => {
 
       const rootItems = [];
       orderItems.forEach((item) => {
-        if (!String(item.id).includes("-")) rootItems.push(itemMap[item.id]);
-        else {
-          const parentId = String(item.id).split("-").slice(0, -1).join("-");
-          if (itemMap[parentId])
+        // 🌟 改用 parentDraftId 來精準抓取對應的母單，不依賴字串比對
+        if (!item.parentDraftId) {
+          rootItems.push(itemMap[item.id]);
+        } else {
+          const parentId = item.parentDraftId;
+          if (itemMap[parentId]) {
             itemMap[parentId].children_mrp.push(itemMap[item.id]);
+          } else {
+            rootItems.push(itemMap[item.id]);
+          }
         }
       });
 
@@ -2100,15 +2242,6 @@ const RequirementOrderPage = () => {
     );
   };
 
-  if (loading && materials.length === 0)
-    return (
-      <div className="flex justify-center items-center h-screen bg-slate-50">
-        <div className="animate-pulse text-slate-500 font-semibold text-xl">
-          載入系統資料中...
-        </div>
-      </div>
-    );
-
   return (
     <>
       <div className="print:hidden p-6 md:p-8 max-w-7xl mx-auto bg-slate-50 min-h-screen font-sans text-slate-900 w-full">
@@ -2155,7 +2288,7 @@ const RequirementOrderPage = () => {
           <div>
             <div className="bg-white rounded-3xl shadow-sm border border-slate-200 mb-8 overflow-hidden w-full">
               <div className="p-8 bg-slate-50/50 border-b border-slate-100">
-                <h3 className="text-lg font-semibold text-blue-600 tracking-wide mb-6 flex items-center gap-3">
+                <h3 className="text-lg font-semibold text-blue-600 tracking-wide flex items-center gap-3">
                   <FileText className="text-blue-500" size={22} /> 1.
                   客戶訂單與出貨資訊
                 </h3>
@@ -3004,126 +3137,43 @@ const RequirementOrderPage = () => {
                                       >
                                         <div className="w-0 min-w-full">
                                           <div className="p-6 w-full max-w-full overflow-hidden">
-                                            <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-                                              <div className="lg:col-span-4 min-w-0">
-                                                {mrpPlans.filter(
-                                                  (child) =>
-                                                    child.parent_id ===
-                                                    d.mrp_id,
-                                                ).length > 0 && (
-                                                  <div className="mb-8 space-y-4 border-b border-slate-200 pb-8">
-                                                    <h4 className="text-sm font-semibold text-blue-600 tracking-wide flex items-center gap-2">
-                                                      <span className="w-2 h-2 rounded-full bg-blue-500"></span>
-                                                      子單據
-                                                    </h4>
-                                                    {mrpPlans
-                                                      .filter(
-                                                        (child) =>
-                                                          child.parent_id ===
-                                                          d.mrp_id,
-                                                      )
-                                                      .map((child) => {
-                                                        const childDisplayId =
-                                                          child.frontend_temp_id ||
-                                                          child.id;
-                                                        const childExpandedKey = `child-mrp-card-${child.id}`;
-                                                        const isChildCardExpanded =
-                                                          expandedMaterials.includes(
-                                                            childExpandedKey,
-                                                          );
-                                                        return (
-                                                          <div
-                                                            key={child.id}
-                                                            className="border border-slate-200 rounded-2xl bg-white overflow-hidden shadow-sm hover:border-blue-300 transition-colors"
-                                                          >
-                                                            <div
-                                                              className="p-5 flex justify-between items-center cursor-pointer hover:bg-slate-50/80 transition-colors"
-                                                              onClick={() =>
-                                                                toggleMaterialExpanded(
-                                                                  childExpandedKey,
-                                                                )
-                                                              }
-                                                            >
-                                                              <div className="flex items-center gap-3">
-                                                                <span className="text-slate-300 text-sm font-semibold">
-                                                                  {isChildCardExpanded
-                                                                    ? "▼"
-                                                                    : "▶"}
-                                                                </span>
-                                                                <span className="text-sm bg-purple-50 text-purple-700 px-2 py-1 rounded-lg font-semibold tracking-wide border border-purple-200">
-                                                                  {child.mrp_id}
-                                                                </span>
-                                                                <span className="font-semibold text-slate-800 text-base">
-                                                                  {
-                                                                    child.product_name
-                                                                  }
-                                                                </span>
-                                                              </div>
-                                                              <div className="text-sm text-slate-600 bg-slate-50 border border-slate-200 px-4 py-2 rounded-xl font-medium shadow-sm">
-                                                                計畫生產:{" "}
-                                                                <span className="font-bold text-slate-900 font-mono ml-2 text-base">
-                                                                  {formatNum(
-                                                                    child.required_qty,
-                                                                    "SEMI",
-                                                                  )}
-                                                                </span>{" "}
-                                                                <span className="text-sm ml-1">
-                                                                  {child.unit}
-                                                                </span>
-                                                              </div>
-                                                            </div>
-                                                            {isChildCardExpanded && (
-                                                              <div className="p-6 border-t border-slate-100 bg-slate-50/30">
-                                                                <MaterialAllocationList
-                                                                  itemId={
-                                                                    childDisplayId
-                                                                  }
-                                                                  allocations={
-                                                                    allocations
-                                                                  }
-                                                                  materials={
-                                                                    materials
-                                                                  }
-                                                                  boms={boms}
-                                                                  expandedMaterials={
-                                                                    expandedMaterials
-                                                                  }
-                                                                  toggleMaterialExpanded={
-                                                                    toggleMaterialExpanded
-                                                                  }
-                                                                  handleBatchUsageSave={
-                                                                    handleBatchUsageSave
-                                                                  }
-                                                                />
-                                                              </div>
-                                                            )}
-                                                          </div>
-                                                        );
-                                                      })}
-                                                  </div>
-                                                )}
-
-                                                <h4 className="text-sm font-semibold text-slate-600 tracking-wide mb-5 flex items-center gap-2">
-                                                  <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                                                  批號與庫存分配
-                                                </h4>
-                                                <MaterialAllocationList
-                                                  itemId={displayId}
-                                                  allocations={allocations}
-                                                  materials={materials}
-                                                  boms={boms}
-                                                  expandedMaterials={
-                                                    expandedMaterials
-                                                  }
-                                                  toggleMaterialExpanded={
-                                                    toggleMaterialExpanded
-                                                  }
-                                                  handleBatchUsageSave={
-                                                    handleBatchUsageSave
-                                                  }
-                                                />
-                                              </div>
-                                            </div>
+                                            <h4 className="text-sm font-semibold text-slate-600 tracking-wide mb-5 flex items-center gap-2">
+                                              <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                                              批號與庫存分配
+                                            </h4>
+                                            <MaterialAllocationList
+                                              itemId={displayId}
+                                              mrpId={d.mrp_id}
+                                              mrpPlans={mrpPlans}
+                                              allocations={allocations}
+                                              materials={materials}
+                                              boms={boms}
+                                              expandedMaterials={
+                                                expandedMaterials
+                                              }
+                                              toggleMaterialExpanded={
+                                                toggleMaterialExpanded
+                                              }
+                                              handleBatchUsageSave={
+                                                handleBatchUsageSave
+                                              }
+                                              handlePreviewOrder={
+                                                handlePreviewOrder
+                                              }
+                                              handlePrintOrder={
+                                                handlePrintOrder
+                                              }
+                                              handleConvertToProduction={
+                                                handleConvertToProduction
+                                              }
+                                              handleDeleteDraft={
+                                                handleDeleteDraft
+                                              }
+                                              isSubmitting={isSubmitting}
+                                              mrpAdditiveErrors={
+                                                mrpAdditiveErrors
+                                              }
+                                            />
                                           </div>
                                         </div>
                                       </td>

@@ -15,9 +15,6 @@ import { fetchWithAuth } from "./utils/fetchWithAuth";
 import { useNavigate } from "react-router-dom";
 import { useAuthStore } from "./store/authStore";
 
-// ==========================================
-// 輔助函數：數值格式化 (至多小數後五位，移除 trailing zero)
-// ==========================================
 const formatValue = (num) => {
   if (num === null || num === undefined || num === "") return "0";
   return parseFloat(Number(num).toFixed(5)).toString();
@@ -55,9 +52,6 @@ const StatusTag = ({ status }) => {
   );
 };
 
-// ==========================================
-// 輔助函數：計算生產單的總重量 (KG)
-// ==========================================
 const getOrderTotalWeight = (materials_info) => {
   if (!Array.isArray(materials_info)) return 0;
   return materials_info.reduce((sum, mat) => {
@@ -69,30 +63,16 @@ const getOrderTotalWeight = (materials_info) => {
   }, 0);
 };
 
-// ==========================================
-// 核心邏輯：將後端嵌套的批號資料，動態攤平為一列列的實體單據格式
-// ==========================================
 const getFlattenedMaterials = (materials_info) => {
   const result = [];
   if (!Array.isArray(materials_info)) return result;
 
   materials_info.forEach((mat) => {
-    const materialCode = mat.code || "-";
-
     if (mat.type === "CHILD_PRODUCT") {
-      result.push({
-        isChild: true,
-        code: materialCode,
-        materialName: mat.materialName,
-        child_order_number: mat.child_order_number,
-        requiredQty: mat.requiredQty,
-        allocatedQty: mat.requiredQty,
-        batch_number: "-",
-        unit: mat.unit || "",
-      });
       return;
     }
 
+    const materialCode = mat.code || "-";
     const batches = mat.batches || [];
     const usedBatches = batches.filter((b) => {
       const usedVal = parseFloat(b.used);
@@ -111,7 +91,21 @@ const getFlattenedMaterials = (materials_info) => {
           empty_bags: b.empty_bags,
           batch_number: b.batch_number,
           unit: mat.unit || "kg",
+          remark: mat.remark || "",
         });
+      });
+    } else {
+      result.push({
+        isChild: false,
+        code: materialCode,
+        materialName: mat.materialName,
+        requiredQty: mat.requiredQty,
+        allocatedQty: mat.requiredQty,
+        input_bags: "",
+        empty_bags: "",
+        batch_number: materialCode,
+        unit: mat.unit || "kg",
+        remark: mat.remark || "",
       });
     }
   });
@@ -119,9 +113,6 @@ const getFlattenedMaterials = (materials_info) => {
   return result;
 };
 
-// ==========================================
-// 實體單據渲染元件
-// ==========================================
 const ProductionFormTemplate = ({ order, isChildForm = false, onPrint }) => {
   if (!order) return null;
 
@@ -156,10 +147,7 @@ const ProductionFormTemplate = ({ order, isChildForm = false, onPrint }) => {
     : order.product_profile?.unit || "KG";
 
   return (
-    <div
-      className={`bg-white font-sans text-black relative ${isChildForm ? "p-1" : "p-4 print:p-0"}`}
-    >
-      {/* Header 表頭區塊 */}
+    <div className={`bg-white font-sans text-black relative p-4 print:p-0`}>
       <div className="flex justify-between items-start mb-2 text-[14px] pt-1">
         <div className="w-1/3 text-[12px] leading-tight">
           <div>
@@ -176,7 +164,7 @@ const ProductionFormTemplate = ({ order, isChildForm = false, onPrint }) => {
             </span>
           </div>
           <div className="mt-1 text-[14px] font-bold whitespace-nowrap">
-            產品名稱 : {order.product_profile?.name}
+            產品名稱 : {order.product_profile?.name || order.product_name}
           </div>
           <div className="mt-1">產品規格 : {order.product_profile?.spec}</div>
           <div className="mt-1 italic underline">生產注意 : </div>
@@ -221,7 +209,6 @@ const ProductionFormTemplate = ({ order, isChildForm = false, onPrint }) => {
         </div>
       </div>
 
-      {/* 核心表格區塊 */}
       <table className="w-full text-[12px] border-collapse border-2 border-black mb-2">
         <thead>
           <tr className="border-b-2 border-black bg-gray-50/50">
@@ -259,17 +246,20 @@ const ProductionFormTemplate = ({ order, isChildForm = false, onPrint }) => {
             flattenedMaterials.map((mat, i) => (
               <tr
                 key={i}
-                className={`border-b border-black h-7 hover:bg-slate-50 transition-colors ${mat.isChild ? "bg-indigo-50/30" : ""}`}
+                className="border-b border-black h-7 hover:bg-slate-50 transition-colors"
               >
                 <td className="border border-black text-center">{i + 1}</td>
                 <td className="border border-black text-center text-[10px] text-gray-700 font-mono tracking-tighter">
                   {mat.code}
                 </td>
                 <td className="border border-black text-left px-2">
-                  <span
-                    className={`truncate max-w-[200px] ${mat.isChild ? "font-bold text-indigo-700" : ""}`}
-                  >
+                  <span className="truncate max-w-[200px]">
                     {mat.materialName}
+                    {mat.remark && mat.remark.length > 0 && (
+                      <span className="px-2 font-mono text-[12px]">
+                        ({mat.remark})
+                      </span>
+                    )}
                   </span>
                 </td>
                 <td className="border border-black text-right px-2 font-mono font-bold text-[13px]">
@@ -313,7 +303,6 @@ const ProductionFormTemplate = ({ order, isChildForm = false, onPrint }) => {
         </tbody>
       </table>
 
-      {/* Footer 備註與簽名區塊 */}
       <div className="text-[12px] mt-1 space-y-1">
         <div className="flex items-baseline gap-6 font-bold border-b border-dotted border-gray-400 pb-1">
           <div>
@@ -435,12 +424,20 @@ const ProductionFormTemplate = ({ order, isChildForm = false, onPrint }) => {
   );
 };
 
-// ==========================================
-// 處理 A4 母子單列印的包裹層元件
-// ==========================================
 const ProductionOrderPrintTemplate = ({ data }) => {
   if (!data) return null;
-  const children = data.children_orders || [];
+
+  const flattenOrders = (order) => {
+    let orders = [order];
+    if (order.children && order.children.length > 0) {
+      order.children.forEach((child) => {
+        orders = orders.concat(flattenOrders(child));
+      });
+    }
+    return orders;
+  };
+
+  const allOrdersToPrint = flattenOrders(data);
 
   return (
     <div className="hidden print:block w-full bg-white text-black font-sans mx-auto print:pt-8 print:px-8">
@@ -462,28 +459,24 @@ const ProductionOrderPrintTemplate = ({ data }) => {
         `}
       </style>
 
-      {/* 母單 */}
-      <div className={children.length > 0 ? "page-break" : ""}>
-        <ProductionFormTemplate order={data} isChildForm={false} />
-      </div>
-
-      {/* 子單列印（一張一頁） */}
-      {children.map((child, idx) => (
+      {allOrdersToPrint.map((orderToPrint, idx) => (
         <div
-          key={child.id}
-          className={idx === children.length - 1 ? "" : "page-break print:pt-8"}
+          key={orderToPrint.id}
+          className={
+            idx === allOrdersToPrint.length - 1 ? "" : "page-break print:pt-8"
+          }
         >
-          <ProductionFormTemplate order={child} isChildForm={true} />
+          <ProductionFormTemplate
+            order={orderToPrint}
+            isChildForm={idx !== 0}
+          />
         </div>
       ))}
     </div>
   );
 };
 
-// ==========================================
-// 主頁面元件
-// ==========================================
-const ProductionOrderPage = () => {
+export default function ProductionOrderPage() {
   const navigate = useNavigate();
   const [productionOrders, setProductionOrders] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -558,9 +551,31 @@ const ProductionOrderPage = () => {
         const res = await fetchWithAuth(`/api/production_orders/${orderId}`);
         if (res.ok) {
           const json = await res.json();
+          const orderData = json.data || json;
+
+          const allChildren = orderData.children_orders || [];
+          const orderMap = {};
+          allChildren.forEach((child) => {
+            child.children = [];
+            orderMap[child.order_number] = child;
+          });
+
+          const rootChildren = [];
+          allChildren.forEach((child) => {
+            if (child.parent_id === orderData.order_number) {
+              rootChildren.push(child);
+            } else if (orderMap[child.parent_id]) {
+              orderMap[child.parent_id].children.push(child);
+            } else {
+              rootChildren.push(child);
+            }
+          });
+
+          orderData.children = rootChildren;
+
           setDetailedOrdersMap((prev) => ({
             ...prev,
-            [orderId]: json.data || json,
+            [orderId]: orderData,
           }));
         } else {
           setDetailedOrdersMap((prev) => ({
@@ -590,6 +605,23 @@ const ProductionOrderPage = () => {
         if (res.ok) {
           const json = await res.json();
           orderToPrint = json.data || json;
+
+          const allChildren = orderToPrint.children_orders || [];
+          const orderMap = {};
+          allChildren.forEach((child) => {
+            child.children = [];
+            orderMap[child.order_number] = child;
+          });
+          const rootChildren = [];
+          allChildren.forEach((child) => {
+            if (child.parent_id === orderToPrint.order_number) {
+              rootChildren.push(child);
+            } else if (orderMap[child.parent_id]) {
+              orderMap[child.parent_id].children.push(child);
+            }
+          });
+          orderToPrint.children = rootChildren;
+
           setDetailedOrdersMap((prev) => ({ ...prev, [po.id]: orderToPrint }));
         } else {
           showAlert("錯誤", "載入單據詳細資料失敗，無法列印", "error");
@@ -609,10 +641,32 @@ const ProductionOrderPage = () => {
     setPrintData(orderToPrint);
     setTimeout(() => {
       const originalTitle = document.title;
-      document.title = `${po.order_number}_${po.product_profile?.name}`;
+      document.title = `${po.order_number}_${po.product_profile?.name || po.product_name}`;
       window.print();
       document.title = originalTitle;
     }, 150);
+  };
+
+  // 🌟 遞迴渲染子生產單 (拔除縮排 CSS，統一平齊呈現)
+  const renderChildrenOrders = (childrenArr, depth = 1) => {
+    if (!childrenArr || childrenArr.length === 0) return null;
+    return childrenArr.map((child, idx) => (
+      <div
+        key={child.id}
+        className="relative pt-6 border-t-[3px] border-dashed border-slate-300 mt-6"
+      >
+        {depth == 1 && (
+          <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-slate-200 text-slate-600 px-4 py-1 rounded-full text-xs font-bold tracking-widest shadow-sm">
+            ▼ 子生產單 ▼
+          </div>
+        )}
+        <div className="shadow-xl ring-1 ring-black/5">
+          <ProductionFormTemplate order={child} isChildForm={true} />
+        </div>
+
+        {renderChildrenOrders(child.children, depth + 1)}
+      </div>
+    ));
   };
 
   const filteredOrders = useMemo(() => {
@@ -723,7 +777,7 @@ const ProductionOrderPage = () => {
                           <td className="p-4">
                             <div className="flex items-center gap-2">
                               <span className="font-bold text-slate-800">
-                                {po.product_profile?.name}
+                                {po.product_profile?.name || po.product_name}
                               </span>
                             </div>
                           </td>
@@ -781,26 +835,10 @@ const ProductionOrderPage = () => {
                                           />
                                         </div>
 
-                                        {detailedOrdersMap[
-                                          po.id
-                                        ].children_orders?.map((child, idx) => (
-                                          <div
-                                            key={child.id}
-                                            className={`relative pt-6 border-t-[3px] border-dashed border-slate-300 ${idx > 0 ? "mt-6" : ""}`}
-                                          >
-                                            {idx === 0 && (
-                                              <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-slate-200 text-slate-600 px-4 py-1 rounded-full text-xs font-bold tracking-widest shadow-sm">
-                                                ▼ 子生產單 ▼
-                                              </div>
-                                            )}
-                                            <div className="shadow-xl ring-1 ring-black/5">
-                                              <ProductionFormTemplate
-                                                order={child}
-                                                isChildForm={true}
-                                              />
-                                            </div>
-                                          </div>
-                                        ))}
+                                        {/* 🌟 呼叫遞迴函式渲染子單據 */}
+                                        {renderChildrenOrders(
+                                          detailedOrdersMap[po.id].children,
+                                        )}
                                       </>
                                     )
                                   ) : (
@@ -845,6 +883,4 @@ const ProductionOrderPage = () => {
       {printData && <ProductionOrderPrintTemplate data={printData} />}
     </>
   );
-};
-
-export default ProductionOrderPage;
+}

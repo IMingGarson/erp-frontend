@@ -14,8 +14,10 @@ import {
   CheckCircle2,
   Plus,
   Edit2,
-  ShieldCheck, // TFDA 標示圖示
-  PenTool, // 手動標示圖示
+  ShieldCheck,
+  PenTool,
+  SlidersHorizontal,
+  AlignLeft,
 } from "lucide-react";
 import CustomDialog from "./components/customDialog";
 import { fetchWithAuth } from "./utils/fetchWithAuth";
@@ -31,9 +33,15 @@ const formatDisplayNum = (val) => {
   return isNaN(num) ? "0" : parseFloat(num.toFixed(2)).toString();
 };
 
-// 🌟 提取成分中的過敏原並與手動勾選的聯集
-const getMergedAllergens = (manualAllergens = [], ingredientsArray = []) => {
+// 🌟 更新：自動從手動成分 (ingredients) 與 配方 (boms) 兩處提取過敏原聯集
+const getMergedAllergens = (
+  manualAllergens = [],
+  ingredientsArray = [],
+  bomsArray = [],
+) => {
   let merged = new Set(manualAllergens);
+
+  // 1. 從手動加入的成分提取
   ingredientsArray.forEach((ing) => {
     if (ing.allergen_info) {
       const ingAllergens =
@@ -46,12 +54,25 @@ const getMergedAllergens = (manualAllergens = [], ingredientsArray = []) => {
       ingAllergens.forEach((a) => merged.add(a));
     }
   });
+
+  // 2. 從 BOM 配方帶入的下層物料提取
+  bomsArray.forEach((bom) => {
+    if (bom.is_active !== false && bom.child_allergen_info) {
+      const bomAllergens = bom.child_allergen_info
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      bomAllergens.forEach((a) => merged.add(a));
+    }
+  });
+
   return Array.from(merged);
 };
 
-// 提取純成分自帶的過敏原 (用來判斷某個選項是否由成分強制勾選)
-const getIngredientsOnlyAllergens = (ingredientsArray = []) => {
+// 🌟 更新：僅獲取由系統自動帶入的過敏原 (用來判斷選項是否反灰鎖定)
+const getIngredientsOnlyAllergens = (ingredientsArray = [], bomsArray = []) => {
   let merged = new Set();
+
   ingredientsArray.forEach((ing) => {
     if (ing.allergen_info) {
       const ingAllergens =
@@ -64,9 +85,23 @@ const getIngredientsOnlyAllergens = (ingredientsArray = []) => {
       ingAllergens.forEach((a) => merged.add(a));
     }
   });
+
+  bomsArray.forEach((bom) => {
+    if (bom.is_active !== false && bom.child_allergen_info) {
+      const bomAllergens = bom.child_allergen_info
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      bomAllergens.forEach((a) => merged.add(a));
+    }
+  });
+
   return Array.from(merged);
 };
 
+// ==========================================
+// 🌟 選項清單定義
+// ==========================================
 const TYPE_OPTIONS = [
   { value: "RAW", label: "原物料" },
   { value: "SEMI", label: "半成品" },
@@ -108,6 +143,18 @@ const ALLERGEN_OPTIONS = [
   { value: "SULFITE", label: "亞硫酸鹽類" },
 ];
 
+const QC_TYPE_OPTIONS = [
+  { value: "range", label: "數值範圍" },
+  { value: "boolean", label: "狀態判定 (合格/陰陽性)" },
+  { value: "text", label: "純文字描述" },
+];
+
+const QC_BOOL_OPTIONS = [
+  { value: "NEGATIVE", label: "陰性 (Negative)" },
+  { value: "POSITIVE", label: "陽性 (Positive)" },
+  { value: "QUALIFIED", label: "合格 (Qualified)" },
+];
+
 const getTypeLabel = (typeValue) => {
   const target = TYPE_OPTIONS.find((opt) => opt.value === typeValue);
   return target ? target.label : typeValue;
@@ -128,6 +175,84 @@ const getDietaryLabel = (val) => {
   return target ? target.label : "未設定";
 };
 
+// ==========================================
+// 🌟 客製化下拉選單
+// ==========================================
+const CustomSelect = ({
+  value,
+  onChange,
+  options,
+  placeholder = "請選擇...",
+  disabled = false,
+  className = "",
+  menuClassName = "",
+}) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const selectRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (selectRef.current && !selectRef.current.contains(e.target)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const selectedOption = options.find(
+    (opt) => String(opt.value) === String(value),
+  );
+
+  return (
+    <div className={`relative ${className}`} ref={selectRef}>
+      <div
+        onClick={() => !disabled && setIsOpen(!isOpen)}
+        className={`w-full flex justify-between items-center px-4 py-3 bg-white border border-slate-300 rounded-xl text-sm font-bold transition-all shadow-sm ${
+          disabled
+            ? "bg-slate-100 text-slate-400 cursor-not-allowed"
+            : "cursor-pointer hover:border-blue-400 text-slate-800"
+        } ${isOpen ? "ring-4 ring-blue-500/10 border-blue-500" : ""}`}
+      >
+        <span
+          className={`truncate ${selectedOption ? "text-slate-800" : "text-slate-400"}`}
+        >
+          {selectedOption ? selectedOption.label : placeholder}
+        </span>
+        <ChevronDown
+          size={16}
+          className={`text-slate-400 transition-transform flex-shrink-0 ml-2 ${isOpen ? "rotate-180 text-blue-500" : ""}`}
+        />
+      </div>
+      {isOpen && !disabled && (
+        <div
+          className={`absolute z-[100] top-[calc(100%+8px)] left-0 w-full bg-white border border-slate-200 rounded-xl shadow-xl max-h-60 overflow-y-auto animate-in fade-in slide-in-from-top-2 duration-200 custom-scrollbar ${menuClassName}`}
+        >
+          {options.map((opt) => (
+            <div
+              key={opt.value}
+              onClick={() => {
+                onChange(opt.value);
+                setIsOpen(false);
+              }}
+              className={`px-4 py-3 text-sm font-bold cursor-pointer transition-colors ${
+                String(value) === String(opt.value)
+                  ? "bg-blue-50 text-blue-700"
+                  : "text-slate-700 hover:bg-slate-50"
+              }`}
+            >
+              {opt.label}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ==========================================
+// 營養標示卡片
+// ==========================================
 const emptyNutrition = {
   energy_kcal: "0",
   protein: "0",
@@ -141,7 +266,6 @@ const emptyNutrition = {
 
 const NutritionLabel = ({ nutritionData }) => {
   const data = nutritionData || {};
-
   const formatVal = (val) => {
     const num = parseFloat(val);
     return isNaN(num) ? "0" : parseFloat(num.toFixed(1)).toString();
@@ -256,7 +380,6 @@ const calculateNutritionFromBOMs = (boms) => {
   return formattedNutrition;
 };
 
-// 計算總和營養素 (給成分加總用)
 const calculateTotalNutrition = (ingredients) => {
   const calc = {
     energy_kcal: 0,
@@ -291,6 +414,149 @@ const isNutritionEmpty = (nutData) => {
   });
 };
 
+const normalizeQCStandards = (rawArray) => {
+  if (!Array.isArray(rawArray)) return [];
+  return rawArray.map((std) => {
+    if (std.format === "v2") {
+      return {
+        ...std,
+        target_min:
+          std.target_min !== undefined ? std.target_min : std.min || "",
+        target_max:
+          std.target_max !== undefined ? std.target_max : std.max || "",
+      };
+    }
+
+    const id = Date.now().toString() + Math.random().toString(36).substr(2, 5);
+    if (std.type === "dilution" || std.type === "custom") {
+      return {
+        format: "v2",
+        id,
+        name: std.name || "未命名檢驗",
+        type: "text",
+        target_text: std.value || "",
+      };
+    }
+    if (
+      ["brix", "salt", "moisture"].includes(std.type) ||
+      std.type === "range"
+    ) {
+      return {
+        format: "v2",
+        id,
+        name: std.name || "數值範圍",
+        type: "range",
+        target_min: std.min || "",
+        target_max: std.max || "",
+      };
+    }
+    if (std.type === "boolean") {
+      return {
+        format: "v2",
+        id,
+        name: std.name || "狀態判定",
+        type: "boolean",
+        target_bool: std.target_bool || "NEGATIVE",
+      };
+    }
+    return {
+      format: "v2",
+      id,
+      name: std.name || "自訂檢驗",
+      type: "text",
+      target_text: std.value || "",
+    };
+  });
+};
+
+const QCCardView = ({ qc }) => {
+  if (qc.type === "range") {
+    return (
+      <div className="bg-blue-50/60 p-4 rounded-2xl border border-blue-100 flex flex-col justify-center shadow-[inset_0_2px_4px_rgba(0,0,0,0.02)] h-full">
+        <span className="text-[10px] font-bold text-blue-600 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+          <SlidersHorizontal size={12} /> {qc.name}
+        </span>
+        <div className="flex items-baseline gap-2">
+          {qc.target_min || qc.target_max ? (
+            <>
+              {qc.target_min && (
+                <span className="text-xl font-black text-blue-800 font-mono tracking-tight">
+                  {qc.target_min}
+                </span>
+              )}
+              {qc.target_min && qc.target_max ? (
+                <span className="text-sm font-bold text-blue-400">~</span>
+              ) : qc.target_max ? (
+                <span className="text-sm font-bold text-blue-500 mr-1">
+                  {"<"}
+                </span>
+              ) : (
+                <span className="text-sm font-bold text-blue-500 ml-1">
+                  {">"}
+                </span>
+              )}
+              {qc.target_max && (
+                <span className="text-xl font-black text-blue-800 font-mono tracking-tight">
+                  {qc.target_max}
+                </span>
+              )}
+            </>
+          ) : (
+            <span className="text-lg font-black text-slate-400">-</span>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  if (qc.type === "boolean") {
+    const isNegative = qc.target_bool === "NEGATIVE";
+    const isPositive = qc.target_bool === "POSITIVE";
+    const isQualified = qc.target_bool === "QUALIFIED";
+    return (
+      <div className="bg-emerald-50/60 p-4 rounded-2xl border border-emerald-100 flex flex-col justify-center shadow-[inset_0_2px_4px_rgba(0,0,0,0.02)] h-full">
+        <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+          <CheckCircle2 size={12} /> {qc.name}
+        </span>
+        <div className="flex items-center">
+          <span
+            className={`text-sm font-black px-3 py-1 rounded-lg border ${
+              isNegative
+                ? "bg-emerald-100 text-emerald-700 border-emerald-200"
+                : isPositive
+                  ? "bg-rose-100 text-rose-700 border-rose-200"
+                  : isQualified
+                    ? "bg-indigo-100 text-indigo-700 border-indigo-200"
+                    : "bg-slate-100 text-slate-600 border-slate-200"
+            }`}
+          >
+            {isNegative
+              ? "陰性 (Negative)"
+              : isPositive
+                ? "陽性 (Positive)"
+                : isQualified
+                  ? "合格 (Qualified)"
+                  : "-"}
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-slate-50/80 p-4 rounded-2xl border border-slate-200 flex flex-col justify-center shadow-[inset_0_2px_4px_rgba(0,0,0,0.02)] h-full">
+      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+        <AlignLeft size={12} /> {qc.name}
+      </span>
+      <div className="flex items-center">
+        <span className="text-base font-black text-slate-800 break-words">
+          {qc.target_text || "-"}
+        </span>
+      </div>
+    </div>
+  );
+};
+
 export default function MaterialPage() {
   const isRD = useAuthStore((state) => state.isRD());
   const navigate = useNavigate();
@@ -316,19 +582,13 @@ export default function MaterialPage() {
     pack_capacity: "",
     storage_method: "ROOM_TEMP",
     dietary_type: "",
-    allergen_info: [], // 包含手動選擇與成分自帶的聯集
-    manual_allergen_info: [], // 專門紀錄使用者手動勾選的過敏原
+    allergen_info: [],
+    manual_allergen_info: [],
     storage_life: "",
     description: "",
     is_active: true,
     nutrition_fact: emptyNutrition,
-    qc_dilution_ratio: "",
-    qc_brix_min: "",
-    qc_brix_max: "",
-    qc_salt_min: "",
-    qc_salt_max: "",
-    qc_moisture_max: "",
-    qc_microbiology: [],
+    qc_standards: [],
     boms: [],
     ingredients: [],
     product_registration_no: "",
@@ -336,13 +596,11 @@ export default function MaterialPage() {
   };
   const [formData, setFormData] = useState(initialFormData);
 
-  // 成分搜尋相關 States
   const [ingSearchTerm, setIngSearchTerm] = useState("");
   const [ingSearchResults, setIngSearchResults] = useState([]);
   const [isIngDropdownOpen, setIsIngDropdownOpen] = useState(false);
   const ingSearchRef = useRef(null);
 
-  // 新增/編輯成分 Dialog States
   const initialIngForm = {
     name: "",
     source_type: "MANUAL",
@@ -412,6 +670,7 @@ export default function MaterialPage() {
   useEffect(() => {
     fetchMaterials();
   }, []);
+
   useEffect(() => {
     setCurrentPage(1);
   }, [searchTerm, filterType]);
@@ -452,34 +711,42 @@ export default function MaterialPage() {
     }));
   };
 
-  const handleAddMicrobio = () => {
+  const handleAddQC = () => {
     setFormData((prev) => ({
       ...prev,
-      qc_microbiology: [
-        ...(prev.qc_microbiology || []),
-        { item: "", limit: "" },
+      qc_standards: [
+        ...(prev.qc_standards || []),
+        {
+          format: "v2",
+          id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
+          name: "",
+          type: "range",
+          target_min: "",
+          target_max: "",
+          target_text: "",
+          target_bool: "NEGATIVE",
+        },
       ],
     }));
   };
 
-  const handleUpdateMicrobio = (index, field, value) => {
+  const handleUpdateQC = (id, field, value) => {
     setFormData((prev) => {
-      const newMicro = [...(prev.qc_microbiology || [])];
-      newMicro[index][field] = value;
-      return { ...prev, qc_microbiology: newMicro };
+      const updated = prev.qc_standards.map((qc) => {
+        if (qc.id === id) {
+          return { ...qc, [field]: value };
+        }
+        return qc;
+      });
+      return { ...prev, qc_standards: updated };
     });
   };
 
-  const handleRemoveMicrobio = (index) => {
-    setFormData((prev) => {
-      const newMicro = [...(prev.qc_microbiology || [])];
-      newMicro.splice(index, 1);
-      return { ...prev, qc_microbiology: newMicro };
-    });
-  };
-
-  const handleQuickDilution = (ratio) => {
-    setFormData((prev) => ({ ...prev, qc_dilution_ratio: ratio }));
+  const handleRemoveQC = (id) => {
+    setFormData((prev) => ({
+      ...prev,
+      qc_standards: prev.qc_standards.filter((qc) => qc.id !== id),
+    }));
   };
 
   const autoDetectAllergens = (foodName) => {
@@ -497,7 +764,6 @@ export default function MaterialPage() {
     return detected;
   };
 
-  // 搜尋現有成分 (Debounce 風格)
   useEffect(() => {
     const delayDebounceFn = setTimeout(async () => {
       if (ingSearchTerm.trim()) {
@@ -521,17 +787,18 @@ export default function MaterialPage() {
     return () => clearTimeout(delayDebounceFn);
   }, [ingSearchTerm]);
 
-  // 🌟 新增成分到清單中，並即時連動更新過敏原與營養素
   const handleAddIngredientToMaterial = (ingredient) => {
     if (formData.ingredients.find((i) => i.id === ingredient.id)) {
       showAlert("提示", "此成分已在清單中", "info");
       return;
     }
     const updatedIngredients = [...formData.ingredients, ingredient];
-    // 使用手動勾選的 + 所有成分自帶的
+
+    // 🌟 聯集時加入 boms
     const newAllergens = getMergedAllergens(
       formData.manual_allergen_info,
       updatedIngredients,
+      formData.boms,
     );
 
     setFormData((prev) => ({
@@ -547,15 +814,15 @@ export default function MaterialPage() {
     setIsIngDropdownOpen(false);
   };
 
-  // 🌟 移除成分，並「即時解除」該成分附帶的過敏原 (若非手動勾選)
   const handleRemoveIngredientFromMaterial = (ingId) => {
     const updatedIngredients = formData.ingredients.filter(
       (i) => i.id !== ingId,
     );
-    // 重算聯集：使用手動勾選的 + "剩餘"成分自帶的
+    // 🌟 聯集時加入 boms
     const newAllergens = getMergedAllergens(
       formData.manual_allergen_info,
       updatedIngredients,
+      formData.boms,
     );
 
     setFormData((prev) => ({
@@ -569,7 +836,6 @@ export default function MaterialPage() {
     }));
   };
 
-  // 🌟 原物料層級：手動勾選過敏原
   const handleManualAllergenChange = (e, allergenValue) => {
     const isChecked = e.target.checked;
     setFormData((prev) => {
@@ -582,10 +848,11 @@ export default function MaterialPage() {
         );
       }
 
-      // 畫面顯示的永遠是聯集 (手動 + 成分自帶)
+      // 🌟 聯集時加入 boms
       const newAllergenInfo = getMergedAllergens(
         newManualAllergens,
         prev.ingredients,
+        prev.boms,
       );
 
       return {
@@ -648,7 +915,6 @@ export default function MaterialPage() {
     }
   };
 
-  // 🌟 將選定的 TFDA 名稱填回 Search Bar
   const handleApplyIngTfdaResult = (item) => {
     const autoAllergens = autoDetectAllergens(item.name || "");
     const mergedAllergens = Array.from(
@@ -676,7 +942,6 @@ export default function MaterialPage() {
     setIsIngTfdaDropdownOpen(false);
   };
 
-  // 🌟 儲存成分 (支援 POST 新增 與 PUT 編輯)
   const handleSaveIngredient = async (e) => {
     e.preventDefault();
     if (!ingForm.name) return showAlert("警告", "請填寫成分名稱", "warning");
@@ -717,9 +982,11 @@ export default function MaterialPage() {
         const updatedIngredients = formData.ingredients.map((i) =>
           i.id === editingIngId ? savedIng : i,
         );
+        // 🌟 聯集時加入 boms
         const newAllergens = getMergedAllergens(
           formData.manual_allergen_info,
           updatedIngredients,
+          formData.boms,
         );
 
         setFormData((prev) => ({
@@ -760,6 +1027,7 @@ export default function MaterialPage() {
     showAlert("展算成功", "已依據底層 BOM 比例覆蓋營養數值。", "success");
   };
 
+  // 🌟 View Modal：動態提取來自配方 (BOM) 的成分
   const handleOpenViewModal = (material) => {
     let displayNut = material.nutrition_fact || emptyNutrition;
     if (
@@ -768,12 +1036,42 @@ export default function MaterialPage() {
     ) {
       displayNut = calculateNutritionFromBOMs(material.boms || []);
     }
+
+    // 手動添加的成分
     const extractedIngredients =
       material.ingredients?.map((i) => i.ingredient_detail) || [];
+
+    // 自動從 BOM 配方帶入的成分
+    const bomIngredientsMap = new Map();
+    (material.boms || [])
+      .filter((b) => b.is_active !== false)
+      .forEach((bom) => {
+        (bom.child_ingredients || []).forEach((ci) => {
+          if (ci.ingredient_detail) {
+            const ing = ci.ingredient_detail;
+            if (!bomIngredientsMap.has(ing.id)) {
+              bomIngredientsMap.set(ing.id, {
+                ...ing,
+                _from_bom: bom.child_name,
+              });
+            }
+          }
+        });
+      });
+
+    const manualIds = new Set(extractedIngredients.map((i) => i.id));
+    const finalBomIngredients = Array.from(bomIngredientsMap.values()).filter(
+      (i) => !manualIds.has(i.id),
+    );
+
+    const displayQC = normalizeQCStandards(material.qc_standards);
+
     setViewingMaterial({
       ...material,
       display_nutrition: displayNut,
       display_ingredients: extractedIngredients,
+      display_bom_ingredients: finalBomIngredients, // 新增：供預覽渲染
+      display_qc: displayQC,
     });
   };
 
@@ -785,20 +1083,24 @@ export default function MaterialPage() {
     setIsModalOpen(true);
   };
 
+  // 🌟 Edit Modal：初始化與展開過敏原/成分
   const handleOpenEditModal = (material) => {
     if (!isRD)
       return showAlert("權限不足", "僅有研發部可以編輯物料。", "warning");
     setEditingId(material.id);
 
-    // 找出哪些是「純手動」勾選的，以保留使用者的操作
     const parsedIngredients =
       material.ingredients?.map((i) => i.ingredient_detail) || [];
     const dbAllergens = material.allergen_info
       ? material.allergen_info.split(",").map((s) => s.trim())
       : [];
-    const ingAllergens = getIngredientsOnlyAllergens(parsedIngredients);
 
-    // 手動過敏原 = 總共的過敏原 減去 成分自帶的過敏原
+    // 🌟 計算系統自動帶入的過敏原 (手動成分 + BOM配方)
+    const ingAllergens = getIngredientsOnlyAllergens(
+      parsedIngredients,
+      material.boms || [],
+    );
+
     const manualAllergens = dbAllergens.filter(
       (a) => !ingAllergens.includes(a),
     );
@@ -810,6 +1112,8 @@ export default function MaterialPage() {
     ) {
       editNut = calculateNutritionFromBOMs(material.boms || []);
     }
+
+    const editQC = normalizeQCStandards(material.qc_standards);
 
     setFormData({
       ...material,
@@ -824,33 +1128,12 @@ export default function MaterialPage() {
       is_active: material.is_active !== false,
       product_registration_no: material.product_registration_no || "",
       allergen_info: dbAllergens,
-      manual_allergen_info: manualAllergens, // 載入時復原手動紀錄
+      manual_allergen_info: manualAllergens,
       nutrition_fact: editNut,
       ingredients: parsedIngredients,
-      qc_dilution_ratio: material.qc_dilution_ratio || "",
-      qc_brix_min:
-        material.qc_brix_min != null
-          ? parseFloat(material.qc_brix_min).toString()
-          : "",
-      qc_brix_max:
-        material.qc_brix_max != null
-          ? parseFloat(material.qc_brix_max).toString()
-          : "",
-      qc_salt_min:
-        material.qc_salt_min != null
-          ? parseFloat(material.qc_salt_min).toString()
-          : "",
-      qc_salt_max:
-        material.qc_salt_max != null
-          ? parseFloat(material.qc_salt_max).toString()
-          : "",
-      qc_moisture_max:
-        material.qc_moisture_max != null
-          ? parseFloat(material.qc_moisture_max).toString()
-          : "",
-      qc_microbiology: material.qc_microbiology || [],
       boms: material.boms || [],
       origin: material.origin || "",
+      qc_standards: editQC,
     });
 
     setIsModalOpen(true);
@@ -884,6 +1167,32 @@ export default function MaterialPage() {
           ingredient_id: i.id,
         }));
 
+        const cleanQC = formData.qc_standards
+          .filter((q) => q.name.trim() !== "")
+          .map((q) => {
+            if (q.type === "range")
+              return {
+                format: "v2",
+                type: "range",
+                name: q.name,
+                target_min: q.target_min,
+                target_max: q.target_max,
+              };
+            if (q.type === "boolean")
+              return {
+                format: "v2",
+                type: "boolean",
+                name: q.name,
+                target_bool: q.target_bool,
+              };
+            return {
+              format: "v2",
+              type: "text",
+              name: q.name,
+              target_text: q.target_text,
+            };
+          });
+
         const payload = {
           ...formData,
           dietary_type: formData.dietary_type || null,
@@ -892,6 +1201,7 @@ export default function MaterialPage() {
           ingredients: payloadIngredients,
           pack_capacity:
             formData.type === "PACK" ? formData.pack_capacity : null,
+          qc_standards: cleanQC,
         };
 
         const url = isEditing
@@ -955,6 +1265,26 @@ export default function MaterialPage() {
     startIndex + itemsPerPage,
   );
 
+  // 🌟 動態取得此表單目前所有 BOM 下層帶入的成分 (Edit Mode)
+  const formBomIngredients = useMemo(() => {
+    const map = new Map();
+    const manualIds = new Set((formData.ingredients || []).map((i) => i.id));
+
+    (formData.boms || [])
+      .filter((b) => b.is_active !== false)
+      .forEach((bom) => {
+        (bom.child_ingredients || []).forEach((ci) => {
+          if (ci.ingredient_detail && !manualIds.has(ci.ingredient_detail.id)) {
+            const ing = ci.ingredient_detail;
+            if (!map.has(ing.id)) {
+              map.set(ing.id, { ...ing, _from_bom: bom.child_name });
+            }
+          }
+        });
+      });
+    return Array.from(map.values());
+  }, [formData.boms, formData.ingredients]);
+
   return (
     <div className="p-6 md:p-8 max-w-7xl mx-auto bg-slate-50 min-h-screen font-sans text-slate-800 w-full">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
@@ -972,10 +1302,14 @@ export default function MaterialPage() {
         <ul className="list-disc list-inside space-y-1 ml-6 text-slate-700 font-medium">
           <li>檢視或維護原物料、半成品、成品、標籤以及包材資料。</li>
           <li>
-            支援輸入過敏原資訊，點擊成分標籤可直接設定該成分是否為添加物與法定上限。
+            配方過敏原與成分將會
+            <strong className="text-blue-700">
+              自動從底層 BOM 遞迴展算並聯集帶出
+            </strong>
+            ，免除人工遺漏。
           </li>
           <li>
-            原物料建檔支援國家 TFDA 資料檢索；半成品與成品{" "}
+            半成品與成品{" "}
             <strong className="text-blue-700">
               預設自動依 BOM 配方展算營養素
             </strong>
@@ -999,22 +1333,13 @@ export default function MaterialPage() {
               className="pl-9 pr-4 py-2.5 w-full bg-white border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 shadow-sm transition-all"
             />
           </div>
-          <div className="relative w-full sm:w-auto">
-            <select
+          <div className="relative w-full sm:w-40">
+            <CustomSelect
+              options={[{ label: "所有類型", value: "" }, ...TYPE_OPTIONS]}
               value={filterType}
-              onChange={(e) => setFilterType(e.target.value)}
-              className="w-full pl-4 pr-10 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 shadow-sm cursor-pointer transition-all appearance-none"
-            >
-              <option value="">所有類型</option>
-              {TYPE_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-            <ChevronDown
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
-              size={18}
+              onChange={(val) => setFilterType(val)}
+              placeholder="所有類型"
+              className="py-0.5"
             />
           </div>
           {searchTerm && (
@@ -1320,21 +1645,23 @@ export default function MaterialPage() {
                         <h4 className="text-[11px] font-black text-amber-600 uppercase tracking-widest mb-4 border-b border-slate-100 pb-2 flex items-center gap-1.5">
                           成分展開清單
                         </h4>
-                        {viewingMaterial.display_ingredients &&
-                        viewingMaterial.display_ingredients.length > 0 ? (
+
+                        {/* 🌟 區隔手動加入與配方帶入的成分 */}
+                        {(viewingMaterial.display_ingredients &&
+                          viewingMaterial.display_ingredients.length > 0) ||
+                        (viewingMaterial.display_bom_ingredients &&
+                          viewingMaterial.display_bom_ingredients.length >
+                            0) ? (
                           <div className="flex flex-wrap gap-2">
-                            {viewingMaterial.display_ingredients.map(
+                            {/* 手動成分 */}
+                            {viewingMaterial.display_ingredients?.map(
                               (ing, idx) => (
                                 <span
-                                  key={idx}
+                                  key={`manual-${idx}`}
                                   className="bg-amber-50 text-amber-900 border border-amber-200 pl-3 pr-2 py-1.5 rounded-lg text-sm font-bold shadow-sm flex items-center gap-2"
                                 >
-                                  {/* 成分名稱 */}
                                   <span>{ing.name}</span>
-
-                                  {/* 標籤群組 */}
                                   <div className="flex items-center gap-1.5 border-l border-amber-200/80 pl-2 ml-0.5">
-                                    {/* 來源標籤 */}
                                     {ing.source_type === "TFDA" ? (
                                       <span className="text-[10px] bg-blue-100/80 text-blue-700 border border-blue-200 px-1.5 py-0.5 rounded-md tracking-wider">
                                         TFDA
@@ -1344,8 +1671,29 @@ export default function MaterialPage() {
                                         手動
                                       </span>
                                     )}
+                                    {ing.is_additive && (
+                                      <span className="text-[10px] bg-orange-100 text-orange-700 border border-orange-200 px-1.5 py-0.5 rounded-md tracking-wider">
+                                        添加物
+                                      </span>
+                                    )}
+                                  </div>
+                                </span>
+                              ),
+                            )}
 
-                                    {/* 添加物標籤 */}
+                            {/* 配方自動帶入成分 */}
+                            {viewingMaterial.display_bom_ingredients?.map(
+                              (ing, idx) => (
+                                <span
+                                  key={`bom-${idx}`}
+                                  className="bg-slate-50 text-slate-600 border border-slate-200 pl-3 pr-2 py-1.5 rounded-lg text-sm font-bold shadow-sm flex items-center gap-2"
+                                  title={`來自配方: ${ing._from_bom}`}
+                                >
+                                  <span>{ing.name}</span>
+                                  <div className="flex items-center gap-1.5 border-l border-slate-200 pl-2 ml-0.5">
+                                    <span className="text-[10px] bg-slate-200/70 text-slate-500 border border-slate-300 px-1.5 py-0.5 rounded-md tracking-wider">
+                                      配方自動帶入
+                                    </span>
                                     {ing.is_additive && (
                                       <span className="text-[10px] bg-orange-100 text-orange-700 border border-orange-200 px-1.5 py-0.5 rounded-md tracking-wider">
                                         添加物
@@ -1367,119 +1715,19 @@ export default function MaterialPage() {
                         <h4 className="text-[11px] font-black text-indigo-500 uppercase tracking-widest mb-4 border-b border-slate-100 pb-2 flex items-center gap-1.5">
                           <Activity size={14} /> 廠內品管與檢驗標準
                         </h4>
-                        <div className="flex flex-col gap-4 mb-6">
-                          <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 flex items-center justify-between">
-                            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
-                              檢測稀釋比例
-                            </span>
-                            <span className="text-lg font-black text-slate-800">
-                              {viewingMaterial.qc_dilution_ratio || "-"}
-                            </span>
+
+                        {viewingMaterial.display_qc &&
+                        viewingMaterial.display_qc.length > 0 ? (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                            {viewingMaterial.display_qc.map((qc) => (
+                              <QCCardView key={qc.id} qc={qc} />
+                            ))}
                           </div>
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                            <div className="bg-blue-50/50 p-4 rounded-2xl border border-blue-100 flex flex-col justify-center">
-                              <span className="text-[10px] font-bold text-blue-600 uppercase tracking-wider mb-1">
-                                Brix (糖度) %
-                              </span>
-                              <div className="flex items-baseline gap-1">
-                                <span className="text-lg font-black text-blue-700 font-mono">
-                                  {formatDisplayNum(
-                                    viewingMaterial.qc_brix_min,
-                                  ) || "-"}
-                                </span>
-                                <span className="text-xs font-bold text-blue-400">
-                                  ~
-                                </span>
-                                <span className="text-lg font-black text-blue-700 font-mono">
-                                  {formatDisplayNum(
-                                    viewingMaterial.qc_brix_max,
-                                  ) || "-"}
-                                </span>
-                              </div>
-                            </div>
-                            <div className="bg-emerald-50/50 p-4 rounded-2xl border border-emerald-100 flex flex-col justify-center">
-                              <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider mb-1">
-                                Salt (鹽度) %
-                              </span>
-                              <div className="flex items-baseline gap-1">
-                                <span className="text-lg font-black text-emerald-700 font-mono">
-                                  {formatDisplayNum(
-                                    viewingMaterial.qc_salt_min,
-                                  ) || "-"}
-                                </span>
-                                <span className="text-xs font-bold text-emerald-400">
-                                  ~
-                                </span>
-                                <span className="text-lg font-black text-emerald-700 font-mono">
-                                  {formatDisplayNum(
-                                    viewingMaterial.qc_salt_max,
-                                  ) || "-"}
-                                </span>
-                              </div>
-                            </div>
-                            <div className="bg-sky-50/50 p-4 rounded-2xl border border-sky-100 flex flex-col justify-center">
-                              <span className="text-[10px] font-bold text-sky-600 uppercase tracking-wider mb-1">
-                                水分上限 %
-                              </span>
-                              <div className="flex items-baseline gap-1">
-                                {viewingMaterial.qc_moisture_max ? (
-                                  <>
-                                    <span className="text-sm font-bold text-sky-500 mr-1">
-                                      {"<"}
-                                    </span>
-                                    <span className="text-lg font-black text-sky-700 font-mono">
-                                      {formatDisplayNum(
-                                        viewingMaterial.qc_moisture_max,
-                                      )}
-                                    </span>
-                                  </>
-                                ) : (
-                                  <span className="text-lg font-black text-slate-400">
-                                    -
-                                  </span>
-                                )}
-                              </div>
-                            </div>
+                        ) : (
+                          <div className="text-sm text-slate-400 font-bold py-8 text-center border-2 border-dashed border-slate-100 rounded-2xl">
+                            尚未設定任何品管檢驗標準
                           </div>
-                        </div>
-                        <div className="border-t border-slate-100 pt-4">
-                          <span className="text-[10px] uppercase font-bold text-slate-400 mb-3 block">
-                            微生物與其他法定檢驗
-                          </span>
-                          {viewingMaterial.qc_microbiology &&
-                          viewingMaterial.qc_microbiology.length > 0 ? (
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                              {viewingMaterial.qc_microbiology.map(
-                                (item, idx) => (
-                                  <div
-                                    key={idx}
-                                    className="flex items-start gap-3 bg-white border border-slate-200 px-4 py-3 rounded-xl shadow-sm"
-                                  >
-                                    <CheckCircle2
-                                      size={18}
-                                      className="text-emerald-500 shrink-0 mt-0.5"
-                                    />
-                                    <div className="flex-1 min-w-0">
-                                      <div className="font-bold text-slate-700 text-sm break-words mb-1.5">
-                                        {item.item}
-                                      </div>
-                                      <div className="text-xs font-black text-indigo-700 bg-indigo-50 px-2.5 py-1 rounded-md border border-indigo-100 inline-block break-words">
-                                        <span className="text-[10px] text-indigo-400 uppercase tracking-wider mr-1.5 font-bold">
-                                          檢驗標準
-                                        </span>
-                                        {item.limit}
-                                      </div>
-                                    </div>
-                                  </div>
-                                ),
-                              )}
-                            </div>
-                          ) : (
-                            <div className="text-sm font-medium text-slate-400 bg-slate-50 rounded-xl p-4 text-center border border-dashed border-slate-200">
-                              未設定微生物或法定檢驗項目
-                            </div>
-                          )}
-                        </div>
+                        )}
                       </div>
 
                       <div className="bg-white p-6 rounded-3xl border border-slate-200/60 shadow-[0_2px_10px_-4px_rgba(0,0,0,0.05)]">
@@ -1667,47 +1915,25 @@ export default function MaterialPage() {
                       <label className="block text-[11px] font-bold text-slate-500 mb-1.5 uppercase">
                         類型
                       </label>
-                      <div className="relative">
-                        <select
-                          name="type"
-                          value={formData.type}
-                          onChange={handleInputChange}
-                          className="w-full pl-4 pr-10 py-3 border border-slate-300 rounded-xl focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none bg-white text-sm font-bold text-slate-800 cursor-pointer transition-all shadow-sm appearance-none"
-                        >
-                          {TYPE_OPTIONS.map((opt) => (
-                            <option key={opt.value} value={opt.value}>
-                              {opt.label}
-                            </option>
-                          ))}
-                        </select>
-                        <ChevronDown
-                          className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
-                          size={18}
-                        />
-                      </div>
+                      <CustomSelect
+                        options={TYPE_OPTIONS}
+                        value={formData.type}
+                        onChange={(val) =>
+                          setFormData((prev) => ({ ...prev, type: val }))
+                        }
+                      />
                     </div>
                     <div>
                       <label className="block text-[11px] font-bold text-slate-500 mb-1.5 uppercase">
                         使用階段
                       </label>
-                      <div className="relative">
-                        <select
-                          name="phase"
-                          value={formData.phase}
-                          onChange={handleInputChange}
-                          className="w-full pl-4 pr-10 py-3 border border-slate-300 rounded-xl focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none bg-white text-sm font-bold text-slate-800 cursor-pointer transition-all shadow-sm appearance-none"
-                        >
-                          {PHASE_OPTIONS.map((opt) => (
-                            <option key={opt.value} value={opt.value}>
-                              {opt.label}
-                            </option>
-                          ))}
-                        </select>
-                        <ChevronDown
-                          className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
-                          size={18}
-                        />
-                      </div>
+                      <CustomSelect
+                        options={PHASE_OPTIONS}
+                        value={formData.phase}
+                        onChange={(val) =>
+                          setFormData((prev) => ({ ...prev, phase: val }))
+                        }
+                      />
                     </div>
                     <div>
                       <label className="block text-[11px] font-bold text-slate-500 mb-1.5 uppercase">
@@ -1727,48 +1953,35 @@ export default function MaterialPage() {
                       <label className="block text-[11px] font-bold text-slate-500 mb-1.5 uppercase">
                         保存方式 <span className="text-red-500">*</span>
                       </label>
-                      <div className="relative">
-                        <select
-                          name="storage_method"
-                          value={formData.storage_method}
-                          onChange={handleInputChange}
-                          className="w-full pl-4 pr-10 py-3 border border-slate-300 rounded-xl focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none bg-white text-sm font-bold text-slate-800 cursor-pointer transition-all shadow-sm appearance-none"
-                        >
-                          {STORAGE_OPTIONS.map((opt) => (
-                            <option key={opt.value} value={opt.value}>
-                              {opt.label}
-                            </option>
-                          ))}
-                        </select>
-                        <ChevronDown
-                          className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
-                          size={18}
-                        />
-                      </div>
+                      <CustomSelect
+                        options={STORAGE_OPTIONS}
+                        value={formData.storage_method}
+                        onChange={(val) =>
+                          setFormData((prev) => ({
+                            ...prev,
+                            storage_method: val,
+                          }))
+                        }
+                      />
                     </div>
                     <div>
                       <label className="block text-[11px] font-bold text-slate-500 mb-1.5 uppercase">
                         素食類別
                       </label>
-                      <div className="relative">
-                        <select
-                          name="dietary_type"
-                          value={formData.dietary_type}
-                          onChange={handleInputChange}
-                          className="w-full pl-4 pr-10 py-3 border border-slate-300 rounded-xl focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none bg-white text-sm font-bold text-slate-800 cursor-pointer transition-all shadow-sm appearance-none"
-                        >
-                          <option value="">未設定</option>
-                          {DIETARY_OPTIONS.map((opt) => (
-                            <option key={opt.value} value={opt.value}>
-                              {opt.label}
-                            </option>
-                          ))}
-                        </select>
-                        <ChevronDown
-                          className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
-                          size={18}
-                        />
-                      </div>
+                      <CustomSelect
+                        options={[
+                          { label: "未設定", value: "" },
+                          ...DIETARY_OPTIONS,
+                        ]}
+                        value={formData.dietary_type}
+                        onChange={(val) =>
+                          setFormData((prev) => ({
+                            ...prev,
+                            dietary_type: val,
+                          }))
+                        }
+                        placeholder="未設定"
+                      />
                     </div>
                     {formData.type === "PACK" && (
                       <div className="animate-in fade-in">
@@ -1801,9 +2014,10 @@ export default function MaterialPage() {
                         </span>
                       </h4>
                       <div className="mb-5 flex flex-wrap gap-2">
+                        {/* 手動加入的成分 */}
                         {formData.ingredients.map((ing) => (
                           <span
-                            key={ing.id}
+                            key={`manual-edit-${ing.id}`}
                             className="bg-amber-50 text-amber-900 border border-amber-200 pl-3 pr-1 py-1.5 rounded-lg text-sm font-bold shadow-sm flex items-center gap-2 group transition-all hover:shadow-md"
                           >
                             <span
@@ -1813,8 +2027,7 @@ export default function MaterialPage() {
                             >
                               <span>{ing.name}</span>
 
-                              {/* 標籤群組 */}
-                              <div className="flex items-center gap-1.5 border-l border-amber-200/80 pl-2">
+                              <div className="flex items-center gap-1.5 border-l border-amber-200/80 pl-2 ml-0.5">
                                 {ing.source_type === "TFDA" ? (
                                   <span className="text-[10px] bg-blue-100/80 text-blue-700 border border-blue-200 px-1.5 py-0.5 rounded-md tracking-wider">
                                     TFDA
@@ -1843,6 +2056,27 @@ export default function MaterialPage() {
                             >
                               ×
                             </button>
+                          </span>
+                        ))}
+
+                        {/* 🌟 渲染由 BOM 繼承的成分 (唯讀) */}
+                        {formBomIngredients.map((ing) => (
+                          <span
+                            key={`bom-edit-${ing.id}`}
+                            className="bg-slate-50 text-slate-600 border border-slate-200 pl-3 pr-3 py-1.5 rounded-lg text-sm font-bold shadow-sm flex items-center gap-2 group cursor-not-allowed"
+                            title={`來自配方: ${ing._from_bom}`}
+                          >
+                            <span>{ing.name}</span>
+                            <div className="flex items-center gap-1.5 border-l border-slate-200 pl-2 ml-0.5">
+                              <span className="text-[10px] bg-slate-200/70 text-slate-500 border border-slate-300 px-1.5 py-0.5 rounded-md tracking-wider">
+                                配方自動帶入
+                              </span>
+                              {ing.is_additive && (
+                                <span className="text-[10px] bg-orange-100 text-orange-700 border border-orange-200 px-1.5 py-0.5 rounded-md tracking-wider">
+                                  添加物
+                                </span>
+                              )}
+                            </div>
                           </span>
                         ))}
                       </div>
@@ -1876,7 +2110,6 @@ export default function MaterialPage() {
                                 >
                                   <div>
                                     <div className="font-bold text-slate-800 text-sm group-hover:text-amber-700 mb-1 flex items-center gap-1.5">
-                                      {/* 🌟 搜尋結果增加 Source 標示 */}
                                       {res.source_type === "TFDA" ? (
                                         <ShieldCheck
                                           size={14}
@@ -2009,176 +2242,133 @@ export default function MaterialPage() {
                     </div>
 
                     <div className="bg-white p-6 rounded-3xl border border-slate-200/60 shadow-[0_2px_10px_-4px_rgba(0,0,0,0.05)]">
-                      <h4 className="text-[11px] font-black text-indigo-500 uppercase tracking-widest mb-5 border-b border-slate-100 pb-2 flex items-center gap-1.5">
-                        <Activity size={14} /> 廠內品管與檢驗標準
-                      </h4>
-                      <div className="flex flex-col gap-5 mb-8">
-                        <div className="flex flex-col md:flex-row md:items-center gap-4 bg-slate-50 p-4 rounded-2xl border border-slate-100">
-                          <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap min-w-max">
-                            檢測稀釋比例
-                          </label>
-                          <input
-                            type="text"
-                            name="qc_dilution_ratio"
-                            value={formData.qc_dilution_ratio}
-                            onChange={handleInputChange}
-                            className="flex-1 px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-black text-slate-800 focus:outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-500/10 transition-all shadow-sm"
-                            placeholder="例如: 原液, 1:1"
-                          />
-                          <div className="flex flex-wrap gap-2">
-                            {["原液", "1:1", "1:5", "1:10"].map((ratio) => (
-                              <button
-                                key={ratio}
-                                type="button"
-                                onClick={() => handleQuickDilution(ratio)}
-                                className="px-3 py-2 bg-white border border-slate-200 text-slate-500 text-xs font-bold rounded-xl hover:border-indigo-400 hover:text-indigo-600 transition-colors shadow-sm whitespace-nowrap"
-                              >
-                                {ratio}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-                          <div className="bg-blue-50/50 p-5 rounded-2xl border border-blue-100 flex flex-col justify-start">
-                            <label className="text-[10px] font-bold text-blue-600 uppercase tracking-wider mb-3">
-                              Brix (糖度) 範圍 %
-                            </label>
-                            <div className="flex items-center gap-2">
-                              <input
-                                type="number"
-                                step="any"
-                                name="qc_brix_min"
-                                value={formData.qc_brix_min}
-                                onChange={handleInputChange}
-                                placeholder="Min"
-                                className="w-full px-3 py-2.5 bg-white border border-blue-200 rounded-xl text-center text-sm font-black text-blue-800 font-mono focus:outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-500/20 shadow-sm transition-all"
-                              />
-                              <span className="font-black text-blue-400">
-                                ~
-                              </span>
-                              <input
-                                type="number"
-                                step="any"
-                                name="qc_brix_max"
-                                value={formData.qc_brix_max}
-                                onChange={handleInputChange}
-                                placeholder="Max"
-                                className="w-full px-3 py-2.5 bg-white border border-blue-200 rounded-xl text-center text-sm font-black text-blue-800 font-mono focus:outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-500/20 shadow-sm transition-all"
-                              />
-                            </div>
-                          </div>
-                          <div className="bg-emerald-50/50 p-5 rounded-2xl border border-emerald-100 flex flex-col justify-start">
-                            <label className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider mb-3">
-                              Salt (鹽度) 範圍 %
-                            </label>
-                            <div className="flex items-center gap-2">
-                              <input
-                                type="number"
-                                step="any"
-                                name="qc_salt_min"
-                                value={formData.qc_salt_min}
-                                onChange={handleInputChange}
-                                placeholder="Min"
-                                className="w-full px-3 py-2.5 bg-white border border-emerald-200 rounded-xl text-center text-sm font-black text-emerald-800 font-mono focus:outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-500/20 shadow-sm transition-all"
-                              />
-                              <span className="font-black text-emerald-400">
-                                ~
-                              </span>
-                              <input
-                                type="number"
-                                step="any"
-                                name="qc_salt_max"
-                                value={formData.qc_salt_max}
-                                onChange={handleInputChange}
-                                placeholder="Max"
-                                className="w-full px-3 py-2.5 bg-white border border-emerald-200 rounded-xl text-center text-sm font-black text-emerald-800 font-mono focus:outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-500/20 shadow-sm transition-all"
-                              />
-                            </div>
-                          </div>
-                          <div className="bg-sky-50/50 p-5 rounded-2xl border border-sky-100 flex flex-col justify-start">
-                            <label className="text-[10px] font-bold text-sky-600 uppercase tracking-wider mb-3">
-                              水分上限 %
-                            </label>
-                            <div className="flex items-center gap-2">
-                              <span className="font-black text-sky-500 pl-2">
-                                {"<"}
-                              </span>
-                              <input
-                                type="number"
-                                step="any"
-                                name="qc_moisture_max"
-                                value={formData.qc_moisture_max}
-                                onChange={handleInputChange}
-                                placeholder="例如: 10"
-                                className="w-full px-4 py-2.5 bg-white border border-sky-200 rounded-xl text-center text-base font-black text-sky-800 font-mono focus:outline-none focus:border-sky-400 focus:ring-4 focus:ring-sky-500/20 shadow-sm transition-all"
-                              />
-                            </div>
-                          </div>
-                        </div>
+                      <div className="flex justify-between items-center mb-5 border-b border-slate-100 pb-2">
+                        <h4 className="text-[11px] font-black text-indigo-500 uppercase tracking-widest flex items-center gap-1.5">
+                          <Activity size={14} /> 廠內品管與檢驗標準
+                        </h4>
+                        <button
+                          type="button"
+                          onClick={handleAddQC}
+                          className="px-4 py-1.5 bg-[#007AFF] text-white text-xs font-black rounded-lg hover:bg-[#0056b3] transition-colors flex items-center gap-1 shadow-sm"
+                        >
+                          <Plus size={14} /> 新增項目
+                        </button>
                       </div>
 
-                      <div className="border-t border-slate-100 pt-6">
-                        <div className="flex justify-between items-center mb-5">
-                          <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-                            微生物與其他法定檢驗
-                          </label>
-                          <button
-                            type="button"
-                            onClick={handleAddMicrobio}
-                            className="px-4 py-2 bg-[#007AFF]/10 text-[#007AFF] text-xs font-black rounded-xl hover:bg-[#007AFF]/20 transition-colors"
+                      <div className="space-y-4">
+                        {formData.qc_standards?.map((item) => (
+                          <div
+                            key={item.id}
+                            className="bg-slate-50 p-4 rounded-2xl border border-slate-200 flex flex-col lg:flex-row gap-4 items-start lg:items-center animate-in slide-in-from-top-2"
                           >
-                            + 新增檢驗項目
-                          </button>
-                        </div>
-                        <div className="space-y-3">
-                          {formData.qc_microbiology?.map((item, idx) => (
-                            <div
-                              key={idx}
-                              className="flex items-center gap-3 animate-in slide-in-from-top-2"
+                            <input
+                              type="text"
+                              value={item.name}
+                              onChange={(e) =>
+                                handleUpdateQC(item.id, "name", e.target.value)
+                              }
+                              placeholder="項目名稱 (如: 糖度, 外觀...)"
+                              className="w-full lg:w-[220px] px-3 py-2 bg-white border border-slate-300 rounded-lg text-sm font-bold focus:outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/20"
+                            />
+                            <div className="relative shrink-0 w-full lg:w-[180px]">
+                              <CustomSelect
+                                options={QC_TYPE_OPTIONS}
+                                value={item.type}
+                                onChange={(val) =>
+                                  handleUpdateQC(item.id, "type", val)
+                                }
+                                className="py-0 border-slate-300"
+                                menuClassName="w-[180px]"
+                              />
+                            </div>
+
+                            <div className="flex-1 w-full flex items-center gap-2">
+                              {item.type === "range" && (
+                                <div className="flex items-center gap-2 w-full">
+                                  <input
+                                    type="number"
+                                    step="any"
+                                    value={item.target_min}
+                                    onChange={(e) =>
+                                      handleUpdateQC(
+                                        item.id,
+                                        "target_min",
+                                        e.target.value,
+                                      )
+                                    }
+                                    placeholder="下限"
+                                    className="flex-1 w-full px-3 py-2 bg-white border border-indigo-200 rounded-lg text-sm font-mono font-bold text-indigo-700 focus:outline-none focus:border-indigo-400"
+                                  />
+                                  <span className="text-slate-400 font-bold">
+                                    ~
+                                  </span>
+                                  <input
+                                    type="number"
+                                    step="any"
+                                    value={item.target_max}
+                                    onChange={(e) =>
+                                      handleUpdateQC(
+                                        item.id,
+                                        "target_max",
+                                        e.target.value,
+                                      )
+                                    }
+                                    placeholder="上限"
+                                    className="flex-1 w-full px-3 py-2 bg-white border border-indigo-200 rounded-lg text-sm font-mono font-bold text-indigo-700 focus:outline-none focus:border-indigo-400"
+                                  />
+                                </div>
+                              )}
+
+                              {item.type === "boolean" && (
+                                <div className="relative w-full">
+                                  <CustomSelect
+                                    options={QC_BOOL_OPTIONS}
+                                    value={item.target_bool}
+                                    onChange={(val) =>
+                                      handleUpdateQC(
+                                        item.id,
+                                        "target_bool",
+                                        val,
+                                      )
+                                    }
+                                    className="border-emerald-200 bg-emerald-50 text-emerald-700 py-0"
+                                  />
+                                </div>
+                              )}
+
+                              {item.type === "text" && (
+                                <input
+                                  type="text"
+                                  value={item.target_text}
+                                  onChange={(e) =>
+                                    handleUpdateQC(
+                                      item.id,
+                                      "target_text",
+                                      e.target.value,
+                                    )
+                                  }
+                                  placeholder="合格標準 (如: 呈現金黃色...)"
+                                  className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-sm font-bold text-slate-700 focus:bg-white focus:outline-none focus:border-indigo-400"
+                                />
+                              )}
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveQC(item.id)}
+                              className="p-2.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all shrink-0"
                             >
-                              <input
-                                type="text"
-                                value={item.item}
-                                onChange={(e) =>
-                                  handleUpdateMicrobio(
-                                    idx,
-                                    "item",
-                                    e.target.value,
-                                  )
-                                }
-                                placeholder="項目名稱 (如: 沙門氏菌)"
-                                className="flex-[2] px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:outline-none focus:bg-white focus:border-indigo-400 focus:ring-4 focus:ring-indigo-500/10 transition-all shadow-sm"
-                              />
-                              <input
-                                type="text"
-                                value={item.limit}
-                                onChange={(e) =>
-                                  handleUpdateMicrobio(
-                                    idx,
-                                    "limit",
-                                    e.target.value,
-                                  )
-                                }
-                                placeholder="合格標準 (如: 陰性 / 10ppb)"
-                                className="flex-[3] px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-indigo-700 focus:outline-none focus:bg-white focus:border-indigo-400 focus:ring-4 focus:ring-indigo-500/10 transition-all shadow-sm"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => handleRemoveMicrobio(idx)}
-                                className="p-3 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all"
-                              >
-                                <Trash2 size={20} />
-                              </button>
-                            </div>
-                          ))}
-                          {(!formData.qc_microbiology ||
-                            formData.qc_microbiology.length === 0) && (
-                            <div className="text-sm text-slate-400 font-bold py-6 text-center border-2 border-dashed border-slate-200 rounded-2xl">
-                              尚未設定任何檢驗項目
-                            </div>
-                          )}
-                        </div>
+                              <Trash2 size={18} />
+                            </button>
+                          </div>
+                        ))}
+
+                        {(!formData.qc_standards ||
+                          formData.qc_standards.length === 0) && (
+                          <div className="text-sm font-bold text-slate-400 py-8 text-center border-2 border-dashed border-slate-200 rounded-2xl">
+                            尚未設定任何檢驗項目
+                          </div>
+                        )}
                       </div>
                     </div>
 
@@ -2198,14 +2388,14 @@ export default function MaterialPage() {
                           </label>
                           <div className="flex flex-wrap gap-2">
                             {ALLERGEN_OPTIONS.map((allergen) => {
-                              // 畫面顯示以聯集為主 (formData.allergen_info)
                               const isChecked = formData.allergen_info.includes(
                                 allergen.value,
                               );
-                              // 判斷這個選項是否是由 "成分" 帶來的
+                              // 🌟 判斷是否由手動成分或BOM強制帶入
                               const isFromIngredients =
                                 getIngredientsOnlyAllergens(
                                   formData.ingredients,
+                                  formData.boms,
                                 ).includes(allergen.value);
 
                               return (
@@ -2222,7 +2412,7 @@ export default function MaterialPage() {
                                     type="checkbox"
                                     className="hidden"
                                     checked={isChecked}
-                                    disabled={isFromIngredients} // 如果是成分自帶的，禁止手動取消
+                                    disabled={isFromIngredients}
                                     onChange={(e) =>
                                       handleManualAllergenChange(
                                         e,
@@ -2316,7 +2506,7 @@ export default function MaterialPage() {
       )}
 
       {/* ========================================================= */}
-      {/* 🌟 新增/編輯「成分」 Sub-Modal (層級 60) - 添加物已移至此處 */}
+      {/* 🌟 新增/編輯「成分」 Sub-Modal */}
       {/* ========================================================= */}
       {ingModalOpen && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
@@ -2360,7 +2550,6 @@ export default function MaterialPage() {
                   />
                 </div>
 
-                {/* 🌟 移轉自原物料的添加物設定 */}
                 <div className="bg-indigo-50/50 p-5 rounded-2xl border border-indigo-100 relative">
                   <div className="flex items-center">
                     <label className="relative inline-flex items-center cursor-pointer">

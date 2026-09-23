@@ -23,6 +23,7 @@ import QuotationListPage from "./QuotationListPage.jsx";
 import QuotationEditPage from "./QuotationEditPage.jsx";
 import MaterialProviderPricePage from "./MaterialProviderPricePage.jsx";
 import ImpactAnalysisPage from "./ImpactAnalysisPage.jsx";
+import ProductionOrderQCPage from "./ProductionOrderQCPage.jsx";
 
 const router = createBrowserRouter([
   {
@@ -47,6 +48,10 @@ const router = createBrowserRouter([
               {
                 path: "production/:production_order_id",
                 element: <ProductionOrderDetailEditPage />,
+              },
+              {
+                path: "/production-qc/:production_order_id",
+                element: <ProductionOrderQCPage />,
               },
               {
                 path: "delivery-notes",

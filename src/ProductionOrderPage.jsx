@@ -50,13 +50,15 @@ const getFlattenedMaterials = (materials_info) => {
           isChild: false,
           code: materialCode,
           materialName: mat.materialName,
-          requiredQty: mat.requiredQty,
+          requiredQty: parseFloat(mat.requiredQty) || 0,
           allocatedQty: parseFloat(b.used),
           input_bags: b.input_bags,
           empty_bags: b.empty_bags,
           batch_number: b.batch_number,
           unit: mat.unit || "kg",
           remark: mat.remark || "",
+          type: mat.type,
+          sequence_num: mat.sequence_num || "",
         });
       });
     } else {
@@ -64,13 +66,15 @@ const getFlattenedMaterials = (materials_info) => {
         isChild: false,
         code: materialCode,
         materialName: mat.materialName,
-        requiredQty: mat.requiredQty,
-        allocatedQty: mat.requiredQty,
+        requiredQty: parseFloat(mat.requiredQty) || 0,
+        allocatedQty: parseFloat(mat.requiredQty) || 0,
         input_bags: "",
         empty_bags: "",
         batch_number: materialCode,
         unit: mat.unit || "kg",
         remark: mat.remark || "",
+        type: mat.type,
+        sequence_num: mat.sequence_num || "",
       });
     }
   });
@@ -103,7 +107,7 @@ const extractDates = (order) => {
     mfgDateShort = `${d.getFullYear()}/${(d.getMonth() + 1).toString().padStart(2, "0")}/${d.getDate().toString().padStart(2, "0")}`;
   }
 
-  let expDateStr = "";
+  let expDateStr = "詳見包裝標示";
   const storageLife = order.product_profile?.storage_life || "";
   const monthsMatch = storageLife.match(/(\d+)\s*個月/);
 
@@ -147,7 +151,11 @@ const getVendorName = (order) => {
 // ==============================================
 // 🌟 列印樣板 0：廠內生產流程單
 // ==============================================
-const ProductionFormTemplate = ({ order, isChildForm = false }) => {
+const ProductionFormTemplate = ({
+  order,
+  isChildForm = false,
+  sortBySequence = false,
+}) => {
   if (!order) return null;
 
   const orderDateStr = new Date(order.created_at).toLocaleDateString("zh-TW", {
@@ -155,7 +163,31 @@ const ProductionFormTemplate = ({ order, isChildForm = false }) => {
     month: "2-digit",
     day: "2-digit",
   });
+
   const flattenedMaterials = getFlattenedMaterials(order.materials_info);
+
+  // 🌟 依照 Toggle 狀態決定前端的即時排序邏輯
+  flattenedMaterials.sort((a, b) => {
+    if (sortBySequence) {
+      // 按照序號 (Sequence_num) 排序，若無序號則退回以數量排序
+      const seqA = String(a.sequence_num || "").trim();
+      const seqB = String(b.sequence_num || "").trim();
+      if (seqA && seqB)
+        return seqA.localeCompare(seqB, undefined, {
+          numeric: true,
+          sensitivity: "base",
+        });
+      if (seqA && !seqB) return -1;
+      if (!seqA && seqB) return 1;
+      return b.requiredQty - a.requiredQty;
+    } else {
+      // 預設原邏輯：半成品固定置頂，其餘按照用量由高到低
+      if (a.type === "SEMI" && b.type !== "SEMI") return -1;
+      if (a.type !== "SEMI" && b.type === "SEMI") return 1;
+      return b.requiredQty - a.requiredQty;
+    }
+  });
+
   let vInfo = {};
   try {
     vInfo =
@@ -1015,7 +1047,7 @@ const CoATemplateSingle = ({ order }) => {
 // ==============================================
 // 🌟 列印包裝元件 (完美還原 Flow 與隱藏網址標頭)
 // ==============================================
-const ProductionOrderPrintTemplate = ({ data, type }) => {
+const ProductionOrderPrintTemplate = ({ data, type, sortBySequence }) => {
   if (!data) return null;
   const dataArray = Array.isArray(data) ? data : [data];
 
@@ -1040,7 +1072,7 @@ const ProductionOrderPrintTemplate = ({ data, type }) => {
           @media print {
             @page { 
               size: A4 portrait; 
-              margin: 0; /* 🌟 隱藏列印的 URL、日期與頁碼 */
+              margin: 0; 
             }
             body { 
               -webkit-print-color-adjust: exact; 
@@ -1050,7 +1082,7 @@ const ProductionOrderPrintTemplate = ({ data, type }) => {
             }
             .page-break { page-break-after: always; }
             .print-container {
-               padding: 10mm; /* 避免文件邊緣被印表機裁切 */
+               padding: 10mm; 
                width: 100%;
             }
           }
@@ -1090,10 +1122,11 @@ const ProductionOrderPrintTemplate = ({ data, type }) => {
                   : "page-break print:pt-8"
               }
             >
-              {/* 🌟 完整還原原本傳給 Flow Template 的 isChildForm */}
+              {/* 🌟 完整還原原本傳給 Flow Template 的 isChildForm 與 sortBySequence */}
               <ProductionFormTemplate
                 order={orderToPrint}
                 isChildForm={idx !== 0}
+                sortBySequence={sortBySequence}
               />
             </div>
           ))}
@@ -1112,6 +1145,9 @@ export default function ProductionOrderPage() {
   const [filterOrder, setFilterOrder] = useState("");
   const [filterProduct, setFilterProduct] = useState("");
   const [filterVendor, setFilterVendor] = useState("");
+
+  // 🌟 新增：由前端控制是否依序號排版的狀態，預設走原邏輯
+  const [sortBySequence, setSortBySequence] = useState(false);
 
   const [expandedOrderIds, setExpandedOrderIds] = useState([]);
   const [detailedOrdersMap, setDetailedOrdersMap] = useState({});
@@ -1323,7 +1359,7 @@ export default function ProductionOrderPage() {
     }
   };
 
-  // 🌟 完全還原展開後的內部單遞迴渲染
+  // 🌟 遞迴渲染子訂單，並將 sortBySequence 開關傳入
   const renderChildrenOrders = (childrenArr, depth = 1) => {
     if (!childrenArr || childrenArr.length === 0) return null;
     return childrenArr.map((child, idx) => (
@@ -1337,7 +1373,11 @@ export default function ProductionOrderPage() {
           </div>
         )}
         <div className="shadow-xl ring-1 ring-black/5">
-          <ProductionFormTemplate order={child} isChildForm={true} />
+          <ProductionFormTemplate
+            order={child}
+            isChildForm={true}
+            sortBySequence={sortBySequence}
+          />
         </div>
         {renderChildrenOrders(child.children, depth + 1)}
       </div>
@@ -1366,8 +1406,9 @@ export default function ProductionOrderPage() {
         </div>
 
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-          <div className="p-6 border-b border-slate-100 flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4 bg-slate-50/50">
-            <div className="flex gap-3 flex-wrap w-full xl:w-auto">
+          <div className="p-5 md:p-6 border-b border-slate-100 flex flex-col gap-5 bg-slate-50/50">
+            {/* 搜尋區塊：改用 Grid 確保對齊不亂跳 */}
+            <div className="flex flex-wrap items-center gap-3 w-full xl:w-auto">
               <div className="relative">
                 <Search
                   className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
@@ -1375,10 +1416,10 @@ export default function ProductionOrderPage() {
                 />
                 <input
                   type="text"
-                  placeholder="過濾單號 (本地)"
+                  placeholder="搜尋單號"
                   value={filterOrder}
                   onChange={(e) => setFilterOrder(e.target.value)}
-                  className="pl-9 pr-4 py-2 bg-white border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-slate-400 focus:border-slate-400 focus:outline-none w-full sm:w-48 shadow-sm transition-all"
+                  className="w-full h-[40px] pl-9 pr-4 bg-white border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-slate-400 focus:outline-none shadow-sm transition-all"
                 />
               </div>
               <div className="relative">
@@ -1388,10 +1429,10 @@ export default function ProductionOrderPage() {
                 />
                 <input
                   type="text"
-                  placeholder="搜尋產品名稱..."
+                  placeholder="搜尋產品名稱"
                   value={filterProduct}
                   onChange={(e) => setFilterProduct(e.target.value)}
-                  className="pl-9 pr-4 py-2 bg-white border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-slate-400 focus:border-slate-400 focus:outline-none w-full sm:w-48 shadow-sm transition-all"
+                  className="w-full h-[40px] pl-9 pr-4 bg-white border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-slate-400 focus:outline-none shadow-sm transition-all"
                 />
               </div>
               <div className="relative">
@@ -1401,31 +1442,41 @@ export default function ProductionOrderPage() {
                 />
                 <input
                   type="text"
-                  placeholder="搜尋客戶名稱..."
+                  placeholder="搜尋客戶名稱"
                   value={filterVendor}
                   onChange={(e) => setFilterVendor(e.target.value)}
-                  className="pl-9 pr-4 py-2 bg-white border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-slate-400 focus:border-slate-400 focus:outline-none w-full sm:w-48 shadow-sm transition-all"
+                  className="w-full h-[40px] pl-9 pr-4 bg-white border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-slate-400 focus:outline-none shadow-sm transition-all"
                 />
               </div>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-3 w-full xl:w-auto mt-2 xl:mt-0">
               <div className="text-xs text-slate-400 font-bold flex items-center gap-2 mr-2">
                 {loading && <Loader2 size={14} className="animate-spin" />}共{" "}
                 {filteredOrders.length} 筆
               </div>
+            </div>
+
+            {/* 操作區塊：統一高度，整齊排列 */}
+            <div className="flex flex-wrap items-center gap-3 w-full xl:w-auto">
+              <label className="flex items-center gap-2 text-sm font-bold text-slate-600 bg-white border border-slate-200 px-3 h-[40px] rounded-lg shadow-sm cursor-pointer hover:bg-slate-50 transition-colors select-none">
+                <input
+                  type="checkbox"
+                  checked={sortBySequence}
+                  onChange={(e) => setSortBySequence(e.target.checked)}
+                  className="w-4 h-4 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500 cursor-pointer"
+                />
+                依自訂序號排序
+              </label>
 
               <button
                 onClick={() => handleBatchPrintCoA("Product")}
                 disabled={!filterProduct || filteredOrders.length === 0}
-                className="px-4 py-2 bg-indigo-600 text-white border border-indigo-700 rounded-lg text-sm font-bold shadow-sm hover:bg-indigo-700 transition-all disabled:opacity-30 flex items-center gap-2"
+                className="px-4 h-[40px] bg-indigo-600 text-white border border-indigo-700 rounded-lg text-sm font-bold shadow-sm hover:bg-indigo-700 transition-all disabled:opacity-30 flex items-center gap-2"
               >
                 <ClipboardCheck size={16} /> 批次產生產品報告
               </button>
               <button
                 onClick={() => handleBatchPrintCoA("Vendor")}
                 disabled={!filterVendor || filteredOrders.length === 0}
-                className="px-4 py-2 bg-emerald-600 text-white border border-emerald-700 rounded-lg text-sm font-bold shadow-sm hover:bg-emerald-700 transition-all disabled:opacity-30 flex items-center gap-2"
+                className="px-4 h-[40px] bg-emerald-600 text-white border border-emerald-700 rounded-lg text-sm font-bold shadow-sm hover:bg-emerald-700 transition-all disabled:opacity-30 flex items-center gap-2"
               >
                 <ClipboardCheck size={16} /> 批次產生客戶報告
               </button>
@@ -1530,7 +1581,7 @@ export default function ProductionOrderPage() {
                                     : "品管檢驗"}
                               </button>
 
-                              {/* 4. 產生報告 (原: 產出 CoA) 移到右側 */}
+                              {/* 4. 產生報告 */}
                               <button
                                 onClick={(e) =>
                                   handlePrintRow(e, po, "CoA_Single")
@@ -1562,9 +1613,10 @@ export default function ProductionOrderPage() {
                                           <ProductionFormTemplate
                                             order={detailedOrdersMap[po.id]}
                                             isChildForm={false}
+                                            sortBySequence={sortBySequence}
                                           />
                                         </div>
-                                        {/* 🌟 保留子配方的展開 */}
+                                        {/* 保留子配方的展開 */}
                                         {renderChildrenOrders(
                                           detailedOrdersMap[po.id].children,
                                         )}
@@ -1610,7 +1662,11 @@ export default function ProductionOrderPage() {
       </div>
 
       {printData && (
-        <ProductionOrderPrintTemplate data={printData} type={printType} />
+        <ProductionOrderPrintTemplate
+          data={printData}
+          type={printType}
+          sortBySequence={sortBySequence}
+        />
       )}
     </>
   );

@@ -540,7 +540,7 @@ const CoATemplateProduct = ({ orders }) => {
               colSpan={standards.length + 2}
               className="border border-black p-1 px-2 text-right text-[12px]"
             >
-              ※規格詳見A-7-03成品管制標準
+              {/* ※規格詳見A-7-03成品管制標準 */}
             </td>
           </tr>
 

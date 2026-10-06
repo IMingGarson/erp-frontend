@@ -609,7 +609,7 @@ const MaterialAllocationList = ({
               String(b.child?.id) === String(matId),
           );
           const seqLabel = currentBom?.sequence_num
-            ? `[序: ${currentBom.sequence_num}] `
+            ? `(序號: ${currentBom.sequence_num}) `
             : "";
 
           return (
@@ -812,11 +812,11 @@ const RequirementOrderPage = () => {
     spec: "",
     quantity: "",
     unit: "箱",
-    sales_unit_quantity: 1,
+    sales_unit_quantity: "1",
     sales_pack_unit: "包",
-    sales_pack_quantity: 10,
-    outer_capacity: 10,
-    inner_capacity: 1,
+    sales_pack_quantity: "", // 🌟 清除預設 10
+    outer_capacity: "", // 🌟 清除預設 10
+    inner_capacity: "", // 🌟 清除預設 1
     unit_price: "",
     outer_pack_id: null,
     inner_pack_id: null,
@@ -969,61 +969,31 @@ const RequirementOrderPage = () => {
     }
   };
 
-  // 🌟 自動推導 Custom Spec 的副作用處理，並做去零格式化
-  useEffect(() => {
-    setFormItems((prev) => {
-      let hasChanges = false;
-      const newItems = prev.map((item) => {
-        if (item.profile_id === "custom") {
-          let generatedSpec = "";
-          const hasInner = !!item.inner_pack_id;
-          const hasOuter = !!item.outer_pack_id;
+  const getGeneratedSpec = (item) => {
+    const cleanNumStr = (val) => {
+      const n = Number(val);
+      return isNaN(n) ? "0" : n.toString();
+    };
 
-          // 使用 Number().toString() 安全去除多餘小數點 (例如: 10.000 -> 10)
-          const cleanNumStr = (val) => {
-            const n = Number(val);
-            return isNaN(n) ? "0" : n.toString();
-          };
+    const outerUnit = item.unit || "箱";
+    const innerUnit = item.sales_pack_unit || "包";
+    const innerCap = cleanNumStr(item.inner_capacity);
+    const packQty = cleanNumStr(item.sales_pack_quantity);
+    const outerCap = cleanNumStr(item.outer_capacity);
 
-          const outerUnit = item.unit || "箱";
-          const innerUnit = item.sales_pack_unit || "包";
-          const innerCap = cleanNumStr(item.inner_capacity);
-          const packQty = cleanNumStr(item.sales_pack_quantity);
-          let outerCap = cleanNumStr(item.outer_capacity);
+    const hasInner =
+      !!item.inner_pack_id ||
+      (Number(item.inner_capacity) > 0 && Number(item.sales_pack_quantity) > 0);
+    const hasOuter = !!item.outer_pack_id || Number(item.outer_capacity) > 0;
 
-          let newOuterCap = item.outer_capacity;
+    if (!hasInner && !hasOuter) return "";
 
-          // 🌟 嚴格對齊 Quotation 格式邏輯：去掉贅字，並統一小數去零
-          if (hasInner) {
-            generatedSpec = `${innerCap}KG*${packQty}${innerUnit}/${outerUnit}`;
-            const calcOuterCap = cleanNumStr(
-              Number(item.inner_capacity) * Number(item.sales_pack_quantity),
-            );
-            if (outerCap !== calcOuterCap) {
-              newOuterCap = calcOuterCap;
-              outerCap = calcOuterCap;
-            }
-          } else if (hasOuter || Number(item.outer_capacity) > 0) {
-            generatedSpec = `${outerCap}KG/${outerUnit}`;
-          }
-
-          if (
-            item.spec !== generatedSpec ||
-            item.outer_capacity !== newOuterCap
-          ) {
-            hasChanges = true;
-            return {
-              ...item,
-              spec: generatedSpec,
-              outer_capacity: newOuterCap,
-            };
-          }
-        }
-        return item;
-      });
-      return hasChanges ? newItems : prev;
-    });
-  }, [formItems, packMaterials]);
+    if (hasInner) {
+      return `${innerCap}KG*${packQty}${innerUnit}/${outerUnit}`;
+    } else {
+      return `${outerCap}KG/${outerUnit}`;
+    }
+  };
 
   const toggleMaterialExpanded = (key) =>
     setExpandedMaterials((prev) =>
@@ -1213,11 +1183,11 @@ const RequirementOrderPage = () => {
               spec: "",
               unit: product.unit || "箱",
               unit_price: "",
-              sales_unit_quantity: 1,
+              sales_unit_quantity: "1",
               sales_pack_unit: "包",
-              sales_pack_quantity: 10,
-              outer_capacity: 10,
-              inner_capacity: 1,
+              sales_pack_quantity: "", // 🌟 改為空字串
+              outer_capacity: "", // 🌟 改為空字串
+              inner_capacity: "", // 🌟 改為空字串
               outer_pack_id: null,
               inner_pack_id: null,
             }
@@ -1235,18 +1205,20 @@ const RequirementOrderPage = () => {
         );
         if (!product) return item;
 
-        if (profileId === "custom") {
+        if (profileId === "custom" || !profileId) {
           return {
             ...item,
-            profile_id: "custom",
+            profile_id: profileId,
             spec: "",
             unit: product.unit || "箱",
             unit_price: "",
-            sales_unit_quantity: 1,
+            sales_unit_quantity: "1",
             sales_pack_unit: "包",
-            sales_pack_quantity: 10,
+            sales_pack_quantity: "", // 🌟 改為空字串
             outer_pack_id: null,
             inner_pack_id: null,
+            outer_capacity: "", // 🌟 改為空字串
+            inner_capacity: "", // 🌟 改為空字串
           };
         }
         if (!profileId) {
@@ -1501,7 +1473,7 @@ const RequirementOrderPage = () => {
       );
 
       if (directChildren.length === 0)
-        itemReqs[productId] = { qty: qtyValue, remark: "" };
+        itemReqs[productId] = { qty: qtyValue, remark: "", sequence_num: "" };
       else {
         directChildren.forEach((c) => {
           const childMat = c.child;
@@ -1509,8 +1481,13 @@ const RequirementOrderPage = () => {
             const baseQty = parseFloat(c.base_quantity || 1);
             const reqQty =
               qtyValue * (parseFloat(c.quantity_required) / baseQty);
-            if (!itemReqs[childMat.id])
-              itemReqs[childMat.id] = { qty: 0, remark: c.remark || "" };
+            if (!itemReqs[childMat.id]) {
+              itemReqs[childMat.id] = {
+                qty: 0,
+                remark: c.remark || "",
+                sequence_num: c.sequence_num || "",
+              };
+            }
             itemReqs[childMat.id].qty += reqQty;
           }
         });
@@ -1572,6 +1549,7 @@ const RequirementOrderPage = () => {
           batches: batchAllocations,
           isShortage: remainingToFulfill > 0.0001,
           remark: remark,
+          sequence_num: itemReqs[matIdStr].sequence_num || "",
         };
       });
 
@@ -1699,7 +1677,12 @@ const RequirementOrderPage = () => {
   );
 
   const handleOpenPreview = () => {
-    const validItems = formItems.filter((i) => i.product_id);
+    const validItems = formItems
+      .filter((i) => i.product_id)
+      .map((item) => ({
+        ...item,
+        spec: item.profile_id === "custom" ? getGeneratedSpec(item) : item.spec,
+      }));
     const payloadData = {
       isPreview: true,
       order_number: "預覽單號",
@@ -1744,7 +1727,7 @@ const RequirementOrderPage = () => {
                 vendor: vendorData.id,
                 product: item.product_id,
                 material: item.product_id,
-                spec: item.spec,
+                spec: getGeneratedSpec(item),
                 sales_unit: item.unit,
                 sales_pack_unit: item.sales_pack_unit,
                 sales_unit_quantity: item.sales_unit_quantity,
@@ -1828,7 +1811,8 @@ const RequirementOrderPage = () => {
           product_id: item.product_id,
           mrp_id: matchedMrp.id,
           document_note: documentNote,
-          spec: item.spec,
+          spec:
+            item.profile_id === "custom" ? getGeneratedSpec(item) : item.spec,
           quantity: item.quantity,
           unit: item.unit,
           unit_price: item.unit_price ? Number(item.unit_price) : null,
@@ -2582,15 +2566,18 @@ const RequirementOrderPage = () => {
                                 </label>
                                 <input
                                   type="text"
-                                  value={item.spec}
+                                  value={
+                                    item.profile_id === "custom"
+                                      ? getGeneratedSpec(item)
+                                      : item.spec || ""
+                                  }
                                   readOnly
                                   disabled={isFieldsLocked}
-                                  className={`w-full h-11 px-4 border border-slate-200 rounded-xl text-sm font-medium outline-none shadow-sm transition-all ${isFieldsLocked ? "bg-slate-50/80 text-slate-500 cursor-not-allowed" : "bg-slate-50 text-slate-700 cursor-default focus:ring-2 focus:ring-blue-500/20"}`}
+                                  className={`w-full h-11 px-4 border border-slate-200 rounded-xl text-sm font-medium outline-none shadow-sm transition-all ${isFieldsLocked ? "bg-slate-50/80 text-slate-500 cursor-not-allowed" : "bg-slate-50 text-blue-700 cursor-default focus:ring-2 focus:ring-blue-500/20"}`}
                                 />
                               </div>
                             </div>
 
-                            {/* 🌟 實體包材與換算結構 (與 Quotation 統一設計) */}
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-5 pt-3 border-t border-slate-200/60">
                               {/* 銷售大單位 */}
                               <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-4">
@@ -2639,7 +2626,7 @@ const RequirementOrderPage = () => {
                                   </div>
                                   <div>
                                     <label className="block text-sm text-slate-400 mb-2 font-medium">
-                                      總淨重 (KG)
+                                      容積 (KG)
                                     </label>
                                     <input
                                       type="number"
@@ -2749,7 +2736,7 @@ const RequirementOrderPage = () => {
                                   </div>
                                   <div>
                                     <label className="block text-sm text-slate-400 mb-2 font-medium">
-                                      淨重 (KG)
+                                      容積 (KG)
                                     </label>
                                     <input
                                       type="number"

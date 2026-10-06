@@ -417,9 +417,14 @@ const isNutritionEmpty = (nutData) => {
 const normalizeQCStandards = (rawArray) => {
   if (!Array.isArray(rawArray)) return [];
   return rawArray.map((std) => {
+    // 🌟 修正：不論是不是 v2，都確保它有一個唯一的 id 供 React 與前端狀態對接
+    const uniqueId =
+      std.id || Date.now().toString() + Math.random().toString(36).substr(2, 5);
+
     if (std.format === "v2") {
       return {
         ...std,
+        id: uniqueId, // 🌟 確保補上 id
         target_min:
           std.target_min !== undefined ? std.target_min : std.min || "",
         target_max:
@@ -427,11 +432,10 @@ const normalizeQCStandards = (rawArray) => {
       };
     }
 
-    const id = Date.now().toString() + Math.random().toString(36).substr(2, 5);
     if (std.type === "dilution" || std.type === "custom") {
       return {
         format: "v2",
-        id,
+        id: uniqueId,
         name: std.name || "未命名檢驗",
         type: "text",
         target_text: std.value || "",
@@ -443,7 +447,7 @@ const normalizeQCStandards = (rawArray) => {
     ) {
       return {
         format: "v2",
-        id,
+        id: uniqueId,
         name: std.name || "數值範圍",
         type: "range",
         target_min: std.min || "",
@@ -453,7 +457,7 @@ const normalizeQCStandards = (rawArray) => {
     if (std.type === "boolean") {
       return {
         format: "v2",
-        id,
+        id: uniqueId,
         name: std.name || "狀態判定",
         type: "boolean",
         target_bool: std.target_bool || "NEGATIVE",
@@ -461,7 +465,7 @@ const normalizeQCStandards = (rawArray) => {
     }
     return {
       format: "v2",
-      id,
+      id: uniqueId,
       name: std.name || "自訂檢驗",
       type: "text",
       target_text: std.value || "",
@@ -1172,6 +1176,7 @@ export default function MaterialPage() {
           .map((q) => {
             if (q.type === "range")
               return {
+                id: q.id,
                 format: "v2",
                 type: "range",
                 name: q.name,
@@ -1180,12 +1185,14 @@ export default function MaterialPage() {
               };
             if (q.type === "boolean")
               return {
+                id: q.id,
                 format: "v2",
                 type: "boolean",
                 name: q.name,
                 target_bool: q.target_bool,
               };
             return {
+              id: q.id,
               format: "v2",
               type: "text",
               name: q.name,

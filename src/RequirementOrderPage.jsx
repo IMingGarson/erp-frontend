@@ -51,14 +51,8 @@ const TypeTag = ({ type }) => {
       label: "半成品",
       css: "bg-purple-50 text-purple-700 border-purple-200",
     },
-    PACK: {
-      label: "包材",
-      css: "bg-amber-50 text-amber-700 border-amber-200",
-    },
-    PRODUCT: {
-      label: "成品",
-      css: "bg-blue-50 text-blue-700 border-blue-200",
-    },
+    PACK: { label: "包材", css: "bg-amber-50 text-amber-700 border-amber-200" },
+    PRODUCT: { label: "成品", css: "bg-blue-50 text-blue-700 border-blue-200" },
   };
   const typeData = config[type] || {
     label: type,
@@ -172,13 +166,7 @@ const FilterableDropdown = ({
         </span>
         <ChevronDown
           size={18}
-          className={`flex-shrink-0 transition-transform duration-300 ${
-            disabled
-              ? "text-slate-300"
-              : isOpen
-                ? "rotate-180 text-blue-500"
-                : "text-slate-400"
-          }`}
+          className={`flex-shrink-0 transition-transform duration-300 ${disabled ? "text-slate-300" : isOpen ? "rotate-180 text-blue-500" : "text-slate-400"}`}
         />
       </button>
 
@@ -210,11 +198,7 @@ const FilterableDropdown = ({
                       setIsOpen(false);
                       setSearchTerm("");
                     }}
-                    className={`flex items-center justify-between px-4 py-3 text-sm rounded-xl cursor-pointer transition-all font-medium mb-1 ${
-                      isSelected
-                        ? "bg-blue-600 text-white shadow-md"
-                        : "text-slate-700 hover:bg-blue-50 hover:text-blue-700"
-                    }`}
+                    className={`flex items-center justify-between px-4 py-3 text-sm rounded-xl cursor-pointer transition-all font-medium mb-1 ${isSelected ? "bg-blue-600 text-white shadow-md" : "text-slate-700 hover:bg-blue-50 hover:text-blue-700"}`}
                   >
                     <span className="truncate pr-2">
                       {renderItem ? renderItem(opt) : opt.name}
@@ -288,13 +272,12 @@ const AdditiveWarningPanel = ({ alloc, materials, boms }) => {
   const warnings = [];
   Object.values(additiveSummary).forEach((add) => {
     const usagePercent = (add.totalUsed / baseQty) * 100;
-    if (usagePercent > add.limit) {
+    if (usagePercent > add.limit)
       warnings.push({
         ...add,
         usagePercent,
         maxAllowed: baseQty * (add.limit / 100),
       });
-    }
   });
 
   if (warnings.length === 0) return null;
@@ -370,12 +353,11 @@ const BatchRow = ({
         setTempValue(batch.used);
         return;
       }
-      if (parsedVal > batch.available) {
+      if (parsedVal > batch.available)
         val =
           matType === "PACK"
             ? Math.floor(batch.available).toString()
             : batch.available.toString();
-      }
     }
     setTempValue(val);
     onSave(orderId, matId, batch.id, val);
@@ -518,10 +500,33 @@ const MaterialAllocationList = ({
     );
 
   const baseQty = itemAlloc._base_qty;
+  const parentProductId = itemAlloc._productId;
 
   const sortedMaterials = Object.entries(itemAlloc)
     .filter(([k]) => k !== "_base_qty" && k !== "_productId")
     .sort(([idA, matA], [idB, matB]) => {
+      const bomA = boms.find(
+        (b) =>
+          String(b.parent?.id) === String(parentProductId) &&
+          String(b.child?.id) === String(idA),
+      );
+      const bomB = boms.find(
+        (b) =>
+          String(b.parent?.id) === String(parentProductId) &&
+          String(b.child?.id) === String(idB),
+      );
+
+      const seqA = bomA?.sequence_num ? String(bomA.sequence_num).trim() : "";
+      const seqB = bomB?.sequence_num ? String(bomB.sequence_num).trim() : "";
+
+      if (seqA && seqB)
+        return seqA.localeCompare(seqB, undefined, {
+          numeric: true,
+          sensitivity: "base",
+        });
+      if (seqA && !seqB) return -1;
+      if (!seqA && seqB) return 1;
+
       const typePriority = { SEMI: 1, RAW: 2, PACK: 3, PRODUCT: 4 };
       const pA = typePriority[matA.type?.toUpperCase()] || 99;
       const pB = typePriority[matB.type?.toUpperCase()] || 99;
@@ -529,13 +534,12 @@ const MaterialAllocationList = ({
       return matB.requiredQty - matA.requiredQty;
     });
 
-  if (sortedMaterials.length === 0) {
+  if (sortedMaterials.length === 0)
     return (
       <div className="p-8 text-center text-slate-400 border border-dashed border-slate-200 rounded-2xl bg-white shadow-sm text-sm font-medium">
         此項目無須分配底層物料庫存，子單據已負責其原料。
       </div>
     );
-  }
 
   return (
     <div className="w-full min-w-0">
@@ -567,8 +571,6 @@ const MaterialAllocationList = ({
           }
 
           const isSemi = mat.type?.toUpperCase() === "SEMI";
-
-          // 🌟 判斷此半成品是否有對應的子單據可供展開
           const childPlan = isSemi
             ? mrpPlans.find(
                 (p) =>
@@ -597,10 +599,18 @@ const MaterialAllocationList = ({
               : isOver
                 ? "bg-purple-50/20"
                 : "bg-white";
-
           const sortedBatches = [...mat.batches].sort(
             (a, b) => (parseFloat(b.used) || 0) - (parseFloat(a.used) || 0),
           );
+
+          const currentBom = boms.find(
+            (b) =>
+              String(b.parent?.id) === String(parentProductId) &&
+              String(b.child?.id) === String(matId),
+          );
+          const seqLabel = currentBom?.sequence_num
+            ? `[序: ${currentBom.sequence_num}] `
+            : "";
 
           return (
             <div
@@ -624,6 +634,9 @@ const MaterialAllocationList = ({
                     </span>
                   )}
                   <span className="font-semibold text-slate-800 truncate text-base">
+                    <span className="text-slate-400 mr-1 font-mono text-sm">
+                      {seqLabel}
+                    </span>
                     {mat.materialName}
                   </span>
                   {mat.remark && mat.remark.length > 0 && (
@@ -665,7 +678,6 @@ const MaterialAllocationList = ({
                 </div>
               </div>
 
-              {/* 原物料的批號展開 */}
               {isExpanded && !isSemi && (
                 <div className="bg-slate-50/50 p-6 border-t border-slate-100 w-full min-w-0">
                   <div className="mb-4 flex flex-col md:flex-row justify-between items-start md:items-center border-b border-slate-200 pb-3 gap-3">
@@ -703,7 +715,6 @@ const MaterialAllocationList = ({
                 </div>
               )}
 
-              {/* 🌟 半成品的子單據遞迴展開 */}
               {isExpanded &&
                 isSemi &&
                 childPlan &&
@@ -727,45 +738,11 @@ const MaterialAllocationList = ({
                             </span>
                           )}
                         </div>
-                        <div className="flex flex-nowrap items-center justify-end gap-2">
-                          <button
-                            onClick={(e) => handlePreviewOrder?.(childPlan, e)}
-                            className="px-3 py-2 bg-white text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-50 transition-all text-sm font-semibold shadow-sm flex items-center gap-1.5"
-                          >
-                            <FileText size={14} strokeWidth={2.5} /> 預覽
-                          </button>
-                          <button
-                            onClick={(e) => handlePrintOrder?.(childPlan, e)}
-                            className="px-3 py-2 bg-white text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50 transition-all text-sm font-semibold shadow-sm flex items-center gap-1.5"
-                          >
-                            <Printer size={14} strokeWidth={2.5} /> 列印
-                          </button>
-                          <button
-                            onClick={(e) =>
-                              handleConvertToProduction?.(childPlan.id, e)
-                            }
-                            disabled={
-                              isSubmitting ||
-                              childPlan.status.toUpperCase() === "CONVERTED"
-                            }
-                            className="px-3 py-2 bg-emerald-50 text-emerald-600 border border-emerald-200 rounded-lg hover:bg-emerald-500 hover:text-white transition-all text-sm font-semibold shadow-sm disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
-                          >
-                            轉生產單
-                          </button>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleDeleteDraft?.(childPlan.id);
-                            }}
-                            disabled={isSubmitting}
-                            className="px-3 py-2 bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-500 hover:text-white transition-all text-sm font-semibold shadow-sm disabled:opacity-50 whitespace-nowrap"
-                          >
-                            刪除
-                          </button>
+                        <div className="flex flex-nowrap items-center justify-end gap-2 text-xs font-semibold text-slate-400">
+                          子配方細節展開
                         </div>
                       </div>
 
-                      {/* 遞迴呼叫！ */}
                       <MaterialAllocationList
                         itemId={childDisplayId}
                         mrpId={childPlan.mrp_id}
@@ -834,10 +811,12 @@ const RequirementOrderPage = () => {
     profile_id: "",
     spec: "",
     quantity: "",
-    unit: "",
+    unit: "箱",
     sales_unit_quantity: 1,
     sales_pack_unit: "包",
-    sales_pack_quantity: 1,
+    sales_pack_quantity: 10,
+    outer_capacity: 10,
+    inner_capacity: 1,
     unit_price: "",
     outer_pack_id: null,
     inner_pack_id: null,
@@ -911,6 +890,141 @@ const RequirementOrderPage = () => {
     fetchData();
   }, []);
 
+  // 🌟 包裝字串剖析引擎 (與 Quotation 統一邏輯)
+  const parsePackInfo = (packName, isInner) => {
+    let parsedUnit = isInner ? "包" : "箱";
+    let parsedCapacity = 1;
+
+    if (packName.includes("桶")) parsedUnit = "桶";
+    else if (packName.includes("箱")) parsedUnit = "箱";
+    else if (packName.includes("袋")) parsedUnit = "袋";
+    else if (packName.includes("瓶")) parsedUnit = "瓶";
+    else if (packName.includes("罐")) parsedUnit = "罐";
+
+    const match = packName.match(/([\d.]+)\s*(KG|L|g|ml)/i);
+    if (match) {
+      parsedCapacity = Number(match[1]);
+      if (match[2].toLowerCase() === "g" || match[2].toLowerCase() === "ml") {
+        parsedCapacity = parsedCapacity / 1000;
+      }
+    }
+    return { parsedUnit, parsedCapacity };
+  };
+
+  const handleOuterPackChange = (rowId, packId) => {
+    handleItemChange(rowId, "outer_pack_id", packId);
+    if (packId) {
+      const packMat = packMaterials.find(
+        (p) => String(p.id) === String(packId),
+      );
+      if (packMat) {
+        const { parsedUnit, parsedCapacity } = parsePackInfo(
+          packMat.name,
+          false,
+        );
+        setFormItems((prev) =>
+          prev.map((item) => {
+            if (item.id === rowId && item.profile_id === "custom") {
+              return {
+                ...item,
+                unit: parsedUnit,
+                outer_capacity: Number(
+                  packMat.pack_capacity || parsedCapacity,
+                ).toString(),
+              };
+            }
+            return item;
+          }),
+        );
+      }
+    }
+  };
+
+  const handleInnerPackChange = (rowId, packId) => {
+    handleItemChange(rowId, "inner_pack_id", packId);
+    if (packId) {
+      const packMat = packMaterials.find(
+        (p) => String(p.id) === String(packId),
+      );
+      if (packMat) {
+        const { parsedUnit, parsedCapacity } = parsePackInfo(
+          packMat.name,
+          true,
+        );
+        setFormItems((prev) =>
+          prev.map((item) => {
+            if (item.id === rowId && item.profile_id === "custom") {
+              return {
+                ...item,
+                sales_pack_unit: parsedUnit,
+                inner_capacity: Number(
+                  packMat.pack_capacity || parsedCapacity,
+                ).toString(),
+              };
+            }
+            return item;
+          }),
+        );
+      }
+    }
+  };
+
+  // 🌟 自動推導 Custom Spec 的副作用處理，並做去零格式化
+  useEffect(() => {
+    setFormItems((prev) => {
+      let hasChanges = false;
+      const newItems = prev.map((item) => {
+        if (item.profile_id === "custom") {
+          let generatedSpec = "";
+          const hasInner = !!item.inner_pack_id;
+          const hasOuter = !!item.outer_pack_id;
+
+          // 使用 Number().toString() 安全去除多餘小數點 (例如: 10.000 -> 10)
+          const cleanNumStr = (val) => {
+            const n = Number(val);
+            return isNaN(n) ? "0" : n.toString();
+          };
+
+          const outerUnit = item.unit || "箱";
+          const innerUnit = item.sales_pack_unit || "包";
+          const innerCap = cleanNumStr(item.inner_capacity);
+          const packQty = cleanNumStr(item.sales_pack_quantity);
+          let outerCap = cleanNumStr(item.outer_capacity);
+
+          let newOuterCap = item.outer_capacity;
+
+          // 🌟 嚴格對齊 Quotation 格式邏輯：去掉贅字，並統一小數去零
+          if (hasInner) {
+            generatedSpec = `${innerCap}KG*${packQty}${innerUnit}/${outerUnit}`;
+            const calcOuterCap = cleanNumStr(
+              Number(item.inner_capacity) * Number(item.sales_pack_quantity),
+            );
+            if (outerCap !== calcOuterCap) {
+              newOuterCap = calcOuterCap;
+              outerCap = calcOuterCap;
+            }
+          } else if (hasOuter || Number(item.outer_capacity) > 0) {
+            generatedSpec = `${outerCap}KG/${outerUnit}`;
+          }
+
+          if (
+            item.spec !== generatedSpec ||
+            item.outer_capacity !== newOuterCap
+          ) {
+            hasChanges = true;
+            return {
+              ...item,
+              spec: generatedSpec,
+              outer_capacity: newOuterCap,
+            };
+          }
+        }
+        return item;
+      });
+      return hasChanges ? newItems : prev;
+    });
+  }, [formItems, packMaterials]);
+
   const toggleMaterialExpanded = (key) =>
     setExpandedMaterials((prev) =>
       prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key],
@@ -958,7 +1072,6 @@ const RequirementOrderPage = () => {
       setBoms(bomJson.data || []);
       setBatches(batchJson.data || []);
       setVendors(venJson.data || []);
-
       const remoteMrp = mrpJson.data || [];
       setMrpPlans(remoteMrp);
 
@@ -1048,13 +1161,11 @@ const RequirementOrderPage = () => {
           method: "DELETE",
         });
         if (!delRes.ok) throw new Error("刪除失敗");
-
         setAllocations((prev) => {
           const newAlloc = { ...prev };
           delete newAlloc[id];
           return newAlloc;
         });
-
         closeDialog();
         fetchData();
       } catch (err) {
@@ -1065,7 +1176,7 @@ const RequirementOrderPage = () => {
     });
   };
 
-  const handleSelectVendor = (v) => {
+  const handleSelectVendor = (v) =>
     setVendorData({
       ...vendorData,
       id: v.id,
@@ -1077,23 +1188,17 @@ const RequirementOrderPage = () => {
       address: v.address || "",
       contact: v.contact_person || "",
     });
-  };
-
   const handleAddRow = () => {
     const nextSeq = dailySequence + 1;
     setDailySequence(nextSeq);
     setFormItems((prev) => [...prev, createEmptyRow(nextSeq)]);
   };
-
-  const handleRemoveRow = (id) => {
+  const handleRemoveRow = (id) =>
     setFormItems((prev) => prev.filter((item) => item.id !== id));
-  };
-
-  const handleItemChange = (id, field, value) => {
+  const handleItemChange = (id, field, value) =>
     setFormItems((prev) =>
       prev.map((item) => (item.id === id ? { ...item, [field]: value } : item)),
     );
-  };
 
   const handleSelectProduct = (rowId, product) => {
     setFormItems((prev) =>
@@ -1106,11 +1211,13 @@ const RequirementOrderPage = () => {
               product_name: product.name || "",
               profile_id: "",
               spec: "",
-              unit: product.unit || "KG",
+              unit: product.unit || "箱",
               unit_price: "",
               sales_unit_quantity: 1,
               sales_pack_unit: "包",
-              sales_pack_quantity: 1,
+              sales_pack_quantity: 10,
+              outer_capacity: 10,
+              inner_capacity: 1,
               outer_pack_id: null,
               inner_pack_id: null,
             }
@@ -1133,26 +1240,25 @@ const RequirementOrderPage = () => {
             ...item,
             profile_id: "custom",
             spec: "",
-            unit: product.unit || "KG",
+            unit: product.unit || "箱",
             unit_price: "",
             sales_unit_quantity: 1,
             sales_pack_unit: "包",
-            sales_pack_quantity: 1,
+            sales_pack_quantity: 10,
             outer_pack_id: null,
             inner_pack_id: null,
           };
         }
-
         if (!profileId) {
           return {
             ...item,
             profile_id: "",
             spec: "",
-            unit: product.unit || "KG",
+            unit: product.unit || "箱",
             unit_price: "",
             sales_unit_quantity: 1,
             sales_pack_unit: "包",
-            sales_pack_quantity: 1,
+            sales_pack_quantity: 10,
             outer_pack_id: null,
             inner_pack_id: null,
           };
@@ -1169,19 +1275,32 @@ const RequirementOrderPage = () => {
           return Number(packData);
         };
 
+        const outId =
+          getPackId(profile.outer_pack_id) || getPackId(profile.outer_pack);
+        const inId =
+          getPackId(profile.inner_pack_id) || getPackId(profile.inner_pack);
+
         return {
           ...item,
           profile_id: profile.id,
           spec: profile.spec || "",
-          unit: profile.sales_unit || product.unit || "",
+          unit: profile.sales_unit || product.unit || "箱",
           unit_price: profile.sales_price || "",
-          sales_unit_quantity: profile.sales_unit_quantity || 1,
+          sales_unit_quantity: profile.sales_unit_quantity
+            ? Number(profile.sales_unit_quantity).toString()
+            : "1",
           sales_pack_unit: profile.sales_pack_unit || "包",
-          sales_pack_quantity: profile.sales_pack_quantity || 1,
-          outer_pack_id:
-            getPackId(profile.outer_pack_id) || getPackId(profile.outer_pack),
-          inner_pack_id:
-            getPackId(profile.inner_pack_id) || getPackId(profile.inner_pack),
+          sales_pack_quantity: profile.sales_pack_quantity
+            ? Number(profile.sales_pack_quantity).toString()
+            : "10",
+          outer_pack_id: outId,
+          inner_pack_id: inId,
+          outer_capacity: profile.outer_capacity
+            ? Number(profile.outer_capacity).toString()
+            : "10",
+          inner_capacity: profile.inner_capacity
+            ? Number(profile.inner_capacity).toString()
+            : "1",
         };
       }),
     );
@@ -1194,42 +1313,28 @@ const RequirementOrderPage = () => {
 
     for (const fItem of formItems) {
       if (!fItem.product_id || Number(fItem.quantity) <= 0) continue;
-
       const product = materials.find(
         (m) => String(m.id) === String(fItem.product_id),
       );
       if (!product) continue;
 
       const orderQty = Number(fItem.quantity) || 0;
-      const unitQty = Number(fItem.sales_unit_quantity) || 1;
-      const packQty = Number(fItem.sales_pack_quantity) || 1;
+      let totalWeightKG = 0;
 
-      let unitCapacity = null;
-      const packId = fItem.inner_pack_id || fItem.outer_pack_id;
-
-      if (packId) {
-        const packMat = materials.find((m) => String(m.id) === String(packId));
-        if (packMat && packMat.pack_capacity) {
-          unitCapacity = parseFloat(packMat.pack_capacity);
-        }
+      // 🌟 新版的重量換算邏輯
+      if (fItem.inner_pack_id) {
+        const packQty = Number(fItem.sales_pack_quantity) || 1;
+        const innerCap = Number(fItem.inner_capacity) || 1;
+        totalWeightKG = precise.mul(precise.mul(orderQty, packQty), innerCap);
+      } else {
+        const outerCap = Number(fItem.outer_capacity) || 1;
+        totalWeightKG = precise.mul(orderQty, outerCap);
       }
-
-      if (!unitCapacity || isNaN(unitCapacity) || unitCapacity <= 0) {
-        unitCapacity = 1.0;
-      }
-
-      const totalWeightKG = precise.mul(
-        precise.mul(precise.div(orderQty, unitQty), packQty),
-        unitCapacity,
-      );
 
       const motherId = fItem.id;
       const generatedItems = [];
-
-      // 🌟 全域計數器：確保子單的 ID 呈現為 PXXXXX-1, PXXXXX-2
       let childDraftSeq = 1;
 
-      // 🌟 將 parentDraftId 納入記憶，取代原本使用字串切割 (-1-1) 尋找父親的邏輯
       const buildDrafts = (
         matId,
         currentQty,
@@ -1238,7 +1343,6 @@ const RequirementOrderPage = () => {
       ) => {
         const mat = materials.find((m) => String(m.id) === String(matId));
         if (!mat) return;
-
         const children = boms.filter(
           (b) => String(b.parent?.id) === String(matId),
         );
@@ -1254,15 +1358,13 @@ const RequirementOrderPage = () => {
                 String(b.parent?.id) === String(parentItem.productId) &&
                 String(b.child?.id) === String(matId),
             );
-            if (relatedBom) {
-              currentRemark = relatedBom.remark || "";
-            }
+            if (relatedBom) currentRemark = relatedBom.remark || "";
           }
         }
 
         generatedItems.push({
           id: currentDraftId,
-          parentDraftId: parentDraftId, // 🌟 記錄真實的父親 Draft ID
+          parentDraftId: parentDraftId,
           productId: mat.id,
           name: mat.name,
           type: mat.type,
@@ -1281,7 +1383,6 @@ const RequirementOrderPage = () => {
             const baseQty = parseFloat(c.base_quantity || 1);
             const childQty =
               currentQty * (parseFloat(c.quantity_required) / baseQty);
-            // 🌟 單號直接使用 MotherId-累加數字
             const childDraftId = `${motherId}-${childDraftSeq++}`;
             buildDrafts(childMat.id, childQty, childDraftId, currentDraftId);
           }
@@ -1308,9 +1409,8 @@ const RequirementOrderPage = () => {
         if (
           !updated[rowId] ||
           !newOrderItems.find((i) => i.id === updated[rowId])
-        ) {
+        )
           updated[rowId] = newActiveTabIds[rowId];
-        }
       });
       return updated;
     });
@@ -1355,7 +1455,6 @@ const RequirementOrderPage = () => {
                   currentGlobalRemaining,
                   usedAmount,
                 );
-
                 matBatches[idx] = { ...bUsed, available: actualAvailable };
                 globalVirtualBatches[batchIdx].remaining_qty -= usedAmount;
               }
@@ -1382,13 +1481,11 @@ const RequirementOrderPage = () => {
                 used: "",
               });
             });
-
             matBatches.sort((a, b) => {
               if (!a.received_date) return 1;
               if (!b.received_date) return -1;
               return new Date(a.received_date) - new Date(b.received_date);
             });
-
             matData.batches = matBatches;
             currentAlloc[matIdStr] = matData;
           });
@@ -1403,18 +1500,17 @@ const RequirementOrderPage = () => {
         (b) => String(b.parent?.id) === String(productId),
       );
 
-      if (directChildren.length === 0) {
+      if (directChildren.length === 0)
         itemReqs[productId] = { qty: qtyValue, remark: "" };
-      } else {
+      else {
         directChildren.forEach((c) => {
           const childMat = c.child;
           if (childMat) {
             const baseQty = parseFloat(c.base_quantity || 1);
             const reqQty =
               qtyValue * (parseFloat(c.quantity_required) / baseQty);
-            if (!itemReqs[childMat.id]) {
+            if (!itemReqs[childMat.id])
               itemReqs[childMat.id] = { qty: 0, remark: c.remark || "" };
-            }
             itemReqs[childMat.id].qty += reqQty;
           }
         });
@@ -1494,7 +1590,6 @@ const RequirementOrderPage = () => {
   const handleBatchUsageSave = async (orderId, matId, batchId, newVal) => {
     showConfirm("確認更新", "是否確認更新此批號的庫存用量？", async () => {
       closeDialog();
-
       const orderAlloc = { ...allocations[orderId] };
       if (!orderAlloc) return;
       const matData = { ...orderAlloc[matId] };
@@ -1506,7 +1601,6 @@ const RequirementOrderPage = () => {
         const newBatches = [...matData.batches];
         newBatches[batchIndex] = { ...newBatches[batchIndex], used: newVal };
         matData.batches = newBatches;
-
         const totalAllocated = newBatches.reduce(
           (sum, b) => sum + (parseFloat(b.used) || 0),
           0,
@@ -1681,16 +1775,12 @@ const RequirementOrderPage = () => {
 
       const rootItems = [];
       orderItems.forEach((item) => {
-        // 🌟 改用 parentDraftId 來精準抓取對應的母單，不依賴字串比對
-        if (!item.parentDraftId) {
-          rootItems.push(itemMap[item.id]);
-        } else {
+        if (!item.parentDraftId) rootItems.push(itemMap[item.id]);
+        else {
           const parentId = item.parentDraftId;
-          if (itemMap[parentId]) {
+          if (itemMap[parentId])
             itemMap[parentId].children_mrp.push(itemMap[item.id]);
-          } else {
-            rootItems.push(itemMap[item.id]);
-          }
+          else rootItems.push(itemMap[item.id]);
         }
       });
 
@@ -2413,8 +2503,6 @@ const RequirementOrderPage = () => {
                     );
                     const productProfiles =
                       selectedProductObj?.product_profiles || [];
-
-                    // 檢查欄位是否被鎖定 (未選自製規格)
                     const isFieldsLocked = item.profile_id !== "custom";
 
                     return (
@@ -2439,7 +2527,6 @@ const RequirementOrderPage = () => {
                               產品與規格資訊{" "}
                               <span className="text-red-500">*</span>
                             </label>
-
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
                               <div>
                                 <label className="block text-sm font-medium text-slate-500 mb-2">
@@ -2468,7 +2555,6 @@ const RequirementOrderPage = () => {
                                   )}
                                 />
                               </div>
-
                               <div>
                                 <label className="block text-sm font-medium text-slate-500 mb-2">
                                   規格範本
@@ -2490,7 +2576,6 @@ const RequirementOrderPage = () => {
                                   disabled={!item.product_id}
                                 />
                               </div>
-
                               <div>
                                 <label className="block text-sm font-medium text-slate-500 mb-2">
                                   自訂規格文字
@@ -2498,50 +2583,45 @@ const RequirementOrderPage = () => {
                                 <input
                                   type="text"
                                   value={item.spec}
-                                  onChange={(e) =>
-                                    handleItemChange(
-                                      item.id,
-                                      "spec",
-                                      e.target.value,
-                                    )
-                                  }
+                                  readOnly
                                   disabled={isFieldsLocked}
-                                  className="w-full h-11 px-4 border border-slate-200 rounded-xl text-sm font-medium outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 shadow-sm disabled:bg-slate-50/80 disabled:text-slate-500 disabled:cursor-not-allowed transition-all"
+                                  className={`w-full h-11 px-4 border border-slate-200 rounded-xl text-sm font-medium outline-none shadow-sm transition-all ${isFieldsLocked ? "bg-slate-50/80 text-slate-500 cursor-not-allowed" : "bg-slate-50 text-slate-700 cursor-default focus:ring-2 focus:ring-blue-500/20"}`}
                                 />
                               </div>
                             </div>
 
-                            {/* 實體包材與換算結構 */}
+                            {/* 🌟 實體包材與換算結構 (與 Quotation 統一設計) */}
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-5 pt-3 border-t border-slate-200/60">
                               {/* 銷售大單位 */}
-                              <div className="bg-white p-5 rounded-2xl border border-slate-100 space-y-4 shadow-sm">
+                              <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-4">
                                 <span className="text-sm font-semibold text-slate-600 tracking-wide block">
-                                  銷售大單位
+                                  銷售大單位 (外層)
                                 </span>
+                                <div>
+                                  <label className="block text-sm font-medium text-slate-400 mb-2">
+                                    對應實體外包裝
+                                  </label>
+                                  <FilterableDropdown
+                                    value={item.outer_pack_id || ""}
+                                    onChange={(valId) =>
+                                      handleOuterPackChange(
+                                        item.id,
+                                        valId ? Number(valId) : null,
+                                      )
+                                    }
+                                    options={packMaterials}
+                                    placeholder="選擇外包裝"
+                                    disabled={isFieldsLocked}
+                                    renderItem={(p) =>
+                                      p.code ? `[${p.code}] ${p.name}` : p.name
+                                    }
+                                    className="w-full h-11 px-4 rounded-xl text-sm"
+                                  />
+                                </div>
                                 <div className="grid grid-cols-2 gap-4">
                                   <div>
                                     <label className="block text-sm text-slate-400 mb-2 font-medium">
-                                      數量
-                                    </label>
-                                    <input
-                                      type="text"
-                                      inputMode="decimal"
-                                      pattern="[0-9]*"
-                                      value={item.sales_unit_quantity}
-                                      onChange={(e) =>
-                                        handleItemChange(
-                                          item.id,
-                                          "sales_unit_quantity",
-                                          e.target.value,
-                                        )
-                                      }
-                                      disabled={isFieldsLocked}
-                                      className="w-full px-3 py-2 h-11 border border-slate-200 rounded-xl text-center font-mono font-medium text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 disabled:bg-slate-50 disabled:text-slate-500 disabled:cursor-not-allowed transition-all"
-                                    />
-                                  </div>
-                                  <div>
-                                    <label className="block text-sm text-slate-400 mb-2 font-medium">
-                                      單位
+                                      大單位名稱 (如: 箱、桶)
                                     </label>
                                     <input
                                       type="text"
@@ -2554,20 +2634,56 @@ const RequirementOrderPage = () => {
                                         )
                                       }
                                       disabled={isFieldsLocked}
-                                      className="w-full px-3 py-2 h-11 border border-slate-200 rounded-xl text-center font-medium text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 disabled:bg-slate-50 disabled:text-slate-500 disabled:cursor-not-allowed transition-all"
+                                      className="w-full px-3 py-2 h-11 border border-slate-200 rounded-xl text-center font-medium text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 disabled:bg-slate-50 disabled:text-slate-400 transition-all"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="block text-sm text-slate-400 mb-2 font-medium">
+                                      總淨重 (KG)
+                                    </label>
+                                    <input
+                                      type="number"
+                                      step="any"
+                                      value={item.outer_capacity}
+                                      onChange={(e) =>
+                                        handleItemChange(
+                                          item.id,
+                                          "outer_capacity",
+                                          e.target.value,
+                                        )
+                                      }
+                                      onBlur={(e) => {
+                                        const val = parseFloat(e.target.value);
+                                        if (!isNaN(val))
+                                          handleItemChange(
+                                            item.id,
+                                            "outer_capacity",
+                                            val.toString(),
+                                          );
+                                      }}
+                                      disabled={
+                                        isFieldsLocked || !!item.inner_pack_id
+                                      } // 有內包裝時自動鎖定並計算
+                                      className="w-full px-3 py-2 h-11 border border-slate-200 rounded-xl text-center font-mono font-medium text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 disabled:bg-slate-50 disabled:text-slate-400 transition-all"
                                     />
                                   </div>
                                 </div>
+                              </div>
+
+                              {/* 內部小單位 */}
+                              <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-4">
+                                <span className="text-sm font-semibold text-slate-600 tracking-wide block">
+                                  內部小單位 (內層, 若無可略過)
+                                </span>
                                 <div>
                                   <label className="block text-sm font-medium text-slate-400 mb-2">
-                                    對應實體外包裝
+                                    對應實體內包裝
                                   </label>
                                   <FilterableDropdown
-                                    value={item.outer_pack_id || ""}
+                                    value={item.inner_pack_id || ""}
                                     onChange={(valId) =>
-                                      handleItemChange(
+                                      handleInnerPackChange(
                                         item.id,
-                                        "outer_pack_id",
                                         valId ? Number(valId) : null,
                                       )
                                     }
@@ -2580,22 +2696,14 @@ const RequirementOrderPage = () => {
                                     className="w-full h-11 px-4 rounded-xl text-sm"
                                   />
                                 </div>
-                              </div>
-
-                              {/* 內部小單位 */}
-                              <div className="bg-white p-5 rounded-2xl border border-slate-100 space-y-4 shadow-sm">
-                                <span className="text-sm font-semibold text-slate-600 tracking-wide block">
-                                  內部小單位與包材對應
-                                </span>
-                                <div className="grid grid-cols-2 gap-4">
+                                <div className="grid grid-cols-3 gap-4">
                                   <div>
                                     <label className="block text-sm text-slate-400 mb-2 font-medium">
-                                      每單位內含
+                                      每大單位內含
                                     </label>
                                     <input
-                                      type="text"
-                                      inputMode="decimal"
-                                      pattern="[0-9]*"
+                                      type="number"
+                                      step="any"
                                       value={item.sales_pack_quantity}
                                       onChange={(e) =>
                                         handleItemChange(
@@ -2604,13 +2712,24 @@ const RequirementOrderPage = () => {
                                           e.target.value,
                                         )
                                       }
-                                      disabled={isFieldsLocked}
-                                      className="w-full px-3 py-2 h-11 border border-slate-200 rounded-xl text-center font-mono font-medium text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 disabled:bg-slate-50 disabled:text-slate-500 disabled:cursor-not-allowed transition-all"
+                                      onBlur={(e) => {
+                                        const val = parseFloat(e.target.value);
+                                        if (!isNaN(val))
+                                          handleItemChange(
+                                            item.id,
+                                            "sales_pack_quantity",
+                                            val.toString(),
+                                          );
+                                      }}
+                                      disabled={
+                                        isFieldsLocked || !item.inner_pack_id
+                                      }
+                                      className="w-full px-3 py-2 h-11 border border-slate-200 rounded-xl text-center font-mono font-medium text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 disabled:bg-slate-50 disabled:text-slate-400 transition-all"
                                     />
                                   </div>
                                   <div>
                                     <label className="block text-sm text-slate-400 mb-2 font-medium">
-                                      小單位
+                                      小單位名稱
                                     </label>
                                     <input
                                       type="text"
@@ -2622,32 +2741,42 @@ const RequirementOrderPage = () => {
                                           e.target.value,
                                         )
                                       }
-                                      disabled={isFieldsLocked}
-                                      className="w-full px-3 py-2 h-11 border border-slate-200 rounded-xl text-center font-medium text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 disabled:bg-slate-50 disabled:text-slate-500 disabled:cursor-not-allowed transition-all"
+                                      disabled={
+                                        isFieldsLocked || !item.inner_pack_id
+                                      }
+                                      className="w-full px-3 py-2 h-11 border border-slate-200 rounded-xl text-center font-medium text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 disabled:bg-slate-50 disabled:text-slate-400 transition-all"
                                     />
                                   </div>
-                                </div>
-                                <div>
-                                  <label className="block text-sm font-medium text-slate-400 mb-2">
-                                    對應實體內包裝
-                                  </label>
-                                  <FilterableDropdown
-                                    value={item.inner_pack_id || ""}
-                                    onChange={(valId) =>
-                                      handleItemChange(
-                                        item.id,
-                                        "inner_pack_id",
-                                        valId ? Number(valId) : null,
-                                      )
-                                    }
-                                    options={packMaterials}
-                                    placeholder="無"
-                                    disabled={isFieldsLocked}
-                                    renderItem={(p) =>
-                                      p.code ? `[${p.code}] ${p.name}` : p.name
-                                    }
-                                    className="w-full h-11 px-4 rounded-xl text-sm"
-                                  />
+                                  <div>
+                                    <label className="block text-sm text-slate-400 mb-2 font-medium">
+                                      淨重 (KG)
+                                    </label>
+                                    <input
+                                      type="number"
+                                      step="any"
+                                      value={item.inner_capacity}
+                                      onChange={(e) =>
+                                        handleItemChange(
+                                          item.id,
+                                          "inner_capacity",
+                                          e.target.value,
+                                        )
+                                      }
+                                      onBlur={(e) => {
+                                        const val = parseFloat(e.target.value);
+                                        if (!isNaN(val))
+                                          handleItemChange(
+                                            item.id,
+                                            "inner_capacity",
+                                            val.toString(),
+                                          );
+                                      }}
+                                      disabled={
+                                        isFieldsLocked || !item.inner_pack_id
+                                      }
+                                      className="w-full px-3 py-2 h-11 border border-slate-200 rounded-xl text-center font-mono font-medium text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 disabled:bg-slate-50 disabled:text-slate-400 transition-all"
+                                    />
+                                  </div>
                                 </div>
                               </div>
                             </div>
@@ -2655,7 +2784,6 @@ const RequirementOrderPage = () => {
 
                           {/* 🌟 下方：左右並排「數量配置」與「金額估算」 */}
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            {/* 左側：數量配置 */}
                             <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-center">
                               <span className="text-sm font-semibold text-slate-500 tracking-wide mb-4 block">
                                 數量配置
@@ -2682,13 +2810,11 @@ const RequirementOrderPage = () => {
                                     className="w-32 h-12 text-right bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl px-4 py-2 focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none text-xl font-mono font-semibold transition-all shadow-sm"
                                   />
                                   <span className="text-base font-medium text-slate-500 w-8">
-                                    {item.sales_unit || "箱"}
+                                    {item.unit || "箱"}
                                   </span>
                                 </div>
                               </div>
                             </div>
-
-                            {/* 右側：金額估算 */}
                             <div className="bg-gradient-to-br from-blue-50/50 to-blue-100/30 p-6 rounded-2xl border border-blue-200 shadow-sm flex flex-col justify-center">
                               <div className="flex justify-between items-center mb-3">
                                 <span className="text-sm font-semibold text-blue-700 tracking-wide">
@@ -2852,6 +2978,7 @@ const RequirementOrderPage = () => {
                         <div className="p-6 md:p-8 bg-slate-50/30">
                           <MaterialAllocationList
                             itemId={activeTabId}
+                            mrpId={fItem.product_id}
                             allocations={allocations}
                             materials={materials}
                             boms={boms}
@@ -2940,7 +3067,6 @@ const RequirementOrderPage = () => {
                     key={group.batchId}
                     className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden mb-8"
                   >
-                    {/* ====== Group Header (訂單層級) ====== */}
                     <div className="bg-slate-50/80 border-b border-slate-200 px-6 py-5 flex flex-col md:flex-row justify-between items-start md:items-center gap-5">
                       <div className="flex flex-wrap items-center gap-4">
                         <div className="bg-blue-100 p-2.5 rounded-xl border border-blue-200 text-blue-600 shadow-sm">
@@ -2956,7 +3082,6 @@ const RequirementOrderPage = () => {
                           共 {group.plans.length} 筆
                         </span>
                       </div>
-
                       <div className="flex flex-wrap flex-nowrap gap-3 w-full md:w-auto">
                         {group.plans.length > 1 && (
                           <>
@@ -3001,7 +3126,6 @@ const RequirementOrderPage = () => {
                       </div>
                     </div>
 
-                    {/* ====== Group Body: Expandable Rows ====== */}
                     <div className="overflow-x-auto p-5 md:p-6 bg-white">
                       <div className="rounded-2xl border border-slate-200 overflow-hidden bg-white shadow-sm">
                         <table className="w-full text-left border-collapse whitespace-nowrap">
@@ -3127,8 +3251,6 @@ const RequirementOrderPage = () => {
                                       </div>
                                     </td>
                                   </tr>
-
-                                  {/* --- Expanded Content --- */}
                                   {isExpanded && (
                                     <tr>
                                       <td

@@ -11,15 +11,13 @@ import {
   ArrowDown,
   ArrowUp,
   AlertTriangle,
-  Info,
   FlaskConical,
   CheckCircle2,
-  Tag,
   Download,
   MessageSquareText,
   MousePointerClick,
-  Link,
   AlertCircle,
+  GripVertical,
 } from "lucide-react";
 import CustomDialog from "./components/customDialog";
 import { fetchWithAuth } from "./utils/fetchWithAuth";
@@ -99,11 +97,11 @@ const SearchableSelect = ({
   }, []);
 
   return (
-    <div className="relative w-full min-w-[240px]">
+    <div className="relative w-full min-w-[200px]">
       <div
         ref={selectRef}
         onClick={() => setIsOpen(!isOpen)}
-        className={`w-full h-[40px] px-4 py-2 border rounded-xl text-sm cursor-pointer bg-white flex justify-between items-center transition-all shadow-sm ${
+        className={`w-full h-[40px] px-3 py-2 border rounded-xl text-sm cursor-pointer bg-white flex justify-between items-center transition-all shadow-sm ${
           isOpen
             ? "border-[#007AFF] ring-2 ring-[#007AFF]/20"
             : "border-slate-200 hover:border-slate-300"
@@ -193,9 +191,12 @@ export default function BOMCreatePage() {
 
   const [expandedRows, setExpandedRows] = useState(new Set());
   const [sortConfig, setSortConfig] = useState({
-    key: "quantity",
-    direction: "desc",
+    key: "sequence",
+    direction: "asc",
   });
+
+  const [draggedIndex, setDraggedIndex] = useState(null);
+  const [dragOverIndex, setDragOverIndex] = useState(null);
 
   const [formData, setFormData] = useState({
     code: "",
@@ -287,10 +288,7 @@ export default function BOMCreatePage() {
               }
             });
           }
-
-          if (fullMat?.type === "SEMI") {
-            await traverse(childCode, actualRatio);
-          }
+          if (fullMat?.type === "SEMI") await traverse(childCode, actualRatio);
         }
       } catch (e) {
         console.error("展開半成品 BOM 失敗", e);
@@ -367,9 +365,7 @@ export default function BOMCreatePage() {
                   matchedQuote.is_expired === true ||
                   (matchedQuote.valid_until &&
                     matchedQuote.valid_until < today);
-                if (!isExpired) {
-                  boundPrice = matchedQuote.price;
-                }
+                if (!isExpired) boundPrice = matchedQuote.price;
               }
             }
 
@@ -407,14 +403,35 @@ export default function BOMCreatePage() {
               ingredients: fullMat?.ingredients || [],
               contained_additives: containedAdditives,
               nutrition_fact: fullMat ? fullMat.nutrition_fact : {},
+              sequence_num: bom.sequence_num || "", // 🌟 載入序號
             };
           }),
         );
 
-        loadedItems.sort(
-          (a, b) =>
-            (parseFloat(b.quantity) || 0) - (parseFloat(a.quantity) || 0),
+        // 🌟 預設排序邏輯：沒有修改順序的話，預設用「使用量」由高到低排序
+        const hasCustomSequence = loadedItems.some(
+          (item) =>
+            item.sequence_num && String(item.sequence_num).trim() !== "",
         );
+        if (hasCustomSequence) {
+          loadedItems.sort((a, b) => {
+            const seqA = String(a.sequence_num || "");
+            const seqB = String(b.sequence_num || "");
+            if (!seqA) return 1;
+            if (!seqB) return -1;
+            return seqA.localeCompare(seqB, undefined, {
+              numeric: true,
+              sensitivity: "base",
+            });
+          });
+          setSortConfig({ key: "sequence", direction: "asc" });
+        } else {
+          loadedItems.sort(
+            (a, b) =>
+              (parseFloat(b.quantity) || 0) - (parseFloat(a.quantity) || 0),
+          );
+          setSortConfig({ key: "quantity", direction: "desc" });
+        }
 
         setFormData({
           code: targetMaterial.code,
@@ -447,6 +464,39 @@ export default function BOMCreatePage() {
   useEffect(() => {
     fetchInitialData();
   }, [materialCode]);
+
+  const handleDragStart = (e, index) => {
+    if (["INPUT", "TEXTAREA", "BUTTON", "SELECT"].includes(e.target.tagName)) {
+      e.preventDefault();
+      return;
+    }
+    setDraggedIndex(index);
+    e.dataTransfer.effectAllowed = "move";
+  };
+
+  const handleDragOver = (e, index) => {
+    e.preventDefault();
+    if (dragOverIndex !== index) setDragOverIndex(index);
+  };
+
+  const handleDragLeave = (e) => {
+    e.preventDefault();
+  };
+
+  const handleDrop = (e, index) => {
+    e.preventDefault();
+    setDragOverIndex(null);
+    if (draggedIndex === null || draggedIndex === index) return;
+
+    const newItems = [...formData.items];
+    const draggedItem = newItems[draggedIndex];
+    newItems.splice(draggedIndex, 1);
+    newItems.splice(index, 0, draggedItem);
+
+    setFormData((prev) => ({ ...prev, items: newItems }));
+    setDraggedIndex(null);
+    setSortConfig({ key: null, direction: null });
+  };
 
   const toggleExpand = (path) => {
     setExpandedRows((prev) => {
@@ -486,6 +536,7 @@ export default function BOMCreatePage() {
           set_cost: "",
           selected_price_id: null,
           selected_quote_info: null,
+          sequence_num: "",
         },
       ],
     }));
@@ -520,23 +571,19 @@ export default function BOMCreatePage() {
           valB = parseFloat(b.quantity) || 0;
         } else if (sortKey === "subtotal") {
           const aExpired = a.selected_quote_info?.is_expired === true;
-          const aRef = aExpired
-            ? parseFloat(a.base_estimated_cost) || 0
-            : parseFloat(a.estimated_cost) || 0;
           const aCost =
             a.set_cost !== "" && a.set_cost !== null
               ? parseFloat(a.set_cost)
-              : aRef;
-
+              : aExpired
+                ? parseFloat(a.base_estimated_cost) || 0
+                : parseFloat(a.estimated_cost) || 0;
           const bExpired = b.selected_quote_info?.is_expired === true;
-          const bRef = bExpired
-            ? parseFloat(b.base_estimated_cost) || 0
-            : parseFloat(b.estimated_cost) || 0;
           const bCost =
             b.set_cost !== "" && b.set_cost !== null
               ? parseFloat(b.set_cost)
-              : bRef;
-
+              : bExpired
+                ? parseFloat(b.base_estimated_cost) || 0
+                : parseFloat(b.estimated_cost) || 0;
           valA = (parseFloat(a.quantity) || 0) * aCost;
           valB = (parseFloat(b.quantity) || 0) * bCost;
         }
@@ -571,6 +618,7 @@ export default function BOMCreatePage() {
     ];
 
     const itemHeaders = [
+      "投入序號",
       "物料代碼",
       "物料名稱",
       "類型",
@@ -591,7 +639,6 @@ export default function BOMCreatePage() {
 
       const processedBoms = parentMat.boms.map((bom) => {
         const childMat = materials.find((m) => m.id === bom.child) || {};
-
         let childRefCost = parseFloat(childMat.estimated_cost) || 0;
         const today = new Date().toISOString().split("T")[0];
 
@@ -603,12 +650,9 @@ export default function BOMCreatePage() {
             const isQuoteExpired =
               matchedQuote.is_expired ||
               (matchedQuote.valid_until && matchedQuote.valid_until < today);
-            if (!isQuoteExpired) {
-              childRefCost = parseFloat(matchedQuote.price);
-            }
+            if (!isQuoteExpired) childRefCost = parseFloat(matchedQuote.price);
           }
         }
-
         const hasSetCost =
           bom.set_cost !== null &&
           bom.set_cost !== undefined &&
@@ -646,6 +690,7 @@ export default function BOMCreatePage() {
       processedBoms.forEach((item) => {
         const prefix = " ".repeat(level) + "↳ ";
         nestedRows.push([
+          safeStr(item.bom.sequence_num),
           safeStr(item.bom.child_code),
           prefix + safeStr(item.bom.child_name),
           getTypeLabel(item.bom.child_type),
@@ -667,7 +712,7 @@ export default function BOMCreatePage() {
     };
 
     let itemRows = [];
-    formData.items.forEach((item) => {
+    formData.items.forEach((item, index) => {
       const qty = parseFloat(item.quantity) || 0;
       const isExpired = item.selected_quote_info?.is_expired === true;
       const refCost = isExpired
@@ -687,6 +732,7 @@ export default function BOMCreatePage() {
           .join(" | ") || "-";
 
       itemRows.push([
+        safeStr(item.sequence_num || index + 1),
         safeStr(item.material_code),
         safeStr(item.material_name),
         getTypeLabel(item.type),
@@ -740,7 +786,6 @@ export default function BOMCreatePage() {
     document.body.removeChild(link);
   };
 
-  // 🌟 廠商報價 Sub-row
   const renderProviderQuotesSubRow = (
     baseRefCost,
     providerQuotes,
@@ -750,26 +795,25 @@ export default function BOMCreatePage() {
   ) => {
     if (!providerQuotes || providerQuotes.length === 0) return null;
 
-    // 判斷是否為「非本人」編輯層的唯讀模式 (展開的半成品配方)
     const isReadOnly = itemIndex === undefined;
     const currentSelectedId = !isReadOnly
       ? formData.items[itemIndex].selected_price_id
       : nestedSelectedId;
 
     return (
-      <div className="w-full pl-[128px] pr-6 pb-4 flex flex-col gap-1.5">
+      <div className="w-full pl-[104px] pr-4 pb-3 flex flex-col gap-1.5">
         <div className="flex items-center gap-1.5 pl-2 mb-0.5 w-full">
           <CornerDownRight
             size={12}
             className="text-slate-300"
             strokeWidth={3}
           />
-          <span className="text-[11px] font-black text-slate-800 tracking-widest">
+          <span className="text-[10px] font-black text-slate-400 tracking-widest uppercase">
             廠商報價情報
           </span>
         </div>
 
-        <div className="flex flex-col gap-1.5 w-full">
+        <div className="flex flex-col gap-1 w-full">
           {providerQuotes.map((pq, i) => {
             const diff = pq.price - baseRefCost;
             const diffPct = baseRefCost > 0 ? (diff / baseRefCost) * 100 : 0;
@@ -786,16 +830,13 @@ export default function BOMCreatePage() {
                 key={i}
                 onClick={() => {
                   if (isReadOnly || isQuoteExpired) return;
-
                   if (itemIndex !== undefined && itemIndex !== null) {
                     if (isThisSelected) {
                       handleItemChange(itemIndex, "selected_price_id", null);
-                      const originalCost =
-                        formData.items[itemIndex].base_estimated_cost;
                       handleItemChange(
                         itemIndex,
                         "estimated_cost",
-                        originalCost,
+                        formData.items[itemIndex].base_estimated_cost,
                       );
                     } else {
                       handleItemChange(
@@ -807,28 +848,18 @@ export default function BOMCreatePage() {
                     }
                   }
                 }}
-                className={`flex items-center justify-between gap-4 px-4 py-2 rounded-xl border transition-colors duration-200 w-full ${
+                className={`flex items-center justify-between gap-4 px-3 py-1.5 rounded-lg border transition-all duration-200 w-full ${
                   isQuoteExpired && isThisSelected
                     ? "bg-amber-50/50 border-amber-300 ring-2 ring-amber-300/40 shadow-sm cursor-not-allowed"
                     : isQuoteExpired
                       ? "bg-slate-50 border-slate-200 opacity-60 cursor-not-allowed"
                       : isThisSelected
-                        ? "bg-emerald-50/60 border-emerald-400 shadow-sm cursor-pointer"
+                        ? "bg-emerald-50 border-emerald-400 shadow-sm cursor-pointer"
                         : isReadOnly
-                          ? "bg-slate-50/50 border-slate-200/60"
-                          : "bg-white border-slate-200 hover:border-[#007AFF] hover:bg-blue-50/20 cursor-pointer group/quote"
+                          ? "bg-slate-50/50 border-transparent"
+                          : "bg-white border-transparent hover:border-[#007AFF]/30 hover:bg-blue-50/20 cursor-pointer group/quote"
                 }`}
-                title={
-                  isQuoteExpired
-                    ? "此報價已過期"
-                    : !isReadOnly
-                      ? isThisSelected
-                        ? "點擊解除綁定"
-                        : "點擊將此報價設為系統均價基準"
-                      : ""
-                }
               >
-                {/* 1. 廠商名稱 */}
                 <div className="flex-[2] flex items-center gap-1.5 min-w-[120px] truncate relative">
                   {isThisSelected && !isQuoteExpired && (
                     <CheckCircle2
@@ -842,89 +873,34 @@ export default function BOMCreatePage() {
                       size={14}
                       className="text-amber-500 shrink-0"
                       strokeWidth={2.5}
-                      title="此報價已過期"
                     />
                   )}
                   <span
-                    className={`text-xs font-bold truncate ${
-                      isQuoteExpired
-                        ? "text-amber-700 line-through decoration-amber-500/50"
-                        : isThisSelected
-                          ? "text-emerald-700"
-                          : "text-slate-800"
-                    }`}
-                    title={pq.provider_name}
+                    className={`text-xs font-semibold truncate ${isQuoteExpired ? "text-amber-700 line-through decoration-amber-500/50" : isThisSelected ? "text-emerald-700" : "text-slate-700"}`}
                   >
                     {pq.provider_name}
                   </span>
-
-                  {isThisSelected && isQuoteExpired && (
-                    <span className="ml-2 text-[10px] font-black text-amber-600 bg-amber-100/80 px-1.5 py-0.5 rounded whitespace-nowrap">
-                      報價過期
-                    </span>
-                  )}
                 </div>
 
-                {/* 2. 起迄日 */}
-                <div className="flex-[3] flex items-center justify-center gap-2 min-w-[180px]">
-                  <div className="flex items-center gap-1.5">
-                    <span
-                      className={`text-xs font-bold shrink-0 ${isQuoteExpired ? "text-amber-500/70" : "text-slate-500"}`}
-                    >
-                      起
-                    </span>
-                    <span
-                      className={`text-[11px] font-mono font-semibold whitespace-nowrap ${isQuoteExpired ? "text-amber-600/70" : "text-slate-600"}`}
-                    >
-                      {pq.effective_date}
-                    </span>
-                  </div>
+                <div className="flex-[3] flex items-center justify-center gap-2 min-w-[160px]">
                   <span
-                    className={`text-[10px] ${isQuoteExpired ? "text-amber-300" : "text-slate-300"}`}
+                    className={`text-[10px] font-mono font-medium whitespace-nowrap ${isQuoteExpired ? "text-amber-600/70" : "text-slate-500"}`}
                   >
-                    -
+                    {pq.effective_date} ~ {pq.valid_until || "長期"}
                   </span>
-                  <div className="flex items-center gap-1.5">
-                    <span
-                      className={`text-xs font-bold shrink-0 ${isQuoteExpired ? "text-amber-500" : "text-slate-500"}`}
-                    >
-                      迄
-                    </span>
-                    <span
-                      className={`text-[11px] font-mono font-semibold whitespace-nowrap ${isQuoteExpired ? "text-amber-600" : "text-slate-600"}`}
-                    >
-                      {pq.valid_until || "無期限"}
-                    </span>
-                  </div>
                 </div>
 
-                {/* 3. 報價 */}
                 <span
-                  className={`flex-[1] text-[13px] font-mono font-black min-w-[70px] text-left ${
-                    isQuoteExpired
-                      ? "text-amber-700"
-                      : isThisSelected
-                        ? "text-emerald-700"
-                        : "text-slate-900"
-                  }`}
+                  className={`flex-[1] text-xs font-mono font-bold min-w-[70px] text-right ${isQuoteExpired ? "text-amber-700" : isThisSelected ? "text-emerald-700" : "text-slate-800"}`}
                 >
                   ${formatNum(pq.price, 2)}
                 </span>
 
-                {/* 4. 漲幅 */}
                 <div
-                  className={`flex-[2] text-right font-mono text-[11px] font-bold min-w-[100px] ${
-                    isQuoteExpired
-                      ? "text-amber-500/70"
-                      : isUp
-                        ? "text-rose-500"
-                        : isDown
-                          ? "text-emerald-500"
-                          : "text-slate-400"
-                  }`}
+                  className={`flex-[2] text-right font-mono text-[10px] font-bold min-w-[90px] ${isQuoteExpired ? "text-amber-500/70" : isUp ? "text-rose-500" : isDown ? "text-emerald-500" : "text-slate-400"}`}
                 >
                   {diff !== 0 ? (
-                    <span className="whitespace-nowrap">
+                    <span>
                       {isUp ? "+" : "-"} ${formatNum(Math.abs(diff), 2)} (
                       {formatNum(Math.abs(diffPct), 1)}%)
                     </span>
@@ -933,12 +909,9 @@ export default function BOMCreatePage() {
                   )}
                 </div>
 
-                {/* 5. 游標 Hover 提示，僅在非唯讀且未過期時出現 */}
                 {!isReadOnly && !isThisSelected && !isQuoteExpired && (
-                  <div className="w-8 shrink-0 flex justify-end opacity-0 group-hover/quote:opacity-100 transition-opacity">
-                    <div className="text-[#007AFF] p-1.5">
-                      <MousePointerClick size={14} />
-                    </div>
+                  <div className="w-6 shrink-0 flex justify-end opacity-0 group-hover/quote:opacity-100 transition-opacity">
+                    <MousePointerClick size={12} className="text-[#007AFF]" />
                   </div>
                 )}
               </div>
@@ -956,7 +929,6 @@ export default function BOMCreatePage() {
 
     const processedBoms = parentMat.boms.map((bom, idx) => {
       const childMat = materials.find((m) => m.id === bom.child) || {};
-
       let childRefCost = parseFloat(childMat.estimated_cost) || 0;
       const today = new Date().toISOString().split("T")[0];
 
@@ -969,9 +941,7 @@ export default function BOMCreatePage() {
           const isQuoteExpired =
             matchedQuote.is_expired ||
             (matchedQuote.valid_until && matchedQuote.valid_until < today);
-          if (!isQuoteExpired) {
-            childRefCost = parseFloat(matchedQuote.price);
-          }
+          if (!isQuoteExpired) childRefCost = parseFloat(matchedQuote.price);
         }
       }
 
@@ -981,14 +951,13 @@ export default function BOMCreatePage() {
         precise.div(childReqQty, childBaseQty),
         parentQty,
       );
-
       const hasSetCost =
         bom.set_cost !== null &&
         bom.set_cost !== undefined &&
         bom.set_cost !== "";
       const activeCost = hasSetCost ? parseFloat(bom.set_cost) : childRefCost;
-
       const subtotal = precise.mul(actualQty, activeCost);
+
       return {
         ...bom,
         originalIdx: idx,
@@ -999,7 +968,7 @@ export default function BOMCreatePage() {
         actualQty,
         subtotal,
         boundId,
-        hasSetCost, // 🌟 傳入 UI 供判斷
+        hasSetCost,
       };
     });
 
@@ -1016,10 +985,11 @@ export default function BOMCreatePage() {
       return (
         <React.Fragment key={currentPath}>
           <div className="flex flex-col border-b border-slate-100/50 bg-slate-50/30 hover:bg-slate-50 transition-colors group">
-            <div className="flex items-start md:items-center gap-4 px-4 py-2 w-full min-w-[900px]">
+            <div className="flex items-start md:items-center gap-2 px-4 py-2 w-full">
+              {/* Spacer 加上與上層完美對齊的留白計算 */}
               <div
-                className="w-8 shrink-0 flex flex-col items-end pt-1"
-                style={{ paddingRight: `${level * 0.5}rem` }}
+                className="w-[88px] shrink-0 flex items-center justify-end pr-3"
+                style={{ paddingRight: `${level * 0.5 + 0.75}rem` }}
               >
                 {hasChildren ? (
                   <button
@@ -1042,7 +1012,8 @@ export default function BOMCreatePage() {
                 )}
               </div>
 
-              <div className="w-[64px] flex justify-center pt-0.5 shrink-0">
+              {/* Type Tag: w-16 */}
+              <div className="w-16 flex justify-center shrink-0">
                 {item.childMat.type && (
                   <span
                     className={`px-2 py-1 text-[9px] font-black rounded-md uppercase tracking-widest ${TYPE_MAP[item.childMat.type]?.color || "bg-slate-100 text-slate-500 border-slate-200"}`}
@@ -1052,7 +1023,8 @@ export default function BOMCreatePage() {
                 )}
               </div>
 
-              <div className="w-[280px] shrink-0 flex flex-col gap-0.5 pt-0.5">
+              {/* Material: w-64 */}
+              <div className="w-64 shrink-0 flex flex-col gap-0.5 px-2">
                 <span className="text-sm font-bold text-slate-700 truncate">
                   {item.child_name}
                 </span>
@@ -1061,6 +1033,7 @@ export default function BOMCreatePage() {
                 </span>
               </div>
 
+              {/* Remark: flex-1 */}
               <div className="flex-1 min-w-[120px]">
                 {item.remark ? (
                   <span className="text-xs text-slate-500 font-medium truncate block bg-white px-2 py-1 rounded border border-slate-100">
@@ -1071,7 +1044,8 @@ export default function BOMCreatePage() {
                 )}
               </div>
 
-              <div className="w-[130px] shrink-0 flex items-baseline gap-1 pt-1 pl-1">
+              {/* Qty: w-32 */}
+              <div className="w-32 shrink-0 flex justify-end items-baseline gap-1 pt-1 pr-2">
                 <span className="text-[15px] font-mono font-black text-slate-700">
                   {formatNum(item.actualQty)}
                 </span>
@@ -1080,14 +1054,15 @@ export default function BOMCreatePage() {
                 </span>
               </div>
 
-              <div className="w-[100px] shrink-0 text-right">
+              {/* Sys Cost: w-24 */}
+              <div className="w-24 shrink-0 text-right">
                 <span className="text-[13px] font-mono font-bold text-slate-500">
                   ${formatNum(item.childCost, 2)}
                 </span>
               </div>
 
-              {/* 🌟 修改此處：顯示唯讀的 Set Cost 標籤 */}
-              <div className="w-[110px] shrink-0 flex justify-center">
+              {/* Set Cost: w-28 */}
+              <div className="w-28 shrink-0 flex justify-center">
                 {item.hasSetCost ? (
                   <span className="font-mono text-[13px] font-bold text-indigo-600 bg-indigo-50 px-2.5 py-0.5 rounded-md border border-indigo-100">
                     ${formatNum(item.set_cost, 2)}
@@ -1097,12 +1072,14 @@ export default function BOMCreatePage() {
                 )}
               </div>
 
-              <div className="w-[100px] shrink-0 text-right pr-2">
+              {/* Subtotal: w-24 */}
+              <div className="w-24 shrink-0 text-right pr-2">
                 <span className="font-mono text-sm font-black text-slate-600">
                   ${formatNum(item.subtotal, 2)}
                 </span>
               </div>
-              <div className="w-8 shrink-0"></div>
+
+              <div className="w-10 shrink-0"></div>
             </div>
 
             {item.childMat.provider_quotes &&
@@ -1113,7 +1090,7 @@ export default function BOMCreatePage() {
                     item.childMat.provider_quotes,
                     undefined,
                     true,
-                    item.boundId, // 🌟 傳入下層做 Highlight
+                    item.boundId,
                   )}
                 </div>
               )}
@@ -1210,7 +1187,7 @@ export default function BOMCreatePage() {
             ing.legal_limit_percent !== undefined
           ) {
             const ingKey = `ing_${ing.id}`;
-            if (!summary[ingKey]) {
+            if (!summary[ingKey])
               summary[ingKey] = {
                 code: ingKey,
                 name: ing.name,
@@ -1218,7 +1195,6 @@ export default function BOMCreatePage() {
                 ratio: 0,
                 sources: [],
               };
-            }
             summary[ingKey].ratio = precise.add(
               summary[ingKey].ratio,
               currentItemRatio,
@@ -1281,7 +1257,6 @@ export default function BOMCreatePage() {
 
     formData.items.forEach((item) => {
       const itemQty = parseFloat(item.quantity) || 0;
-
       const today = new Date().toISOString().split("T")[0];
       let isExpired = false;
       if (item.selected_price_id && item.provider_quotes) {
@@ -1294,18 +1269,15 @@ export default function BOMCreatePage() {
             (matchedQuote.valid_until && matchedQuote.valid_until < today);
         }
       }
-
       const refCost = isExpired
         ? parseFloat(item.base_estimated_cost) || 0
         : parseFloat(item.estimated_cost) || 0;
-
       const activeCost =
         item.set_cost !== "" && item.set_cost !== null
           ? parseFloat(item.set_cost)
           : refCost;
 
       totalCost += itemQty * activeCost;
-
       if (item.type !== "PACK" && item.type !== "STICKER")
         totalWeight += itemQty;
     });
@@ -1369,7 +1341,7 @@ export default function BOMCreatePage() {
         await Promise.all(deletePromises);
       }
 
-      const bomPromises = formData.items.map(async (item) => {
+      const bomPromises = formData.items.map(async (item, index) => {
         const bomPayload = {
           parent_id: currentParentId,
           child_id: item.material_id,
@@ -1378,6 +1350,8 @@ export default function BOMCreatePage() {
           remark: item.remark || "",
           set_cost: item.set_cost !== "" ? parseFloat(item.set_cost) : null,
           selected_price_id: item.selected_price_id || null,
+          // 🌟 無論如何皆寫入序號，確保自訂排序的持久化
+          sequence_num: item.sequence_num || String(index + 1),
         };
         const url =
           isEditMode && item.id ? `/api/boms/${item.id}` : "/api/boms";
@@ -1524,7 +1498,7 @@ export default function BOMCreatePage() {
           </div>
         </div>
 
-        {/* 🌟 核心：高密度、全橫排對齊資料列 (Data Grid) */}
+        {/* 🌟 2. 核心配方明細 (使用標準 Tailwind 等寬級距建構 Data Grid) */}
         <div className="bg-white rounded-3xl border border-slate-200 shadow-sm flex flex-col w-full overflow-hidden">
           <div className="px-6 py-4 md:px-6 md:py-5 border-b border-slate-100 flex flex-col md:flex-row justify-between items-start md:items-center bg-slate-50/50 gap-4">
             <div className="flex items-center gap-3">
@@ -1533,6 +1507,10 @@ export default function BOMCreatePage() {
               </h3>
               <span className="text-[#007AFF] bg-blue-50 font-black px-2.5 py-0.5 rounded-full border border-blue-100 shadow-sm text-sm">
                 {formData.items.length}
+              </span>
+              <span className="text-xs font-bold text-slate-400 ml-2">
+                ※ 拖曳左側 <GripVertical size={12} className="inline mb-0.5" />{" "}
+                符號可自訂物料加工順序
               </span>
             </div>
 
@@ -1584,32 +1562,30 @@ export default function BOMCreatePage() {
                 尚未加入任何原料，請點擊上方「加入原料」開始設計。
               </div>
             ) : (
-              <div className="min-w-[1100px] flex flex-col w-full">
-                {/* 🌟 嚴格對齊的表頭 */}
-                <div className="flex items-center px-4 py-2 bg-slate-100/50 border-b border-slate-200 text-[10px] font-black text-slate-500 uppercase tracking-widest gap-4">
-                  <div className="w-8 text-center shrink-0">#</div>
-                  <div className="w-[64px] text-center shrink-0">類型</div>
-                  <div className="w-[280px] shrink-0">物料</div>
+              <div className="min-w-[1000px] flex flex-col w-full">
+                {/* 🌟 嚴格對齊的表頭 (合併序號區塊) */}
+                <div className="flex items-center gap-2 px-4 py-2 bg-slate-100/50 border-b border-slate-200 text-[10px] font-black text-slate-500 uppercase tracking-widest sticky top-0 z-10">
+                  <div className="w-[88px] text-center shrink-0">序號</div>
+                  <div className="w-16 text-center shrink-0">類型</div>
+                  <div className="w-64 shrink-0">物料</div>
                   <div className="flex-1 min-w-[120px]">備註</div>
-                  <div className="w-[120px] shrink-0 pl-1">
+                  <div className="w-32 shrink-0 pl-1 text-right">
                     用量(KG) <span className="text-red-500">*</span>
                   </div>
-                  <div className="w-[100px] shrink-0 text-right">系統均價</div>
-                  <div className="w-[110px] shrink-0 text-center">設定成本</div>
-                  <div className="w-[100px] shrink-0 text-right pr-2">小計</div>
-                  <div className="w-8 shrink-0"></div>
+                  <div className="w-24 shrink-0 text-right">系統均價</div>
+                  <div className="w-28 shrink-0 text-center">設定成本</div>
+                  <div className="w-24 shrink-0 text-right pr-2">小計</div>
+                  <div className="w-10 shrink-0"></div>
                 </div>
 
                 <div className="flex flex-col">
                   {formData.items.map((item, index) => {
                     const itemQty = parseFloat(item.quantity) || 0;
-
                     const isExpired =
                       item.selected_quote_info?.is_expired === true;
                     const refCost = isExpired
                       ? parseFloat(item.base_estimated_cost) || 0
                       : parseFloat(item.estimated_cost) || 0;
-
                     const hasSetCost =
                       item.set_cost !== "" &&
                       item.set_cost !== null &&
@@ -1618,11 +1594,6 @@ export default function BOMCreatePage() {
                       ? parseFloat(item.set_cost)
                       : refCost;
                     const subtotal = formatNum(itemQty * activeCost, 2);
-
-                    const excludedIds = formData.items
-                      .filter((_, i) => i !== index)
-                      .map((i) => i.material_id)
-                      .filter(Boolean);
                     const isSemi = item.type === "SEMI";
                     const currentPath = `root-${index}`;
                     const isExpanded = expandedRows.has(currentPath);
@@ -1644,21 +1615,55 @@ export default function BOMCreatePage() {
                     return (
                       <React.Fragment key={index}>
                         <div
-                          className={`flex flex-col border-b border-slate-100 transition-colors group ${isErrorRow ? "bg-red-50 hover:bg-red-100/50" : "bg-white hover:bg-slate-50/50"}`}
+                          draggable
+                          onDragStart={(e) => handleDragStart(e, index)}
+                          onDragOver={(e) => handleDragOver(e, index)}
+                          onDragLeave={handleDragLeave}
+                          onDrop={(e) => handleDrop(e, index)}
+                          className={`flex flex-col border-b border-slate-100 transition-colors group relative ${
+                            isErrorRow
+                              ? "bg-red-50 hover:bg-red-100/50"
+                              : "bg-white hover:bg-slate-50/50"
+                          } ${dragOverIndex === index ? "border-t-[3px] border-t-[#007AFF] bg-blue-50/30" : ""} ${
+                            draggedIndex === index ? "opacity-50" : ""
+                          }`}
                         >
                           {/* 🌟 1. 主資料列 */}
-                          <div className="flex items-start md:items-center gap-4 px-4 py-3 w-full">
-                            <div className="w-8 flex flex-col items-center justify-center pt-1.5 shrink-0">
-                              <span
-                                className={`text-xs font-black ${isErrorRow ? "text-red-500" : "text-slate-400"}`}
-                              >
-                                {index + 1}
-                              </span>
+                          <div className="flex items-start md:items-center gap-2 px-4 py-2 w-full">
+                            {/* 🌟 合併的 Drag & Seq Input 區塊: w-[88px] */}
+                            <div className="w-[88px] shrink-0 flex items-center justify-center gap-1.5 pl-2 pt-1">
+                              <div className="cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500 shrink-0">
+                                <GripVertical size={16} />
+                              </div>
+                              <input
+                                type="text"
+                                value={item.sequence_num || ""}
+                                onChange={(e) =>
+                                  handleItemChange(
+                                    index,
+                                    "sequence_num",
+                                    e.target.value,
+                                  )
+                                }
+                                placeholder={index + 1}
+                                className={`w-12 h-8 text-center text-xs font-mono font-bold rounded-md transition-all outline-none ${isErrorRow ? "bg-red-50 text-red-600 placeholder:text-red-300 border-red-100" : "bg-slate-50 text-slate-700 border border-transparent hover:border-slate-200 focus:bg-white focus:border-[#007AFF] focus:ring-2 focus:ring-[#007AFF]/20 placeholder:text-slate-400 placeholder:font-bold"}`}
+                              />
+                            </div>
+
+                            {/* Type Tag: w-16 */}
+                            <div className="w-16 shrink-0 flex flex-col items-center justify-center">
+                              {item.type && (
+                                <span
+                                  className={`px-1.5 py-0.5 text-[9px] font-black rounded uppercase tracking-widest ${TYPE_MAP[item.type]?.color || "bg-slate-100 text-slate-500 border-slate-200"}`}
+                                >
+                                  {TYPE_MAP[item.type]?.label || item.type}
+                                </span>
+                              )}
                               {isSemi && (
                                 <button
                                   type="button"
                                   onClick={() => toggleExpand(currentPath)}
-                                  className="mt-1 text-[#007AFF] hover:bg-blue-50 p-1 rounded-md transition-colors border border-blue-100 shadow-sm bg-white"
+                                  className="mt-1 text-[#007AFF] hover:bg-blue-50 p-0.5 rounded transition-colors"
                                 >
                                   {isExpanded ? (
                                     <ChevronDown size={14} strokeWidth={3} />
@@ -1669,17 +1674,8 @@ export default function BOMCreatePage() {
                               )}
                             </div>
 
-                            <div className="w-[64px] flex justify-center pt-1.5 shrink-0">
-                              {item.type && (
-                                <span
-                                  className={`px-2 py-1 text-[9px] font-black rounded-md uppercase tracking-widest ${TYPE_MAP[item.type]?.color || "bg-slate-100 text-slate-500 border-slate-200"}`}
-                                >
-                                  {TYPE_MAP[item.type]?.label || item.type}
-                                </span>
-                              )}
-                            </div>
-
-                            <div className="w-[280px] shrink-0 pt-0.5">
+                            {/* Material Select: w-64 */}
+                            <div className="w-64 shrink-0">
                               <SearchableSelect
                                 placeholder="請搜尋原料..."
                                 value={
@@ -1758,7 +1754,6 @@ export default function BOMCreatePage() {
                                     "nutrition_fact",
                                     selectedMat.nutrition_fact || {},
                                   );
-
                                   handleItemChange(index, "set_cost", "");
                                   handleItemChange(
                                     index,
@@ -1800,20 +1795,18 @@ export default function BOMCreatePage() {
                                         matIng;
                                       return ing?.is_additive === true;
                                     });
-
                                   return (
-                                    <div className="flex items-center gap-3">
+                                    <div className="flex items-center gap-2">
                                       <span
                                         className={`px-1.5 py-0.5 border text-[9px] font-bold rounded uppercase ${TYPE_MAP[mat.type]?.color || "bg-slate-50 text-slate-600 border-slate-200"}`}
                                       >
                                         {TYPE_MAP[mat.type]?.label || mat.type}
                                       </span>
-                                      <span className="font-bold text-slate-800 text-sm">
+                                      <span className="font-bold text-slate-800 text-sm truncate">
                                         {opt.label}
                                       </span>
-
-                                      <div className="flex-1 flex items-center justify-end gap-1.5">
-                                        <span className="text-[10px] text-slate-400 font-mono font-semibold ml-auto">
+                                      <div className="flex-1 flex items-center justify-end gap-1">
+                                        <span className="text-[10px] text-slate-400 font-mono font-semibold">
                                           {opt.subLabel}
                                         </span>
                                         {hasAdditiveIcon && (
@@ -1831,11 +1824,8 @@ export default function BOMCreatePage() {
                               />
                             </div>
 
-                            <div className="flex-1 min-w-[120px] pt-1 relative">
-                              <MessageSquareText
-                                size={13}
-                                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-300"
-                              />
+                            {/* Remark: flex-1 */}
+                            <div className="flex-1 min-w-[120px] relative">
                               <input
                                 type="text"
                                 value={item.remark || ""}
@@ -1846,12 +1836,13 @@ export default function BOMCreatePage() {
                                     e.target.value,
                                   )
                                 }
-                                className="w-full h-[40px] pl-8 pr-3 border border-slate-200 rounded-lg focus:border-[#007AFF] focus:ring-2 focus:ring-[#007AFF]/20 outline-none text-[13px] transition-all bg-white focus:bg-white placeholder:text-slate-300"
+                                className="w-full h-[36px] px-3 border border-transparent bg-slate-50 rounded-lg hover:border-slate-200 hover:bg-white focus:bg-white focus:border-[#007AFF] focus:ring-2 focus:ring-[#007AFF]/20 outline-none text-[13px] transition-all placeholder:text-slate-300"
                                 placeholder="備註..."
                               />
                             </div>
 
-                            <div className="w-[120px] shrink-0 relative pt-1">
+                            {/* Qty: w-32 */}
+                            <div className="w-32 shrink-0 relative">
                               <input
                                 type="number"
                                 step="any"
@@ -1865,17 +1856,15 @@ export default function BOMCreatePage() {
                                 }
                                 onBlur={(e) => {
                                   const val = parseFloat(e.target.value);
-                                  if (!isNaN(val)) {
+                                  if (!isNaN(val))
                                     handleItemChange(
                                       index,
                                       "quantity",
                                       val.toFixed(3),
                                     );
-                                  } else {
-                                    handleItemChange(index, "quantity", "");
-                                  }
+                                  else handleItemChange(index, "quantity", "");
                                 }}
-                                className={`w-full h-[40px] pl-3 pr-8 border border-slate-200 rounded-lg focus:border-[#007AFF] focus:ring-2 focus:ring-[#007AFF]/20 outline-none font-mono font-bold text-sm text-[#007AFF] bg-blue-50/30 transition-all ${isErrorRow ? "border-red-300 text-red-600 bg-white" : "bg-white"}`}
+                                className={`w-full h-[36px] pl-3 pr-8 text-right font-mono font-bold text-[#007AFF] bg-blue-50/30 border border-transparent hover:border-blue-100 rounded-lg focus:bg-white focus:border-[#007AFF] focus:ring-2 focus:ring-[#007AFF]/20 outline-none transition-all ${isErrorRow ? "border-red-300 text-red-600 bg-white" : ""}`}
                                 placeholder="0"
                               />
                               <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[9px] font-black text-blue-300 uppercase pointer-events-none">
@@ -1883,18 +1872,17 @@ export default function BOMCreatePage() {
                               </span>
                             </div>
 
-                            {/* 🌟 系統均價 (顯示過期警告) */}
-                            <div className="w-[100px] shrink-0 text-right pt-2 relative group/price">
+                            {/* Ref Cost: w-24 */}
+                            <div className="w-24 shrink-0 text-right pt-0.5 relative group/price">
                               <span
-                                className={`font-mono font-bold text-[13px] transition-colors ${item.selected_price_id && !isExpired ? "text-emerald-600" : "text-slate-500"}`}
+                                className={`font-mono text-[13px] font-bold transition-colors ${item.selected_price_id && !isExpired ? "text-emerald-600" : "text-slate-500"}`}
                               >
                                 ${formatNum(refCost, 2)}
                               </span>
-
                               {item.selected_price_id && isExpired && (
                                 <div
-                                  className="absolute -top-1 -right-2 bg-amber-50 rounded-full shadow-sm border border-amber-200 p-0.5 cursor-help"
-                                  title={`此報價已於 ${item.selected_quote_info?.valid_until} 過期，已自動恢復系統均價計算`}
+                                  className="absolute -top-1 -right-1 bg-amber-50 rounded-full border border-amber-200 p-0.5 cursor-help"
+                                  title={`此報價已於 ${item.selected_quote_info?.valid_until} 過期`}
                                 >
                                   <AlertCircle
                                     size={10}
@@ -1905,10 +1893,10 @@ export default function BOMCreatePage() {
                               )}
                             </div>
 
-                            {/* 自訂成本框 */}
-                            <div className="w-[110px] shrink-0 relative pt-0.5">
-                              <div className="flex items-center justify-between h-[40px] px-3 mt-1 border border-indigo-200 bg-indigo-50/20 text-indigo-700 rounded-lg focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-500/20 transition-all shadow-sm">
-                                <span className="text-xs font-bold text-indigo-300">
+                            {/* Set Cost: w-28 */}
+                            <div className="w-28 shrink-0 flex justify-center">
+                              <div className="flex items-center h-[36px] px-2 bg-slate-50 border border-transparent rounded-lg hover:bg-white hover:border-slate-200 focus-within:bg-white focus-within:border-[#007AFF] focus-within:ring-2 focus-within:ring-[#007AFF]/20 transition-all">
+                                <span className="text-xs font-bold text-slate-400 mr-1">
                                   $
                                 </span>
                                 <input
@@ -1926,35 +1914,36 @@ export default function BOMCreatePage() {
                                   }
                                   onBlur={(e) => {
                                     const val = parseFloat(e.target.value);
-                                    if (!isNaN(val)) {
+                                    if (!isNaN(val))
                                       handleItemChange(
                                         index,
                                         "set_cost",
                                         val.toFixed(2),
                                       );
-                                    } else {
+                                    else
                                       handleItemChange(index, "set_cost", "");
-                                    }
                                   }}
-                                  className="w-full pl-2 text-left bg-transparent outline-none font-mono font-bold text-sm placeholder:text-indigo-200 placeholder:font-sans placeholder:text-center"
+                                  className="w-full text-right bg-transparent outline-none font-mono font-bold text-sm text-indigo-600 placeholder:font-sans placeholder:text-slate-300 placeholder:font-normal"
                                   placeholder="自訂"
                                 />
                               </div>
                             </div>
 
-                            <div className="w-[100px] shrink-0 text-right pt-2.5 pr-2 flex flex-col items-end">
+                            {/* Subtotal: w-24 */}
+                            <div className="w-24 shrink-0 text-right pr-2 pt-0.5">
                               <span className="font-mono text-[15px] font-black text-slate-700">
                                 ${subtotal}
                               </span>
                             </div>
 
-                            <div className="w-8 shrink-0 flex justify-end pt-1">
+                            {/* Delete: w-10 */}
+                            <div className="w-10 shrink-0 flex justify-center pt-0.5">
                               <button
                                 type="button"
                                 onClick={() => handleRemoveItem(index)}
                                 className="text-slate-300 hover:text-red-500 hover:bg-red-50 p-1.5 rounded-lg transition-colors"
                               >
-                                <Trash2 size={16} strokeWidth={2.5} />
+                                <Trash2 size={16} />
                               </button>
                             </div>
                           </div>
@@ -1988,17 +1977,17 @@ export default function BOMCreatePage() {
         </div>
 
         {/* 法規面板 */}
-        <div className="border border-slate-200/60 bg-slate-50/50 p-8 rounded-3xl shadow-[0_2px_10px_-4px_rgba(0,0,0,0.05)] min-h-[220px] flex flex-col gap-6">
-          <h3 className="text-base font-black text-slate-800 flex items-center gap-2">
+        <div className="border border-slate-200/60 bg-slate-50/50 p-6 md:p-8 rounded-2xl shadow-sm min-h-[220px] flex flex-col gap-6">
+          <h3 className="text-sm font-black text-slate-800 flex items-center gap-2">
             <FlaskConical
-              size={18}
+              size={16}
               className="text-orange-500"
               strokeWidth={2.5}
             />
             法定添加物安全試算面板
           </h3>
           {additiveCalculations.results.length === 0 ? (
-            <div className="flex-1 flex flex-col items-center justify-center text-slate-400 border-2 border-dashed border-slate-200 rounded-2xl p-8 bg-white/50">
+            <div className="flex-1 flex flex-col items-center justify-center text-slate-400 border-2 border-dashed border-slate-200 rounded-xl p-8 bg-white/50">
               <FlaskConical size={32} className="mb-3 opacity-20" />
               <span className="text-sm font-bold">
                 目前配方中尚無法定添加物
@@ -2012,28 +2001,28 @@ export default function BOMCreatePage() {
                 return (
                   <div
                     key={add.code}
-                    className={`flex flex-col bg-white rounded-2xl border shadow-sm overflow-hidden transition-all duration-300 ${add.isExceeded ? "border-red-300 ring-4 ring-red-500/10" : "border-slate-200"}`}
+                    className={`flex flex-col bg-white rounded-xl border shadow-sm overflow-hidden transition-all duration-300 ${add.isExceeded ? "border-red-300 ring-2 ring-red-500/10" : "border-slate-200"}`}
                   >
-                    <div className="px-5 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/80">
-                      <h4 className="font-black text-slate-800 text-base truncate pr-2">
+                    <div className="px-4 py-3 border-b border-slate-100 flex justify-between items-center bg-slate-50/80">
+                      <h4 className="font-bold text-slate-800 text-sm truncate pr-2">
                         {add.name}
                       </h4>
-                      <span className="bg-white text-slate-500 text-[10px] uppercase tracking-widest px-3 py-1.5 rounded-lg font-black shrink-0 shadow-sm border border-slate-200">
+                      <span className="bg-white text-slate-500 text-[10px] uppercase tracking-widest px-2.5 py-1 rounded-md font-black shrink-0 shadow-sm border border-slate-200">
                         上限 {formatNum(add.limit)}%
                       </span>
                     </div>
-                    <div className="p-5 flex-1 flex flex-col">
-                      <div className="text-[10px] text-slate-400 font-black mb-3 uppercase tracking-widest">
+                    <div className="p-4 flex-1 flex flex-col">
+                      <div className="text-[10px] text-slate-400 font-bold mb-2 uppercase tracking-widest">
                         配方貢獻來源
                       </div>
-                      <div className="space-y-2.5 flex-1">
+                      <div className="space-y-2 flex-1">
                         {add.sources.map((src, i) => (
                           <div
                             key={i}
-                            className="flex justify-between items-baseline text-sm"
+                            className="flex justify-between items-baseline text-xs"
                           >
-                            <span className="text-slate-700 truncate pr-4 text-xs font-bold">
-                              <span className="text-slate-400 mr-2 font-medium">
+                            <span className="text-slate-700 truncate pr-4 font-semibold">
+                              <span className="text-slate-400 mr-1 font-medium">
                                 [{src.type === "DIRECT" ? "原料" : "半成品"}]
                               </span>
                               {src.name}
@@ -2044,60 +2033,35 @@ export default function BOMCreatePage() {
                           </div>
                         ))}
                       </div>
-                      <div className="mt-5 pt-3 border-t-[3px] border-slate-800 flex justify-between items-end">
-                        <span className="text-xs font-black text-slate-800">
+                      <div className="mt-4 pt-3 border-t border-slate-200 flex justify-between items-end">
+                        <span className="text-xs font-bold text-slate-500">
                           合計總重 (KG)
                         </span>
-                        <span className="text-2xl font-mono font-black text-slate-800 leading-none tracking-tight">
+                        <span className="text-xl font-mono font-black text-slate-800 leading-none">
                           {formatNum(add.totalQty)}
                         </span>
                       </div>
                     </div>
-                    <div className="p-5 border-t border-slate-100 bg-slate-50/80 flex flex-col gap-5">
-                      <div className="flex bg-white rounded-xl border border-slate-200/80 shadow-sm p-1.5">
-                        <div className="flex-1 flex flex-col items-center justify-center py-2.5 border-r border-slate-100">
-                          <span className="text-[9px] font-black text-slate-400 mb-1.5 uppercase tracking-widest">
-                            安全上限 (KG)
-                          </span>
-                          <span className="font-mono font-black text-slate-700 text-sm">
-                            {formatNum(maxAllowedQty)}
-                          </span>
-                        </div>
-                        <div className="flex-1 flex flex-col items-center justify-center py-2.5">
-                          <span
-                            className={`text-[9px] font-black mb-1.5 uppercase tracking-widest ${add.isExceeded ? "text-red-500" : "text-slate-400"}`}
-                          >
-                            {add.isExceeded ? "已超標量 (KG)" : "還可新增 (KG)"}
-                          </span>
-                          <span
-                            className={`font-mono font-black text-sm ${add.isExceeded ? "text-red-600" : "text-slate-700"}`}
-                          >
-                            {formatNum(Math.abs(maxAllowedQty - add.totalQty))}
-                          </span>
-                        </div>
-                      </div>
-                      <div className="flex justify-between items-center mt-1">
+                    <div className="p-4 border-t border-slate-100 bg-slate-50/80 flex flex-col gap-4">
+                      <div className="flex justify-between items-center">
                         <div
-                          className={`flex items-center gap-2 font-bold text-sm tracking-wide ${add.isExceeded ? "text-red-500" : "text-emerald-500"}`}
+                          className={`flex items-center gap-1.5 font-bold text-xs tracking-wide ${add.isExceeded ? "text-red-500" : "text-emerald-500"}`}
                         >
                           {add.isExceeded ? (
-                            <AlertTriangle size={20} strokeWidth={2.5} />
+                            <AlertTriangle size={16} strokeWidth={2.5} />
                           ) : (
-                            <CheckCircle2 size={20} strokeWidth={2.5} />
+                            <CheckCircle2 size={16} strokeWidth={2.5} />
                           )}
                           <span>
                             {add.isExceeded ? "佔比已超標" : "符合安全"}
                           </span>
                         </div>
                         <div className="text-right flex flex-col justify-center">
-                          <div className="text-[9px] font-black tracking-widest text-slate-400 uppercase mb-1">
-                            目前佔比
-                          </div>
                           <div
-                            className={`text-3xl font-black font-mono leading-none tracking-tighter flex items-baseline justify-end ${add.isExceeded ? "text-red-500" : "text-slate-800"}`}
+                            className={`text-2xl font-black font-mono leading-none flex items-baseline justify-end ${add.isExceeded ? "text-red-500" : "text-slate-800"}`}
                           >
                             {formatNum(add.usagePercent, 2)}
-                            <span className="text-lg ml-1 font-bold opacity-40 text-slate-500">
+                            <span className="text-sm ml-0.5 font-bold opacity-50">
                               %
                             </span>
                           </div>
@@ -2112,43 +2076,37 @@ export default function BOMCreatePage() {
         </div>
 
         {/* 底部總計 */}
-        <div className="bg-white px-8 py-6 rounded-3xl border border-slate-200/60 shadow-sm flex flex-col md:flex-row justify-between items-center gap-6">
-          <div className="flex flex-wrap items-center gap-6 md:gap-10">
+        <div className="bg-white px-6 py-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row justify-between items-center gap-6">
+          <div className="flex flex-wrap items-center gap-6 md:gap-8">
             <div>
-              <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mb-1.5">
+              <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mb-1">
                 總材料成本
               </p>
-              <div className="text-slate-800 font-mono font-black text-2xl">
+              <div className="text-slate-800 font-mono font-black text-xl">
                 ${formatNum(calculations.totalCost, 2)}
               </div>
             </div>
-            <div className="w-px h-10 bg-slate-300 hidden md:block"></div>
+            <div className="w-px h-8 bg-slate-200 hidden md:block"></div>
             <div>
-              <p className="text-[#007AFF] text-[10px] font-black uppercase tracking-widest mb-1.5">
-                每 KG 成本 (除 {formData.base_quantity} 基準)
+              <p className="text-[#007AFF] text-[10px] font-bold uppercase tracking-widest mb-1">
+                每 KG 成本
               </p>
-              <div className="text-[#007AFF] font-mono font-black text-3xl">
+              <div className="text-[#007AFF] font-mono font-black text-2xl">
                 ${formatNum(calculations.unitCost, 2)}
               </div>
             </div>
-            <div className="w-px h-10 bg-slate-300 hidden md:block"></div>
+            <div className="w-px h-8 bg-slate-200 hidden md:block"></div>
             <div>
-              <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mb-1.5">
+              <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mb-1">
                 用料總重
               </p>
               <div className="flex items-baseline gap-2">
                 <div
-                  className={`font-mono font-black text-3xl ${calculations.weightDiff < -0.001 ? "text-red-500" : calculations.weightDiff > 0.001 ? "text-amber-500" : "text-emerald-500"}`}
+                  className={`font-mono font-black text-2xl ${calculations.weightDiff < -0.001 ? "text-red-500" : calculations.weightDiff > 0.001 ? "text-amber-500" : "text-emerald-500"}`}
                 >
                   {formatNum(calculations.totalWeight, 2)}
                 </div>
-                <span className="text-slate-500 font-bold text-sm">KG</span>
-                <div
-                  className={`font-mono font-bold text-sm px-2.5 py-1 rounded-lg border shadow-sm ml-1 ${calculations.weightDiff < -0.001 ? "bg-red-50 text-red-600 border-red-200" : calculations.weightDiff > 0.001 ? "bg-amber-50 text-amber-600 border-amber-200" : "bg-emerald-50 text-emerald-600 border-emerald-200"}`}
-                >
-                  {calculations.weightDiff > 0.001 ? "多" : "缺"}{" "}
-                  {Math.abs(formatNum(calculations.weightDiff, 2))} KG
-                </div>
+                <span className="text-slate-500 font-bold text-xs">KG</span>
               </div>
             </div>
           </div>
@@ -2157,9 +2115,9 @@ export default function BOMCreatePage() {
             <button
               type="button"
               onClick={handleExportExcel}
-              className="w-full md:w-auto px-6 py-3.5 bg-white border border-slate-200 hover:bg-slate-50 hover:border-slate-300 text-slate-700 rounded-xl shadow-sm transition-all font-black text-sm flex items-center justify-center gap-2"
+              className="w-full md:w-auto px-5 py-2.5 bg-white border border-slate-200 hover:bg-slate-50 hover:border-slate-300 text-slate-700 rounded-lg shadow-sm transition-all font-bold text-sm flex items-center justify-center gap-2"
             >
-              <Download size={18} strokeWidth={2.5} /> 匯出 EXCEL
+              <Download size={16} strokeWidth={2.5} /> 匯出 EXCEL
             </button>
             <button
               type="submit"
@@ -2168,9 +2126,9 @@ export default function BOMCreatePage() {
                 additiveCalculations.hasLimitError ||
                 claimsAndWarnings.banned.length > 0
               }
-              className="w-full md:w-auto px-12 py-3.5 bg-[#007AFF] hover:bg-[#0056b3] text-white rounded-xl shadow-[0_4px_12px_rgba(0,122,255,0.3)] transition-all font-black text-sm flex items-center justify-center gap-2 hover:-translate-y-0.5 disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed disabled:shadow-none disabled:transform-none"
+              className="w-full md:w-auto px-8 py-2.5 bg-[#007AFF] hover:bg-[#0056b3] text-white rounded-lg shadow-[0_2px_8px_rgba(0,122,255,0.3)] transition-all font-bold text-sm flex items-center justify-center gap-2 disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed disabled:shadow-none"
             >
-              <Save size={18} strokeWidth={2.5} />{" "}
+              <Save size={16} strokeWidth={2.5} />{" "}
               {isSubmitting ? "儲存中..." : "儲存配方"}
             </button>
           </div>

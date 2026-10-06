@@ -169,7 +169,6 @@ const ProductionFormTemplate = ({
   // 🌟 依照 Toggle 狀態決定前端的即時排序邏輯
   flattenedMaterials.sort((a, b) => {
     if (sortBySequence) {
-      // 按照序號 (Sequence_num) 排序，若無序號則退回以數量排序
       const seqA = String(a.sequence_num || "").trim();
       const seqB = String(b.sequence_num || "").trim();
       if (seqA && seqB)
@@ -181,7 +180,6 @@ const ProductionFormTemplate = ({
       if (!seqA && seqB) return 1;
       return b.requiredQty - a.requiredQty;
     } else {
-      // 預設原邏輯：半成品固定置頂，其餘按照用量由高到低
       if (a.type === "SEMI" && b.type !== "SEMI") return -1;
       if (a.type !== "SEMI" && b.type === "SEMI") return 1;
       return b.requiredQty - a.requiredQty;
@@ -568,15 +566,48 @@ const CoATemplateProduct = ({ orders }) => {
                 </div>
                 <div className="w-[60%] flex flex-col justify-center">
                   {rangeStandards.length > 0 ? (
-                    rangeStandards.map((s, idx) => (
-                      <div
-                        key={idx}
-                        className="flex justify-between border-b border-black last:border-0 px-2 py-0.5"
-                      >
-                        <span>{s.name}</span>
-                        <span>{s.target_min || s.target_max || "-"}</span>
-                      </div>
-                    ))
+                    rangeStandards.map((s, idx) => {
+                      const minStr = s.target_min;
+                      const maxStr = s.target_max;
+                      let midText = "-";
+
+                      const hasMin =
+                        minStr !== null &&
+                        minStr !== undefined &&
+                        minStr !== "";
+                      const hasMax =
+                        maxStr !== null &&
+                        maxStr !== undefined &&
+                        maxStr !== "";
+
+                      if (hasMin && hasMax) {
+                        const minNum = parseFloat(minStr);
+                        const maxNum = parseFloat(maxStr);
+                        if (!isNaN(minNum) && !isNaN(maxNum)) {
+                          const mid = ((minNum + maxNum) / 2).toFixed(1);
+                          // 萃取後綴文字 (例如 '%' 或 'kg')
+                          const suffixMatch = String(maxStr).match(/[^\d.-]+/);
+                          const suffix = suffixMatch ? suffixMatch[0] : "";
+                          midText = `${parseFloat(mid)}${suffix}`;
+                        } else {
+                          midText = `${minStr} ~ ${maxStr}`;
+                        }
+                      } else if (hasMin) {
+                        midText = minStr;
+                      } else if (hasMax) {
+                        midText = maxStr;
+                      }
+
+                      return (
+                        <div
+                          key={idx}
+                          className="flex justify-between border-b border-black last:border-0 px-2 py-0.5"
+                        >
+                          <span>{s.name}</span>
+                          <span>{midText}</span>
+                        </div>
+                      );
+                    })
                   ) : (
                     <div className="text-center w-full">-</div>
                   )}
@@ -772,11 +803,30 @@ const CoATemplateVendor = ({ orders }) => {
                   let resText = "-";
 
                   if (qc) {
-                    if (qc.type === "range")
-                      stdText = `${qc.target_min || ""} ~ ${qc.target_max || ""}`;
-                    else if (qc.type === "boolean")
+                    if (qc.type === "range") {
+                      const hasMin =
+                        qc.target_min !== null &&
+                        qc.target_min !== undefined &&
+                        qc.target_min !== "";
+                      const hasMax =
+                        qc.target_max !== null &&
+                        qc.target_max !== undefined &&
+                        qc.target_max !== "";
+
+                      if (hasMin && hasMax) {
+                        stdText = `介於 ${qc.target_min} ~ ${qc.target_max}`;
+                      } else if (hasMin && !hasMax) {
+                        stdText = `高於 ${qc.target_min}`;
+                      } else if (!hasMin && hasMax) {
+                        stdText = `低於 ${qc.target_max}`;
+                      } else {
+                        stdText = "-";
+                      }
+                    } else if (qc.type === "boolean") {
                       stdText = qc.target_bool === "NEGATIVE" ? "陰性" : "合格";
-                    else stdText = qc.target_text || "-";
+                    } else {
+                      stdText = qc.target_text || "-";
+                    }
 
                     resText = metricsMap[qc.name] || "-";
                     if (qc.type === "boolean" && resText) {
@@ -1406,9 +1456,8 @@ export default function ProductionOrderPage() {
         </div>
 
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-          <div className="p-5 md:p-6 border-b border-slate-100 flex flex-col gap-5 bg-slate-50/50">
-            {/* 搜尋區塊：改用 Grid 確保對齊不亂跳 */}
-            <div className="flex flex-wrap items-center gap-3 w-full xl:w-auto">
+          <div className="p-5 md:p-6 border-b border-slate-100 flex flex-col items-center xl:items-center gap-5 bg-slate-50/50">
+            <div className="flex flex-row grid grid-cols-1 sm:grid-cols-3 gap-3 w-full xl:w-auto">
               <div className="relative">
                 <Search
                   className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
@@ -1445,17 +1494,12 @@ export default function ProductionOrderPage() {
                   placeholder="搜尋客戶名稱"
                   value={filterVendor}
                   onChange={(e) => setFilterVendor(e.target.value)}
-                  className="w-full h-[40px] pl-9 pr-4 bg-white border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-slate-400 focus:outline-none shadow-sm transition-all"
+                  className="flex w-full h-[40px] pl-9 pr-4 bg-white border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-slate-400 focus:outline-none shadow-sm transition-all"
                 />
-              </div>
-              <div className="text-xs text-slate-400 font-bold flex items-center gap-2 mr-2">
-                {loading && <Loader2 size={14} className="animate-spin" />}共{" "}
-                {filteredOrders.length} 筆
               </div>
             </div>
 
-            {/* 操作區塊：統一高度，整齊排列 */}
-            <div className="flex flex-wrap items-center gap-3 w-full xl:w-auto">
+            <div className="flex flex-row flex-wrap items-center gap-3 w-full xl:w-auto">
               <label className="flex items-center gap-2 text-sm font-bold text-slate-600 bg-white border border-slate-200 px-3 h-[40px] rounded-lg shadow-sm cursor-pointer hover:bg-slate-50 transition-colors select-none">
                 <input
                   type="checkbox"

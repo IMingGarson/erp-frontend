@@ -7,6 +7,7 @@ import {
   ClipboardCheck,
   Loader2,
   Search,
+  Calendar,
 } from "lucide-react";
 import { fetchWithAuth } from "./utils/fetchWithAuth";
 import { useNavigate } from "react-router-dom";
@@ -146,6 +147,15 @@ const getVendorName = (order) => {
   } catch (e) {
     return "基香食品";
   }
+};
+
+const getDaysAgoStr = (days) => {
+  const d = new Date();
+  d.setDate(d.getDate() - days);
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
 };
 
 // ==============================================
@@ -540,7 +550,7 @@ const CoATemplateProduct = ({ orders }) => {
               colSpan={standards.length + 2}
               className="border border-black p-1 px-2 text-right text-[12px]"
             >
-              {/* ※規格詳見A-7-03成品管制標準 */}
+              ※規格詳見A-7-03成品管制標準
             </td>
           </tr>
 
@@ -880,12 +890,29 @@ const CoATemplateVendor = ({ orders }) => {
                             {expNoSpaces}
                           </td>
                           <td
-                            className="border border-black p-1 text-left text-[10px] leading-tight"
+                            className="border border-black p-1 w-[100px] text-center text-[10px] leading-tight"
                             rowSpan={rowCount}
                           >
-                            <div>■ 常溫 28°C↓</div>
-                            <div>□ 冷藏 0-7°C↓</div>
-                            <div>□ 冷凍 -18°C↓</div>
+                            <div>
+                              {order.product_profile.storage_method ===
+                              "ROOM_TEMP"
+                                ? "■"
+                                : "□"}{" "}
+                              常溫 28°C ↓
+                            </div>
+                            <div>
+                              {order.product_profile.storage_method ===
+                              "REFRIGERATED"
+                                ? "■"
+                                : "□"}{" "}
+                              冷藏 -7°C ↓
+                            </div>
+                            <div>
+                              {order.product_profile.storage_method === "FROZEN"
+                                ? "■"
+                                : "□"}{" "}
+                              冷凍 -18°C ↓
+                            </div>
                           </td>
                         </>
                       )}
@@ -898,9 +925,7 @@ const CoATemplateVendor = ({ orders }) => {
                       <td className="border border-black p-1 bg-gray-50/20">
                         {resText}
                       </td>
-                      <td className="border border-black p-1 bg-gray-50/20 text-[10px]">
-                        -
-                      </td>
+                      <td className="border w-[450px] border-black p-1 bg-gray-50/20 text-[10px]"></td>
                     </tr>
                   );
                 })}
@@ -1192,12 +1217,46 @@ export default function ProductionOrderPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  const [filterOrder, setFilterOrder] = useState("");
-  const [filterProduct, setFilterProduct] = useState("");
-  const [filterVendor, setFilterVendor] = useState("");
+  // 🌟 從 sessionStorage 載入或給定預設值
+  const [filterOrder, setFilterOrder] = useState(
+    () => sessionStorage.getItem("po_filterOrder") || "",
+  );
+  const [filterProduct, setFilterProduct] = useState(
+    () => sessionStorage.getItem("po_filterProduct") || "",
+  );
+  const [filterVendor, setFilterVendor] = useState(
+    () => sessionStorage.getItem("po_filterVendor") || "",
+  );
 
-  // 🌟 新增：由前端控制是否依序號排版的狀態，預設走原邏輯
-  const [sortBySequence, setSortBySequence] = useState(false);
+  // 🌟 時間區間：預設抓取前一個月到今天
+  const [startDate, setStartDate] = useState(
+    () => sessionStorage.getItem("po_startDate") || getDaysAgoStr(30),
+  );
+  const [endDate, setEndDate] = useState(
+    () => sessionStorage.getItem("po_endDate") || getDaysAgoStr(0),
+  );
+
+  // 🌟 前端控制是否依序號排版
+  const [sortBySequence, setSortBySequence] = useState(
+    () => sessionStorage.getItem("po_sortBySequence") === "true",
+  );
+
+  // 🌟 狀態改變時自動同步存入 sessionStorage
+  useEffect(() => {
+    sessionStorage.setItem("po_filterOrder", filterOrder);
+    sessionStorage.setItem("po_filterProduct", filterProduct);
+    sessionStorage.setItem("po_filterVendor", filterVendor);
+    sessionStorage.setItem("po_startDate", startDate);
+    sessionStorage.setItem("po_endDate", endDate);
+    sessionStorage.setItem("po_sortBySequence", sortBySequence);
+  }, [
+    filterOrder,
+    filterProduct,
+    filterVendor,
+    startDate,
+    endDate,
+    sortBySequence,
+  ]);
 
   const [expandedOrderIds, setExpandedOrderIds] = useState([]);
   const [detailedOrdersMap, setDetailedOrdersMap] = useState({});
@@ -1224,9 +1283,10 @@ export default function ProductionOrderPage() {
       onConfirm: null,
     });
 
+  // 🌟 重新撈取資料，並綁定日期做為 Dependency
   useEffect(() => {
     fetchData();
-  }, [filterProduct, filterVendor]);
+  }, [filterProduct, filterVendor, startDate, endDate]);
 
   const fetchData = async () => {
     setLoading(true);
@@ -1234,6 +1294,9 @@ export default function ProductionOrderPage() {
       const params = new URLSearchParams({ is_root: "true" });
       if (filterProduct) params.append("product", filterProduct);
       if (filterVendor) params.append("vendor", filterVendor);
+      // 將時間範圍帶入 API
+      if (startDate) params.append("start_date", startDate);
+      if (endDate) params.append("end_date", endDate);
 
       const res = await fetchWithAuth(
         `/api/production_orders?${params.toString()}`,
@@ -1456,9 +1519,10 @@ export default function ProductionOrderPage() {
         </div>
 
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-          <div className="p-5 md:p-6 border-b border-slate-100 flex flex-col items-center xl:items-center gap-5 bg-slate-50/50">
-            <div className="flex flex-row grid grid-cols-1 sm:grid-cols-3 gap-3 w-full xl:w-auto">
-              <div className="relative">
+          <div className="p-5 md:p-6 border-b border-slate-100 flex flex-col gap-5 bg-slate-50/50">
+            {/* 🌟 頂層過濾設計重構：上層 Grid，下層 Flex */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 w-full">
+              <div className="relative w-full">
                 <Search
                   className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
                   size={16}
@@ -1471,7 +1535,7 @@ export default function ProductionOrderPage() {
                   className="w-full h-[40px] pl-9 pr-4 bg-white border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-slate-400 focus:outline-none shadow-sm transition-all"
                 />
               </div>
-              <div className="relative">
+              <div className="relative w-full">
                 <Search
                   className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
                   size={16}
@@ -1484,7 +1548,7 @@ export default function ProductionOrderPage() {
                   className="w-full h-[40px] pl-9 pr-4 bg-white border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-slate-400 focus:outline-none shadow-sm transition-all"
                 />
               </div>
-              <div className="relative">
+              <div className="relative w-full">
                 <Search
                   className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
                   size={16}
@@ -1494,36 +1558,67 @@ export default function ProductionOrderPage() {
                   placeholder="搜尋客戶名稱"
                   value={filterVendor}
                   onChange={(e) => setFilterVendor(e.target.value)}
-                  className="flex w-full h-[40px] pl-9 pr-4 bg-white border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-slate-400 focus:outline-none shadow-sm transition-all"
+                  className="w-full h-[40px] pl-9 pr-4 bg-white border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-slate-400 focus:outline-none shadow-sm transition-all"
                 />
               </div>
             </div>
 
-            <div className="flex flex-row flex-wrap items-center gap-3 w-full xl:w-auto">
-              <label className="flex items-center gap-2 text-sm font-bold text-slate-600 bg-white border border-slate-200 px-3 h-[40px] rounded-lg shadow-sm cursor-pointer hover:bg-slate-50 transition-colors select-none">
-                <input
-                  type="checkbox"
-                  checked={sortBySequence}
-                  onChange={(e) => setSortBySequence(e.target.checked)}
-                  className="w-4 h-4 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500 cursor-pointer"
-                />
-                依自訂序號排序
-              </label>
+            <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4 w-full">
+              {/* 時間區間過濾 */}
+              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-3 w-full xl:w-auto bg-white p-1.5 rounded-xl border border-slate-200 shadow-sm">
+                <div className="px-3 text-sm font-bold text-slate-500 whitespace-nowrap flex items-center gap-1.5">
+                  <Calendar size={16} className="text-slate-400" />
+                  日期區間
+                </div>
+                <div className="flex items-center gap-2 w-full sm:w-auto">
+                  <input
+                    type="date"
+                    value={startDate}
+                    onChange={(e) => setStartDate(e.target.value)}
+                    className="w-full sm:w-auto px-3 py-1.5 h-[32px] bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium focus:ring-2 focus:ring-slate-400 focus:border-slate-400 outline-none transition-all text-slate-700"
+                  />
+                  <span className="text-slate-400 font-bold">~</span>
+                  <input
+                    type="date"
+                    value={endDate}
+                    onChange={(e) => setEndDate(e.target.value)}
+                    className="w-full sm:w-auto px-3 py-1.5 h-[32px] bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium focus:ring-2 focus:ring-slate-400 focus:border-slate-400 outline-none transition-all text-slate-700"
+                  />
+                </div>
+              </div>
 
-              <button
-                onClick={() => handleBatchPrintCoA("Product")}
-                disabled={!filterProduct || filteredOrders.length === 0}
-                className="px-4 h-[40px] bg-indigo-600 text-white border border-indigo-700 rounded-lg text-sm font-bold shadow-sm hover:bg-indigo-700 transition-all disabled:opacity-30 flex items-center gap-2"
-              >
-                <ClipboardCheck size={16} /> 批次產生產品報告
-              </button>
-              <button
-                onClick={() => handleBatchPrintCoA("Vendor")}
-                disabled={!filterVendor || filteredOrders.length === 0}
-                className="px-4 h-[40px] bg-emerald-600 text-white border border-emerald-700 rounded-lg text-sm font-bold shadow-sm hover:bg-emerald-700 transition-all disabled:opacity-30 flex items-center gap-2"
-              >
-                <ClipboardCheck size={16} /> 批次產生客戶報告
-              </button>
+              {/* 操作按鈕 */}
+              <div className="flex flex-wrap items-center justify-start xl:justify-end gap-3 w-full xl:w-auto">
+                <div className="text-xs text-slate-400 font-bold flex items-center gap-2 mr-2">
+                  {loading && <Loader2 size={14} className="animate-spin" />}共{" "}
+                  {filteredOrders.length} 筆
+                </div>
+
+                <label className="flex items-center gap-2 text-sm font-bold text-slate-600 bg-white border border-slate-200 px-3 h-[40px] rounded-lg shadow-sm cursor-pointer hover:bg-slate-50 transition-colors select-none">
+                  <input
+                    type="checkbox"
+                    checked={sortBySequence}
+                    onChange={(e) => setSortBySequence(e.target.checked)}
+                    className="w-4 h-4 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500 cursor-pointer"
+                  />
+                  依自訂序號排序
+                </label>
+
+                <button
+                  onClick={() => handleBatchPrintCoA("Product")}
+                  disabled={!filterProduct || filteredOrders.length === 0}
+                  className="px-4 h-[40px] bg-indigo-600 text-white border border-indigo-700 rounded-lg text-sm font-bold shadow-sm hover:bg-indigo-700 transition-all disabled:opacity-30 flex items-center gap-2"
+                >
+                  <ClipboardCheck size={16} /> 批次產生產品報告
+                </button>
+                <button
+                  onClick={() => handleBatchPrintCoA("Vendor")}
+                  disabled={!filterVendor || filteredOrders.length === 0}
+                  className="px-4 h-[40px] bg-emerald-600 text-white border border-emerald-700 rounded-lg text-sm font-bold shadow-sm hover:bg-emerald-700 transition-all disabled:opacity-30 flex items-center gap-2"
+                >
+                  <ClipboardCheck size={16} /> 批次產生客戶報告
+                </button>
+              </div>
             </div>
           </div>
 

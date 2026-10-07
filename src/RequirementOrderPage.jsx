@@ -29,16 +29,92 @@ const getTodayString = (formatted = false) => {
   return formatted ? `${yyyy}-${mm}-${dd}` : `${yyyy}${mm}${dd}`;
 };
 
+// ==========================================
+// 🌟 1. 核心：有理數 (分數) 高精度運算引擎
+// 避免 JavaScript IEEE 754 浮點數連乘除產生的精度飄移
+// ==========================================
+const gcd = (a, b) => (b === 0n ? a : gcd(b, a % b));
+
+const toFraction = (val) => {
+  try {
+    if (val === null || val === undefined || val === "")
+      return { n: 0n, d: 1n };
+    const str = String(val).trim();
+
+    // 🌟 第一層防護：若包含注音、英文字母等非數字字元，提早退回 0
+    if (isNaN(Number(str))) return { n: 0n, d: 1n };
+
+    if (!str.includes(".")) return { n: BigInt(str), d: 1n };
+
+    let [intPart, decPart] = str.split(".");
+    // 處理只有小數點或負號的過渡狀態 (例如輸入 "-." 或 ".")
+    if (!intPart || intPart === "-") intPart = intPart === "-" ? "-0" : "0";
+    if (!decPart) decPart = "0";
+
+    // 去除小數點尾數多餘的 0
+    decPart = decPart.replace(/0+$/, "");
+    if (decPart === "") decPart = "0";
+
+    const decimals = decPart === "0" ? 0n : BigInt(decPart.length);
+    const nStr = decPart === "0" ? intPart : intPart + decPart;
+
+    const n = BigInt(nStr);
+    const d = 10n ** decimals;
+
+    const divisor = gcd(n < 0n ? -n : n, d);
+    return { n: n / divisor, d: d / divisor };
+  } catch (error) {
+    console.warn("Fraction conversion caught invalid input:", val);
+    return { n: 0n, d: 1n };
+  }
+};
+
+const mulFrac = (f1, f2) => {
+  const n = f1.n * f2.n;
+  const d = f1.d * f2.d;
+  const divisor = gcd(n < 0n ? -n : n, d);
+  return { n: n / divisor, d: d / divisor };
+};
+
+const divFrac = (f1, f2) => {
+  if (f2.n === 0n) return { n: 0n, d: 1n };
+  const n = f1.n * f2.d;
+  const d = f1.d * f2.n;
+  const finalN = d < 0n ? -n : n;
+  const finalD = d < 0n ? -d : d;
+  const divisor = gcd(finalN < 0n ? -finalN : finalN, finalD);
+  return { n: finalN / divisor, d: finalD / divisor };
+};
+
+const addFrac = (f1, f2) => {
+  const n = f1.n * f2.d + f2.n * f1.d;
+  const d = f1.d * f2.d;
+  const divisor = gcd(n < 0n ? -n : n, d);
+  return { n: n / divisor, d: d / divisor };
+};
+
+const fracToNumber = (f) => Number(f.n) / Number(f.d);
+
+// ==========================================
+// 🌟 2. 顯示精度格式化引擎
+// ==========================================
 const formatNum = (num, type) => {
   if (num === null || num === undefined || isNaN(num) || num === "") return "0";
   if (type === "PACK") return Math.ceil(num).toString();
-  return parseFloat(Number(num).toFixed(5)).toString();
-};
 
-const precise = {
-  add: (a, b) => parseFloat((Number(a) + Number(b)).toPrecision(12)),
-  mul: (a, b) => parseFloat((Number(a) * Number(b)).toPrecision(12)),
-  div: (a, b) => parseFloat((Number(a) / Number(b)).toPrecision(12)),
+  const value = Number(num);
+  if (value === 0) return "0";
+
+  // 大於 0.01 (10g) 固定顯示到小數點第二位
+  if (Math.abs(value) >= 0.01) {
+    return value.toLocaleString("en-US", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+  } else {
+    // 極小數值 (mg)，顯示到小數點第三或第四位
+    return Number(value.toFixed(4)).toString();
+  }
 };
 
 const TypeTag = ({ type }) => {
@@ -68,9 +144,14 @@ const TypeTag = ({ type }) => {
 };
 
 // ==========================================
-// 🌟 遞迴穿透引擎 (用於法規判定)
+// 🌟 遞迴穿透引擎 (用於法規判定，套用分數運算)
 // ==========================================
-const getContainedAdditives = (matId, boms, materials, multiplier = 1) => {
+const getContainedAdditives = (
+  matId,
+  boms,
+  materials,
+  multiplierFrac = { n: 1n, d: 1n },
+) => {
   const results = {};
   const children = boms.filter((b) => String(b.parent?.id) === String(matId));
 
@@ -79,22 +160,37 @@ const getContainedAdditives = (matId, boms, materials, multiplier = 1) => {
       (m) => String(m.id) === String(c.child?.id || c.child),
     );
     if (!childMat) return;
-    const baseQty = parseFloat(c.base_quantity || 1);
-    const qty = multiplier * (parseFloat(c.quantity_required) / baseQty);
+
+    const baseQtyF = toFraction(c.base_quantity || "1");
+    const reqQtyF = toFraction(c.quantity_required || "0");
+    const ratioF = divFrac(reqQtyF, baseQtyF);
+    const qtyF = mulFrac(multiplierFrac, ratioF);
 
     if (childMat.is_additive && childMat.legal_limit_percent) {
-      if (!results[childMat.id]) results[childMat.id] = { ...childMat, qty: 0 };
-      results[childMat.id].qty += qty;
+      if (!results[childMat.id])
+        results[childMat.id] = {
+          ...childMat,
+          _qtyFrac: { n: 0n, d: 1n },
+          qty: 0,
+        };
+
+      const r = results[childMat.id];
+      r._qtyFrac = addFrac(r._qtyFrac, qtyF);
+      r.qty = fracToNumber(r._qtyFrac);
     } else if (childMat.type === "SEMI" || childMat.type === "PRODUCT") {
       const deepResults = getContainedAdditives(
         childMat.id,
         boms,
         materials,
-        qty,
+        qtyF,
       );
       Object.values(deepResults).forEach((dr) => {
-        if (!results[dr.id]) results[dr.id] = { ...dr, qty: 0 };
-        results[dr.id].qty += dr.qty;
+        if (!results[dr.id])
+          results[dr.id] = { ...dr, _qtyFrac: { n: 0n, d: 1n }, qty: 0 };
+
+        const r = results[dr.id];
+        r._qtyFrac = addFrac(r._qtyFrac, dr._qtyFrac);
+        r.qty = fracToNumber(r._qtyFrac);
       });
     }
   });
@@ -253,7 +349,12 @@ const AdditiveWarningPanel = ({ alloc, materials, boms }) => {
         };
       additiveSummary[matId].totalUsed += totalUsed;
     } else if (matInfo.type === "SEMI" || matInfo.type === "PRODUCT") {
-      const embedded = getContainedAdditives(matId, boms, materials, 1);
+      const embedded = getContainedAdditives(
+        matId,
+        boms,
+        materials,
+        toFraction("1"),
+      );
       Object.values(embedded).forEach((ea) => {
         const contributedQty = totalUsed * ea.qty;
         if (!additiveSummary[ea.id])
@@ -312,7 +413,7 @@ const AdditiveWarningPanel = ({ alloc, materials, boms }) => {
               <span>
                 實際佔比:{" "}
                 <span className="font-mono font-semibold text-red-600 text-base">
-                  {formatNum(w.usagePercent, 3)}%
+                  {formatNum(w.usagePercent)}%
                 </span>
               </span>
             </div>
@@ -651,7 +752,7 @@ const MaterialAllocationList = ({
                     <div className="flex items-center gap-2 bg-red-100/80 text-red-700 px-3 py-1.5 rounded-xl border border-red-200 shadow-sm animate-pulse">
                       <AlertTriangle size={16} strokeWidth={2.5} />
                       <span className="font-semibold">
-                        超標 {formatNum(usagePercent, 2)}%
+                        超標 {formatNum(usagePercent, "PERCENT")}%
                       </span>
                       <span className="text-sm font-medium bg-white/80 px-2 py-0.5 rounded-md text-red-800">
                         最多 {formatNum(maxAllowedQty, "RAW")} {mat.unit}
@@ -814,9 +915,9 @@ const RequirementOrderPage = () => {
     unit: "箱",
     sales_unit_quantity: "1",
     sales_pack_unit: "包",
-    sales_pack_quantity: "", // 🌟 清除預設 10
-    outer_capacity: "", // 🌟 清除預設 10
-    inner_capacity: "", // 🌟 清除預設 1
+    sales_pack_quantity: "",
+    outer_capacity: "",
+    inner_capacity: "",
     unit_price: "",
     outer_pack_id: null,
     inner_pack_id: null,
@@ -890,7 +991,6 @@ const RequirementOrderPage = () => {
     fetchData();
   }, []);
 
-  // 🌟 包裝字串剖析引擎 (與 Quotation 統一邏輯)
   const parsePackInfo = (packName, isInner) => {
     let parsedUnit = isInner ? "包" : "箱";
     let parsedCapacity = 1;
@@ -1185,9 +1285,9 @@ const RequirementOrderPage = () => {
               unit_price: "",
               sales_unit_quantity: "1",
               sales_pack_unit: "包",
-              sales_pack_quantity: "", // 🌟 改為空字串
-              outer_capacity: "", // 🌟 改為空字串
-              inner_capacity: "", // 🌟 改為空字串
+              sales_pack_quantity: "",
+              outer_capacity: "",
+              inner_capacity: "",
               outer_pack_id: null,
               inner_pack_id: null,
             }
@@ -1214,11 +1314,11 @@ const RequirementOrderPage = () => {
             unit_price: "",
             sales_unit_quantity: "1",
             sales_pack_unit: "包",
-            sales_pack_quantity: "", // 🌟 改為空字串
+            sales_pack_quantity: "",
             outer_pack_id: null,
             inner_pack_id: null,
-            outer_capacity: "", // 🌟 改為空字串
-            inner_capacity: "", // 🌟 改為空字串
+            outer_capacity: "",
+            inner_capacity: "",
           };
         }
         if (!profileId) {
@@ -1278,6 +1378,9 @@ const RequirementOrderPage = () => {
     );
   };
 
+  // ==========================================
+  // 🌟 主體 BOM 展開連動引擎 (結合 Fraction 演算法)
+  // ==========================================
   useEffect(() => {
     let newOrderItems = [];
     const newActiveTabIds = {};
@@ -1290,17 +1393,16 @@ const RequirementOrderPage = () => {
       );
       if (!product) continue;
 
-      const orderQty = Number(fItem.quantity) || 0;
-      let totalWeightKG = 0;
+      const orderQtyF = toFraction(fItem.quantity);
+      let totalWeightFrac = { n: 0n, d: 1n };
 
-      // 🌟 新版的重量換算邏輯
       if (fItem.inner_pack_id) {
-        const packQty = Number(fItem.sales_pack_quantity) || 1;
-        const innerCap = Number(fItem.inner_capacity) || 1;
-        totalWeightKG = precise.mul(precise.mul(orderQty, packQty), innerCap);
+        const packQtyF = toFraction(fItem.sales_pack_quantity || "1");
+        const innerCapF = toFraction(fItem.inner_capacity || "1");
+        totalWeightFrac = mulFrac(mulFrac(orderQtyF, packQtyF), innerCapF);
       } else {
-        const outerCap = Number(fItem.outer_capacity) || 1;
-        totalWeightKG = precise.mul(orderQty, outerCap);
+        const outerCapF = toFraction(fItem.outer_capacity || "1");
+        totalWeightFrac = mulFrac(orderQtyF, outerCapF);
       }
 
       const motherId = fItem.id;
@@ -1309,7 +1411,7 @@ const RequirementOrderPage = () => {
 
       const buildDrafts = (
         matId,
-        currentQty,
+        currentQtyFrac,
         currentDraftId,
         parentDraftId = null,
       ) => {
@@ -1340,7 +1442,8 @@ const RequirementOrderPage = () => {
           productId: mat.id,
           name: mat.name,
           type: mat.type,
-          qty: parseFloat(Number(currentQty).toFixed(5)),
+          qty: fracToNumber(currentQtyFrac), // 用於純顯示或最後 JSON 儲存
+          _qtyFrac: currentQtyFrac, // 🌟 用於繼續精準遞迴
           unit: "KG",
           productCode: mat.code,
           remark: currentRemark,
@@ -1352,16 +1455,25 @@ const RequirementOrderPage = () => {
             childMat &&
             (childMat.type === "SEMI" || childMat.type === "PRODUCT")
           ) {
-            const baseQty = parseFloat(c.base_quantity || 1);
-            const childQty =
-              currentQty * (parseFloat(c.quantity_required) / baseQty);
+            const baseQtyF = toFraction(c.base_quantity || "1");
+            const reqQtyF = toFraction(c.quantity_required || "0");
+            const ratioF = divFrac(reqQtyF, baseQtyF);
+
+            // 🌟 分數相乘，完全避開 JS 浮點數誤差
+            const childQtyFrac = mulFrac(currentQtyFrac, ratioF);
+
             const childDraftId = `${motherId}-${childDraftSeq++}`;
-            buildDrafts(childMat.id, childQty, childDraftId, currentDraftId);
+            buildDrafts(
+              childMat.id,
+              childQtyFrac,
+              childDraftId,
+              currentDraftId,
+            );
           }
         });
       };
 
-      buildDrafts(fItem.product_id, totalWeightKG, motherId, null);
+      buildDrafts(fItem.product_id, totalWeightFrac, motherId, null);
       newOrderItems = [...newOrderItems, ...generatedItems];
 
       if (generatedItems.length > 0)
@@ -1388,6 +1500,9 @@ const RequirementOrderPage = () => {
     });
   }, [formItems, materials, boms]);
 
+  // ==========================================
+  // 🌟 庫存分配引擎 (整合 Fraction)
+  // ==========================================
   useEffect(() => {
     if (orderItems.length === 0 && mrpPlans.length === 0) return;
 
@@ -1400,12 +1515,14 @@ const RequirementOrderPage = () => {
     const applyAllocation = (item, isNewOrder) => {
       const uniqueId = item.id;
       const productId = isNewOrder ? item.productId : item.product_id;
-      const qtyValue = isNewOrder ? item.qty : parseFloat(item.required_qty);
+      const qtyValueF = isNewOrder
+        ? item._qtyFrac
+        : toFraction(item.required_qty);
 
       if (newAllocations[uniqueId]) {
         const currentAlloc = { ...newAllocations[uniqueId] };
         if (
-          currentAlloc._base_qty !== qtyValue ||
+          currentAlloc._base_qty !== fracToNumber(qtyValueF) ||
           currentAlloc._productId !== productId
         ) {
           delete newAllocations[uniqueId];
@@ -1472,35 +1589,47 @@ const RequirementOrderPage = () => {
         (b) => String(b.parent?.id) === String(productId),
       );
 
-      if (directChildren.length === 0)
-        itemReqs[productId] = { qty: qtyValue, remark: "", sequence_num: "" };
-      else {
+      if (directChildren.length === 0) {
+        itemReqs[productId] = {
+          qtyFrac: qtyValueF,
+          remark: "",
+          sequence_num: "",
+        };
+      } else {
         directChildren.forEach((c) => {
           const childMat = c.child;
           if (childMat) {
-            const baseQty = parseFloat(c.base_quantity || 1);
-            const reqQty =
-              qtyValue * (parseFloat(c.quantity_required) / baseQty);
+            const baseQtyF = toFraction(c.base_quantity || "1");
+            const reqQtyF = toFraction(c.quantity_required || "0");
+            const ratioF = divFrac(reqQtyF, baseQtyF);
+            const reqF = mulFrac(qtyValueF, ratioF);
+
             if (!itemReqs[childMat.id]) {
               itemReqs[childMat.id] = {
-                qty: 0,
+                qtyFrac: { n: 0n, d: 1n },
                 remark: c.remark || "",
                 sequence_num: c.sequence_num || "",
               };
             }
-            itemReqs[childMat.id].qty += reqQty;
+            itemReqs[childMat.id].qtyFrac = addFrac(
+              itemReqs[childMat.id].qtyFrac,
+              reqF,
+            );
           }
         });
       }
 
-      const itemAlloc = { _base_qty: qtyValue, _productId: productId };
+      const itemAlloc = {
+        _base_qty: fracToNumber(qtyValueF),
+        _productId: productId,
+      };
 
       Object.keys(itemReqs).forEach((matIdStr) => {
         const matInfo = materials.find(
           (m) => String(m.id) === String(matIdStr),
         );
         const isPack = matInfo?.type === "PACK";
-        let requiredQty = itemReqs[matIdStr].qty;
+        let requiredQty = fracToNumber(itemReqs[matIdStr].qtyFrac);
         let remark = itemReqs[matIdStr].remark;
         if (isPack) requiredQty = Math.ceil(requiredQty);
 
@@ -1534,7 +1663,7 @@ const RequirementOrderPage = () => {
                   ? ""
                   : isPack
                     ? Math.ceil(used).toString()
-                    : parseFloat(used.toFixed(5)).toString(),
+                    : parseFloat(used.toFixed(5)).toString(), // 分配時使用普通小數截斷即可
             };
           })
           .filter((b) => b.available > 0);
@@ -1649,7 +1778,10 @@ const RequirementOrderPage = () => {
             };
           additiveSummary[matId].totalUsed += totalUsed;
         } else if (matInfo.type === "SEMI" || matInfo.type === "PRODUCT") {
-          const embedded = getContainedAdditives(matId, boms, materials, 1);
+          const embedded = getContainedAdditives(matId, boms, materials, {
+            n: 1n,
+            d: 1n,
+          });
           Object.values(embedded).forEach((ea) => {
             const contributedQty = totalUsed * ea.qty;
             if (!additiveSummary[ea.id])
@@ -2650,7 +2782,7 @@ const RequirementOrderPage = () => {
                                       }}
                                       disabled={
                                         isFieldsLocked || !!item.inner_pack_id
-                                      } // 有內包裝時自動鎖定並計算
+                                      }
                                       className="w-full px-3 py-2 h-11 border border-slate-200 rounded-xl text-center font-mono font-medium text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 disabled:bg-slate-50 disabled:text-slate-400 transition-all"
                                     />
                                   </div>

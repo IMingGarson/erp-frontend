@@ -8,12 +8,13 @@ import {
   Loader2,
   Search,
   Calendar,
+  Tag,
 } from "lucide-react";
 import { fetchWithAuth } from "./utils/fetchWithAuth";
 import { useNavigate } from "react-router-dom";
 
 // ==============================================
-// 🌟 輔助函數
+// 🌟 輔助函數與營養素動態計算引擎
 // ==============================================
 const formatValue = (num) => {
   if (num === null || num === undefined || num === "") return "0";
@@ -83,7 +84,94 @@ const getFlattenedMaterials = (materials_info) => {
   return result;
 };
 
-// 提取共用的日期格式化邏輯
+const convertToGrams = (qty, unit) => {
+  const u = (unit || "kg").toLowerCase();
+  const q = parseFloat(qty) || 0;
+  if (u === "kg" || u === "l") return q * 1000;
+  if (u === "g" || u === "ml") return q;
+  return q;
+};
+
+const calculateNutritionFromBOMsAndIngredients = (
+  boms,
+  ingredients,
+  parentUnit,
+) => {
+  const totalNut = {
+    energy_kcal: 0,
+    protein: 0,
+    fat: 0,
+    saturated_fat: 0,
+    trans_fat: 0,
+    carbs: 0,
+    sugar: 0,
+    sodium: 0,
+  };
+
+  let baseQtyInGrams = 0;
+
+  if (boms && boms.length > 0) {
+    boms.forEach((bom) => {
+      if (bom.is_active === false) return;
+
+      if (!baseQtyInGrams) {
+        baseQtyInGrams = convertToGrams(bom.base_quantity, parentUnit);
+      }
+
+      if (
+        ["RAW", "SEMI"].includes(bom.child_type) &&
+        bom.child_nutrition_fact
+      ) {
+        const reqQtyInGrams = convertToGrams(
+          bom.quantity_required,
+          bom.child_unit,
+        );
+
+        Object.keys(totalNut).forEach((k) => {
+          const per100gVal = parseFloat(bom.child_nutrition_fact[k]) || 0;
+          const totalContributed = (reqQtyInGrams / 100) * per100gVal;
+          totalNut[k] += totalContributed;
+        });
+      }
+    });
+  }
+
+  if (!baseQtyInGrams) baseQtyInGrams = convertToGrams(1, parentUnit || "KG");
+
+  if (ingredients && ingredients.length > 0) {
+    ingredients.forEach((item) => {
+      if (!item.is_active || !item.ingredient_detail) return;
+      const ing = item.ingredient_detail;
+      const percent =
+        ing.is_additive && ing.legal_limit_percent
+          ? parseFloat(ing.legal_limit_percent)
+          : 2;
+
+      const estimatedWeightInGrams = baseQtyInGrams * (percent / 100);
+
+      if (ing.nutrition_fact) {
+        Object.keys(totalNut).forEach((k) => {
+          const per100gVal = parseFloat(ing.nutrition_fact[k]) || 0;
+          const totalContributed = (estimatedWeightInGrams / 100) * per100gVal;
+          totalNut[k] += totalContributed;
+        });
+      }
+    });
+  }
+
+  const formattedNut = {};
+  Object.keys(totalNut).forEach((k) => {
+    if (baseQtyInGrams > 0) {
+      const per100gFinal = totalNut[k] / (baseQtyInGrams / 100);
+      formattedNut[k] = parseFloat(per100gFinal.toFixed(1)).toString();
+    } else {
+      formattedNut[k] = "0";
+    }
+  });
+
+  return formattedNut;
+};
+
 const extractDates = (order) => {
   const today = new Date();
   const reportDateStr = `${today.getFullYear()} 年 ${(today.getMonth() + 1).toString().padStart(2, "0")} 月 ${today.getDate().toString().padStart(2, "0")} 日`;
@@ -159,6 +247,291 @@ const getDaysAgoStr = (days) => {
 };
 
 // ==============================================
+// 🌟 標籤專用輔助函數與組件
+// ==============================================
+const ALLERGEN_MAP = {
+  CRUSTACEAN: "甲殼類",
+  MANGO: "芒果",
+  PEANUT: "花生",
+  MILK: "奶類",
+  EGG: "蛋",
+  NUT: "堅果類",
+  SESAME: "芝麻",
+  GLUTEN: "含麩質之穀物",
+  SOY: "大豆",
+  FISH: "魚類",
+  SULFITE: "二氧化硫",
+};
+
+const calculateExpDateForLabel = (mfgDateStr, storageLifeStr) => {
+  if (!mfgDateStr) return "";
+  const d = new Date(mfgDateStr);
+  if (isNaN(d.getTime())) return "";
+
+  let monthsToAdd = 0;
+  if (storageLifeStr) {
+    const monthMatch = storageLifeStr.match(/(\d+)\s*個月/);
+    const yearMatch = storageLifeStr.match(/(\d+)\s*年/);
+    const dayMatch = storageLifeStr.match(/(\d+)\s*天/);
+
+    if (monthMatch) monthsToAdd += parseInt(monthMatch[1], 10);
+    if (yearMatch) monthsToAdd += parseInt(yearMatch[1], 10) * 12;
+
+    if (monthsToAdd > 0) {
+      d.setMonth(d.getMonth() + monthsToAdd);
+      d.setDate(d.getDate() - 1);
+    } else if (dayMatch) {
+      d.setDate(d.getDate() + parseInt(dayMatch[1], 10) - 1);
+    }
+  }
+  return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, "0")}.${String(d.getDate()).padStart(2, "0")}`;
+};
+
+const ProductLabelTemplate = ({
+  order,
+  mfgDate,
+  servingSize,
+  servingsPerContainer,
+  calculatedNut100,
+  fullMatData,
+}) => {
+  if (!order || !order.product_profile) return null;
+  const p = order.product_profile;
+
+  let rawIngredients = "";
+
+  if (fullMatData) {
+    const ingredientMap = new Map();
+
+    let baseQuantity = 1;
+    const validBom = (fullMatData.boms || []).find(
+      (b) => b.is_active !== false,
+    );
+    if (validBom && parseFloat(validBom.base_quantity) > 0) {
+      baseQuantity = parseFloat(validBom.base_quantity);
+    }
+
+    if (fullMatData.ingredients) {
+      fullMatData.ingredients.forEach((item) => {
+        if (!item.is_active || !item.ingredient_detail) return;
+        const ing = item.ingredient_detail;
+        const percent =
+          ing.is_additive && ing.legal_limit_percent
+            ? parseFloat(ing.legal_limit_percent)
+            : 2;
+
+        const estimatedWeight = baseQuantity * (percent / 100);
+        ingredientMap.set(
+          ing.name,
+          (ingredientMap.get(ing.name) || 0) + estimatedWeight,
+        );
+      });
+    }
+
+    if (fullMatData.boms) {
+      fullMatData.boms.forEach((bom, bomIdx) => {
+        if (bom.is_active === false) return;
+        if (
+          bom.child_type === "PACK" ||
+          bom.child_type === "OTHER" ||
+          bom.child_type === "SEMI"
+        )
+          return;
+
+        const currentWeight = parseFloat(bom.quantity_required) || 0;
+        const childIngs = bom.child_ingredients || [];
+
+        if (childIngs.length > 0) {
+          childIngs.forEach((item, childIdx) => {
+            if (!item.is_active || !item.ingredient_detail) return;
+            const ingName = item.ingredient_detail.name;
+            const stableWeight =
+              currentWeight - childIdx * 0.000001 - bomIdx * 0.0000001;
+            ingredientMap.set(
+              ingName,
+              (ingredientMap.get(ingName) || 0) + stableWeight,
+            );
+          });
+        } else {
+          const fallbackName = bom.child_name;
+          ingredientMap.set(
+            fallbackName,
+            (ingredientMap.get(fallbackName) || 0) + currentWeight,
+          );
+        }
+      });
+    }
+
+    rawIngredients = Array.from(ingredientMap.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map((entry) => entry[0])
+      .join("、");
+  } else {
+    rawIngredients = (order.materials_info || [])
+      .filter(
+        (m) => m.type !== "PACK" && m.type !== "OTHER" && m.type !== "SEMI",
+      )
+      .sort((a, b) => parseFloat(b.requiredQty) - parseFloat(a.requiredQty))
+      .map((m) => m.materialName)
+      .join("、");
+  }
+
+  // 🌟 2. 營養素完美格式化引擎
+  const nut100 = calculatedNut100 || p.nutrition_fact || {};
+
+  const format100g = (val) => parseFloat(val || 0).toFixed(1);
+  const calcPerServing = (val) => {
+    const num = parseFloat(val || 0);
+    // 🌟 核心修正：當手動設定份量為 100g 時，直接回傳以消滅任何浮點數運算的進位誤差
+    if (Number(servingSize) === 100) {
+      return num.toFixed(1);
+    }
+    return ((num / 100) * Number(servingSize)).toFixed(1);
+  };
+
+  // 🌟 完美切齊的 Row 輔助元件
+  const NutRow = ({ label, indent, valKey, unit }) => (
+    <tr>
+      <td className={`text-left py-[3px] ${indent ? "pl-3 text-[11px]" : ""}`}>
+        {label}
+      </td>
+      <td className="py-[3px]">
+        <div className="flex justify-end gap-2 w-full pr-1">
+          <span>{calcPerServing(nut100[valKey])}</span>
+          <span className="w-[28px] text-left">{unit}</span>
+        </div>
+      </td>
+      <td className="py-[3px]">
+        <div className="flex justify-end gap-2 w-full">
+          <span>{format100g(nut100[valKey])}</span>
+          <span className="w-[28px] text-left">{unit}</span>
+        </div>
+      </td>
+    </tr>
+  );
+
+  const rawAllergens = p.allergen_info ? p.allergen_info.split(",") : [];
+  const activeAllergens = rawAllergens
+    .map((a) => ALLERGEN_MAP[a.trim()] || a.trim())
+    .filter(Boolean);
+  const allergenStr =
+    activeAllergens.length > 0 ? `本品含有${activeAllergens.join("、")}` : "";
+
+  const mfgDateDisplay = mfgDate ? mfgDate.replace(/-/g, ".") : " 年  月  日";
+  const expDateDisplay = mfgDate
+    ? calculateExpDateForLabel(mfgDate, p.storage_life)
+    : "詳見包裝標示";
+
+  let specStr = p.spec || "-";
+  if (p.inner_pack_capacity) {
+    specStr = `${parseFloat(p.inner_pack_capacity)}KG/${p.sales_pack_unit || "包"}`;
+  } else if (p.outer_pack_capacity) {
+    specStr = `${parseFloat(p.outer_pack_capacity)}KG/${p.sales_unit || "箱"}`;
+  }
+
+  let storageStr =
+    "常溫保存，貯存於乾燥陰涼處，避免陽光直射，開封後請儘速使用。";
+  if (p.storage_method === "REFRIGERATED") {
+    storageStr =
+      "請冷藏保存於 7°C 以下，離開冷藏請勿超過半小時，開封後請儘速使用完畢。";
+  } else if (p.storage_method === "FROZEN") {
+    storageStr =
+      "請冷凍保存於 -18°C 以下，請勿反覆解凍，開封後請儘速使用完畢。";
+  }
+
+  return (
+    <div className="w-[130mm] bg-white p-4 font-sans text-black border-[3px] border-black mx-auto box-border overflow-hidden">
+      <div className="text-center font-black text-2xl tracking-widest mb-3 border-b-[3px] border-black pb-2">
+        {p.name}
+      </div>
+
+      <div className="flex gap-4 text-[11px] leading-tight">
+        {/* 🌟 調整左半邊的寬度佔比 */}
+        <div className="w-[55%] flex flex-col gap-1.5 justify-between text-[11px]">
+          <div>
+            <span className="font-bold">成份：</span>
+            {rawIngredients}
+          </div>
+          <div className="font-bold text-justify leading-relaxed">
+            本產品生產製程廠房，其設備或生產管線有處理甲殼類、芒果、花生、奶類、蛋、堅果類、芝麻、含麩質之穀物、大豆、魚類及二氧化硫
+          </div>
+          {allergenStr && <div className="font-bold">{allergenStr}</div>}
+
+          <div className="mt-1 flex flex-col gap-1 text-[12px]">
+            <div>製造日期：{mfgDateDisplay}</div>
+            <div>有效期限：{expDateDisplay}</div>
+            <div>包裝規格：{specStr}</div>
+            <div>原產地：{p.origin || "台灣"}</div>
+            <div>製造商：基香食品有限公司</div>
+            <div>TEL: 03-4988228 FAX: 03-4988159</div>
+            <div>桃園市觀音區崙坪里1鄰1之10號</div>
+          </div>
+          <div className="mt-1 font-bold text-[12px]">{storageStr}</div>
+        </div>
+
+        {/* 🌟 右側營養標示區塊加寬，並全面套用精準對齊 */}
+        <div className="w-[60%] flex flex-col">
+          <div className="border-[2px] border-black p-1.5 flex-1">
+            <div className="text-center font-bold text-[15px] border-b-[2px] border-black pb-1 mb-1.5 tracking-widest">
+              營養標示
+            </div>
+
+            <div className="flex justify-between border-b border-black pb-1 text-[12px]">
+              <span>每一份量</span>
+              <div className="flex justify-end gap-2 pr-1">
+                <span>{servingSize}</span>
+                <span className="w-[28px] text-left">公克</span>
+              </div>
+            </div>
+            <div className="flex justify-between border-b-[2px] border-black pb-1 mb-1 text-[12px]">
+              <span>本包裝含</span>
+              <div className="flex justify-end gap-2 pr-1">
+                <span>{servingsPerContainer}</span>
+                <span className="w-[28px] text-left">份</span>
+              </div>
+            </div>
+
+            <table className="w-full text-right mt-1 text-[12px] border-collapse">
+              <thead>
+                <tr className="border-b border-black">
+                  <th className="text-left font-normal pb-1"></th>
+                  <th className="font-normal pb-1 text-right pr-[16px]">
+                    每份
+                  </th>
+                  <th className="font-normal pb-1 text-right pr-[12px]">
+                    每100公克
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                <NutRow label="熱量" valKey="energy_kcal" unit="大卡" />
+                <NutRow label="蛋白質" valKey="protein" unit="公克" />
+                <NutRow label="脂肪" valKey="fat" unit="公克" />
+                <NutRow
+                  label="飽和脂肪"
+                  indent
+                  valKey="saturated_fat"
+                  unit="公克"
+                />
+                <NutRow
+                  label="反式脂肪"
+                  indent
+                  valKey="trans_fat"
+                  unit="公克"
+                />
+                <NutRow label="碳水化合物" valKey="carbs" unit="公克" />
+                <NutRow label="糖" indent valKey="sugar" unit="公克" />
+                <NutRow label="鈉" valKey="sodium" unit="毫克" />
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ==============================================
 // 🌟 列印樣板 0：廠內生產流程單
 // ==============================================
 const ProductionFormTemplate = ({
@@ -176,7 +549,6 @@ const ProductionFormTemplate = ({
 
   const flattenedMaterials = getFlattenedMaterials(order.materials_info);
 
-  // 🌟 依照 Toggle 狀態決定前端的即時排序邏輯
   flattenedMaterials.sort((a, b) => {
     if (sortBySequence) {
       const seqA = String(a.sequence_num || "").trim();
@@ -595,7 +967,6 @@ const CoATemplateProduct = ({ orders }) => {
                         const maxNum = parseFloat(maxStr);
                         if (!isNaN(minNum) && !isNaN(maxNum)) {
                           const mid = ((minNum + maxNum) / 2).toFixed(1);
-                          // 萃取後綴文字 (例如 '%' 或 'kg')
                           const suffixMatch = String(maxStr).match(/[^\d.-]+/);
                           const suffix = suffixMatch ? suffixMatch[0] : "";
                           midText = `${parseFloat(mid)}${suffix}`;
@@ -1140,14 +1511,17 @@ const ProductionOrderPrintTemplate = ({ data, type, sortBySequence }) => {
   const flowOrdersToPrint =
     type === "Flow" ? dataArray.flatMap(flattenOrders) : [];
 
+  // 🌟 動態判斷：當前列印的是否為「標籤」
+  const isLabel = type === "Label";
+
   return (
     <div className="hidden print:block w-full bg-white text-black font-sans mx-auto print:p-0">
       <style>
         {`
           @media print {
             @page { 
-              size: A4 portrait; 
-              margin: 0; 
+              /* 🌟 核心修正：如果是印標籤，釋放 A4 限制，讓印表機自適應貼紙大小 */
+              ${isLabel ? "margin: 3mm; size: auto;" : "size: A4 portrait; margin: 0;"}
             }
             body { 
               -webkit-print-color-adjust: exact; 
@@ -1157,12 +1531,29 @@ const ProductionOrderPrintTemplate = ({ data, type, sortBySequence }) => {
             }
             .page-break { page-break-after: always; }
             .print-container {
-               padding: 10mm; 
-               width: 100%;
+               /* 🌟 標籤專屬設定：強制垂直水平置中 */
+               ${isLabel ? "display: flex; justify-content: center; align-items: center; width: 100%; padding: 5mm 0;" : "padding: 10mm; width: 100%;"}
             }
           }
         `}
       </style>
+
+      {isLabel &&
+        dataArray.map((info, idx) => (
+          <div
+            key={`label-${idx}`}
+            className={`print-container ${idx === dataArray.length - 1 ? "" : "page-break"}`}
+          >
+            <ProductLabelTemplate
+              order={info.order}
+              mfgDate={info.mfgDate}
+              servingSize={info.servingSize}
+              servingsPerContainer={info.servingsPerContainer}
+              calculatedNut100={info.calculatedNut100}
+              fullMatData={info.fullMatData}
+            />
+          </div>
+        ))}
 
       {type === "CoA_Single" &&
         dataArray.map((order, idx) => (
@@ -1197,7 +1588,6 @@ const ProductionOrderPrintTemplate = ({ data, type, sortBySequence }) => {
                   : "page-break print:pt-8"
               }
             >
-              {/* 🌟 完整還原原本傳給 Flow Template 的 isChildForm 與 sortBySequence */}
               <ProductionFormTemplate
                 order={orderToPrint}
                 isChildForm={idx !== 0}
@@ -1236,12 +1626,21 @@ export default function ProductionOrderPage() {
     () => sessionStorage.getItem("po_endDate") || getDaysAgoStr(0),
   );
 
-  // 🌟 前端控制是否依序號排版
   const [sortBySequence, setSortBySequence] = useState(
     () => sessionStorage.getItem("po_sortBySequence") === "true",
   );
 
-  // 🌟 狀態改變時自動同步存入 sessionStorage
+  // 🌟 標籤列印設定 Modal
+  const [labelModal, setLabelModal] = useState({
+    isOpen: false,
+    order: null,
+    mfgDate: "",
+    servingSize: 10,
+    servingsPerContainer: 1,
+    calculatedNut100: null,
+    fullMatData: null,
+  });
+
   useEffect(() => {
     sessionStorage.setItem("po_filterOrder", filterOrder);
     sessionStorage.setItem("po_filterProduct", filterProduct);
@@ -1283,7 +1682,6 @@ export default function ProductionOrderPage() {
       onConfirm: null,
     });
 
-  // 🌟 重新撈取資料，並綁定日期做為 Dependency
   useEffect(() => {
     fetchData();
   }, [filterProduct, filterVendor, startDate, endDate]);
@@ -1294,7 +1692,6 @@ export default function ProductionOrderPage() {
       const params = new URLSearchParams({ is_root: "true" });
       if (filterProduct) params.append("product", filterProduct);
       if (filterVendor) params.append("vendor", filterVendor);
-      // 將時間範圍帶入 API
       if (startDate) params.append("start_date", startDate);
       if (endDate) params.append("end_date", endDate);
 
@@ -1372,6 +1769,110 @@ export default function ProductionOrderPage() {
     }
 
     setExpandedOrderIds((prev) => [...prev, orderId]);
+  };
+
+  const handleOpenLabelModal = async (e, po) => {
+    e.stopPropagation();
+
+    let orderToPrint = detailedOrdersMap[po.id];
+    if (!orderToPrint) {
+      try {
+        const res = await fetchWithAuth(`/api/production_orders/${po.id}`);
+        if (res.ok) {
+          const json = await res.json();
+          orderToPrint = json.data || json;
+          setDetailedOrdersMap((prev) => ({ ...prev, [po.id]: orderToPrint }));
+        } else {
+          return showAlert("錯誤", "載入單據資料失敗", "error");
+        }
+      } catch (err) {
+        return showAlert("錯誤", "網路異常，無法載入資料", "error");
+      }
+    }
+
+    let calculatedNut100 = orderToPrint.product_profile?.nutrition_fact || {};
+    let fullMatData = null;
+
+    try {
+      const matRes = await fetchWithAuth(
+        `/api/materials/${orderToPrint.product_id}?lite=true`,
+      );
+      if (matRes.ok) {
+        const matJson = await matRes.json();
+        fullMatData = matJson.data || matJson;
+        if (fullMatData) {
+          calculatedNut100 = calculateNutritionFromBOMsAndIngredients(
+            fullMatData.boms,
+            fullMatData.ingredients,
+            fullMatData.unit,
+          );
+        }
+      }
+    } catch (err) {
+      console.error("Failed to fetch material BOMs", err);
+    }
+
+    const p = orderToPrint.product_profile;
+    const baseCapacity = p?.inner_pack_capacity || p?.outer_pack_capacity || 1;
+    const defaultServingSize = 10;
+    const defaultTotalServings = Math.round(
+      (parseFloat(baseCapacity) * 1000) / defaultServingSize,
+    );
+
+    setLabelModal({
+      isOpen: true,
+      order: orderToPrint,
+      mfgDate: orderToPrint.manufacture_date || getDaysAgoStr(0),
+      servingSize: defaultServingSize,
+      servingsPerContainer: defaultTotalServings,
+      calculatedNut100,
+      fullMatData,
+    });
+  };
+
+  const handleConfirmAndPrintLabel = async () => {
+    const {
+      order,
+      mfgDate,
+      servingSize,
+      servingsPerContainer,
+      calculatedNut100,
+      fullMatData,
+    } = labelModal;
+
+    try {
+      await fetchWithAuth(`/api/production_orders/${order.id}/`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ manufacture_date: mfgDate }),
+      });
+      setDetailedOrdersMap((prev) => ({
+        ...prev,
+        [order.id]: { ...prev[order.id], manufacture_date: mfgDate },
+      }));
+    } catch (err) {
+      console.error("儲存製造日期失敗:", err);
+    }
+
+    setPrintType("Label");
+    setPrintData([
+      {
+        order,
+        mfgDate,
+        servingSize,
+        servingsPerContainer,
+        calculatedNut100,
+        fullMatData,
+      },
+    ]);
+    setLabelModal((prev) => ({ ...prev, isOpen: false }));
+
+    setTimeout(() => {
+      const originalTitle = document.title;
+      document.title = `Label_${order.order_number}_${order.product_profile?.name}`;
+      window.print();
+      document.title = originalTitle;
+    }, 200);
   };
 
   const handlePrintRow = async (e, po, type = "Flow") => {
@@ -1472,7 +1973,6 @@ export default function ProductionOrderPage() {
     }
   };
 
-  // 🌟 遞迴渲染子訂單，並將 sortBySequence 開關傳入
   const renderChildrenOrders = (childrenArr, depth = 1) => {
     if (!childrenArr || childrenArr.length === 0) return null;
     return childrenArr.map((child, idx) => (
@@ -1520,7 +2020,6 @@ export default function ProductionOrderPage() {
 
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
           <div className="p-5 md:p-6 border-b border-slate-100 flex flex-col gap-5 bg-slate-50/50">
-            {/* 🌟 頂層過濾設計重構：上層 Grid，下層 Flex */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 w-full">
               <div className="relative w-full">
                 <Search
@@ -1564,7 +2063,6 @@ export default function ProductionOrderPage() {
             </div>
 
             <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4 w-full">
-              {/* 時間區間過濾 */}
               <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-3 w-full xl:w-auto bg-white p-1.5 rounded-xl border border-slate-200 shadow-sm">
                 <div className="px-3 text-sm font-bold text-slate-500 whitespace-nowrap flex items-center gap-1.5">
                   <Calendar size={16} className="text-slate-400" />
@@ -1587,7 +2085,6 @@ export default function ProductionOrderPage() {
                 </div>
               </div>
 
-              {/* 操作按鈕 */}
               <div className="flex flex-wrap items-center justify-start xl:justify-end gap-3 w-full xl:w-auto">
                 <div className="text-xs text-slate-400 font-bold flex items-center gap-2 mr-2">
                   {loading && <Loader2 size={14} className="animate-spin" />}共{" "}
@@ -1682,29 +2179,37 @@ export default function ProductionOrderPage() {
                               {/* 1. 內部單 */}
                               <button
                                 onClick={(e) => handlePrintRow(e, po, "Flow")}
-                                className="px-3 py-1.5 bg-slate-100 text-slate-600 border border-slate-300 rounded-md hover:bg-slate-600 hover:text-white transition-all duration-200 text-xs font-bold inline-flex items-center gap-1 shadow-sm outline-none"
+                                className="px-3 py-1.5 bg-slate-100 text-slate-600 border border-slate-300 rounded-md hover:bg-slate-600 hover:text-white transition-all text-xs font-bold inline-flex items-center gap-1 shadow-sm"
                               >
                                 <Printer size={14} /> 內部單
                               </button>
 
-                              {/* 2. 耗損回填 */}
+                              {/* 🌟 2. 列印標籤 */}
+                              <button
+                                onClick={(e) => handleOpenLabelModal(e, po)}
+                                className="px-3 py-1.5 bg-amber-50 text-amber-700 border border-amber-300 rounded-md hover:bg-amber-600 hover:text-white transition-all text-xs font-bold inline-flex items-center gap-1 shadow-sm"
+                              >
+                                <Tag size={14} /> 產品標籤
+                              </button>
+
+                              {/* 3. 耗損回填 */}
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   navigate(`/production/${po.id}`);
                                 }}
-                                className="px-3 py-1.5 bg-white text-slate-600 border border-slate-300 rounded-md hover:bg-slate-600 hover:text-white transition-all duration-200 text-xs font-bold inline-flex items-center gap-1 shadow-sm outline-none"
+                                className="px-3 py-1.5 bg-white text-slate-600 border border-slate-300 rounded-md hover:bg-slate-600 hover:text-white transition-all text-xs font-bold inline-flex items-center gap-1 shadow-sm"
                               >
                                 <FileText size={14} /> 耗損回填
                               </button>
 
-                              {/* 3. QC 檢驗 */}
+                              {/* 4. QC 檢驗 */}
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   navigate(`/production-qc/${po.id}`);
                                 }}
-                                className={`px-3 py-1.5 border rounded-md transition-all duration-200 text-xs font-bold inline-flex items-center gap-1 shadow-sm outline-none ${
+                                className={`px-3 py-1.5 border rounded-md transition-all text-xs font-bold inline-flex items-center gap-1 shadow-sm ${
                                   po.qc_passed === true
                                     ? "bg-emerald-50 text-emerald-600 border-emerald-200 hover:bg-emerald-600 hover:text-white"
                                     : po.qc_passed === false
@@ -1720,12 +2225,12 @@ export default function ProductionOrderPage() {
                                     : "品管檢驗"}
                               </button>
 
-                              {/* 4. 產生報告 */}
+                              {/* 5. 產生報告 */}
                               <button
                                 onClick={(e) =>
                                   handlePrintRow(e, po, "CoA_Single")
                                 }
-                                className="px-3 py-1.5 bg-blue-50 text-blue-600 border border-blue-200 rounded-md hover:bg-blue-600 hover:text-white transition-all duration-200 text-xs font-bold inline-flex items-center gap-1 shadow-sm outline-none"
+                                className="px-3 py-1.5 bg-blue-50 text-blue-600 border border-blue-200 rounded-md hover:bg-blue-600 hover:text-white transition-all text-xs font-bold inline-flex items-center gap-1 shadow-sm"
                               >
                                 <ClipboardCheck size={14} /> 產生報告
                               </button>
@@ -1788,6 +2293,134 @@ export default function ProductionOrderPage() {
             </table>
           </div>
         </div>
+
+        {/* ========================================================= */}
+        {/* 🌟 WYSIWYG 標籤設定與預覽 Modal */}
+        {/* ========================================================= */}
+        {labelModal.isOpen && labelModal.order && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+            <div className="bg-slate-50 rounded-3xl shadow-2xl w-full max-w-6xl h-[95vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 border border-slate-200/50">
+              <div className="p-5 border-b border-slate-200/60 flex justify-between items-center bg-white/90 backdrop-blur-md shrink-0">
+                <h3 className="text-xl font-black text-slate-800 flex items-center gap-2">
+                  <Tag className="text-amber-500" size={24} /> 產品標籤列印設定
+                </h3>
+                <button
+                  onClick={() =>
+                    setLabelModal({ ...labelModal, isOpen: false })
+                  }
+                  className="text-slate-400 hover:text-slate-700 text-3xl leading-none outline-none transition-colors"
+                >
+                  ×
+                </button>
+              </div>
+
+              <div className="flex flex-col lg:flex-row flex-1 overflow-hidden">
+                {/* 左側：設定控制面板 */}
+                <div className="w-full lg:w-[350px] bg-white border-r border-slate-200/60 p-6 flex flex-col gap-6 overflow-y-auto custom-scrollbar">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-500 mb-1.5 uppercase">
+                      製造日期
+                    </label>
+                    <input
+                      type="date"
+                      value={labelModal.mfgDate}
+                      onChange={(e) =>
+                        setLabelModal({
+                          ...labelModal,
+                          mfgDate: e.target.value,
+                        })
+                      }
+                      className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-amber-500/20 focus:border-amber-400 outline-none transition-all shadow-sm"
+                    />
+
+                    <div className="text-[12px] text-slate-600 leading-relaxed font-bold mt-2 flex items-center gap-1.5">
+                      <Calendar size={14} className="text-amber-600" />
+                      此物料保存期限：
+                      <span className="text-amber-600">
+                        {labelModal.order?.product_profile?.storage_life ||
+                          labelModal.fullMatData?.storage_life ||
+                          "未設定"}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="bg-amber-50/50 p-4 rounded-2xl border border-amber-100 flex flex-col gap-4">
+                    <div>
+                      <label className="block text-[11px] font-bold text-amber-700 mb-1.5 uppercase">
+                        每一份量 (公克)
+                      </label>
+                      <input
+                        type="number"
+                        value={labelModal.servingSize}
+                        onChange={(e) =>
+                          setLabelModal({
+                            ...labelModal,
+                            servingSize: e.target.value,
+                          })
+                        }
+                        className="w-full px-4 py-2 bg-white border border-amber-200 rounded-lg text-sm font-bold focus:ring-2 focus:ring-amber-500/20 focus:border-amber-400 outline-none transition-all"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-amber-700 mb-1.5 uppercase">
+                        本包裝總份數
+                      </label>
+                      <input
+                        type="number"
+                        value={labelModal.servingsPerContainer}
+                        onChange={(e) =>
+                          setLabelModal({
+                            ...labelModal,
+                            servingsPerContainer: e.target.value,
+                          })
+                        }
+                        className="w-full px-4 py-2 bg-white border border-amber-200 rounded-lg text-sm font-bold focus:ring-2 focus:ring-amber-500/20 focus:border-amber-400 outline-none transition-all"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="text-[11px] text-slate-400 leading-relaxed font-bold">
+                    💡
+                    提示：右側為法規標籤預覽。當您點擊「儲存並列印」時，所選的製造日期將被寫入資料庫保存。
+                  </div>
+                </div>
+
+                {/* 右側：擬真預覽區域 */}
+                <div className="flex-1 bg-slate-100 p-8 flex items-center justify-center overflow-auto relative shadow-inner">
+                  <div className="shadow-[0_10px_40px_-10px_rgba(0,0,0,0.15)] ring-1 ring-black/5 transform origin-top transition-transform">
+                    <ProductLabelTemplate
+                      order={labelModal.order}
+                      mfgDate={labelModal.mfgDate}
+                      servingSize={labelModal.servingSize}
+                      servingsPerContainer={labelModal.servingsPerContainer}
+                      calculatedNut100={labelModal.calculatedNut100}
+                      fullMatData={labelModal.fullMatData}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-5 border-t border-slate-200/60 bg-white shrink-0 flex justify-end gap-3 z-10">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setLabelModal({ ...labelModal, isOpen: false })
+                  }
+                  className="px-6 py-2.5 text-slate-600 bg-white border border-slate-300 hover:bg-slate-50 text-sm font-bold rounded-xl transition-colors"
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmAndPrintLabel}
+                  className="px-8 py-2.5 text-white bg-amber-500 hover:bg-amber-600 text-sm font-bold rounded-xl shadow-md transition-all flex items-center gap-2 hover:-translate-y-0.5"
+                >
+                  <Printer size={16} /> 儲存並列印標籤
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         <CustomDialog
           isOpen={dialog.isOpen}

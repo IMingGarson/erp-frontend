@@ -33,7 +33,6 @@ const formatDisplayNum = (val) => {
   return isNaN(num) ? "0" : parseFloat(num.toFixed(2)).toString();
 };
 
-// 🌟 更新：自動從手動成分 (ingredients) 與 配方 (boms) 兩處提取過敏原聯集
 const getMergedAllergens = (
   manualAllergens = [],
   ingredientsArray = [],
@@ -41,7 +40,6 @@ const getMergedAllergens = (
 ) => {
   let merged = new Set(manualAllergens);
 
-  // 1. 從手動加入的成分提取
   ingredientsArray.forEach((ing) => {
     if (ing.allergen_info) {
       const ingAllergens =
@@ -55,7 +53,6 @@ const getMergedAllergens = (
     }
   });
 
-  // 2. 從 BOM 配方帶入的下層物料提取
   bomsArray.forEach((bom) => {
     if (bom.is_active !== false && bom.child_allergen_info) {
       const bomAllergens = bom.child_allergen_info
@@ -69,7 +66,6 @@ const getMergedAllergens = (
   return Array.from(merged);
 };
 
-// 🌟 更新：僅獲取由系統自動帶入的過敏原 (用來判斷選項是否反灰鎖定)
 const getIngredientsOnlyAllergens = (ingredientsArray = [], bomsArray = []) => {
   let merged = new Set();
 
@@ -306,7 +302,7 @@ const NutritionLabel = ({ nutritionData }) => {
           </tr>
           <tr>
             <td className="text-left py-1.5 pl-4 text-[13px] text-slate-700 font-medium">
-              飽和脂肪
+              飽鎖脂肪
             </td>
             <td className="py-1.5 text-center text-[13px]">
               {formatVal(data.saturated_fat)} 公克
@@ -344,8 +340,22 @@ const NutritionLabel = ({ nutritionData }) => {
   );
 };
 
-const calculateNutritionFromBOMs = (boms) => {
-  const calculated = {
+// 🌟 單位正規化
+const convertToGrams = (qty, unit) => {
+  const u = (unit || "kg").toLowerCase();
+  const q = parseFloat(qty) || 0;
+  if (u === "kg" || u === "l") return q * 1000;
+  if (u === "g" || u === "ml") return q;
+  return q;
+};
+
+// 🌟 動態換算引擎 (SEMI / PRODUCT 適用)
+const calculateNutritionFromBOMsAndIngredients = (
+  boms,
+  ingredients,
+  parentUnit,
+) => {
+  const totalNut = {
     energy_kcal: 0,
     protein: 0,
     fat: 0,
@@ -355,31 +365,72 @@ const calculateNutritionFromBOMs = (boms) => {
     sugar: 0,
     sodium: 0,
   };
-  if (!boms || boms.length === 0) return calculated;
 
-  boms.forEach((bom) => {
-    if (
-      ["RAW", "SEMI"].includes(bom.child_type) &&
-      bom.child_nutrition_fact &&
-      bom.is_active !== false
-    ) {
-      const baseQty = parseFloat(bom.base_quantity) || 1;
-      const requiredQty = parseFloat(bom.quantity_required) || 0;
-      const ratio = requiredQty / baseQty;
-      Object.keys(calculated).forEach((k) => {
-        const val = parseFloat(bom.child_nutrition_fact[k]) || 0;
-        calculated[k] += val * ratio;
-      });
+  let baseQtyInGrams = 0;
+
+  if (boms && boms.length > 0) {
+    boms.forEach((bom) => {
+      if (bom.is_active === false) return;
+
+      if (!baseQtyInGrams) {
+        baseQtyInGrams = convertToGrams(bom.base_quantity, parentUnit);
+      }
+
+      if (
+        ["RAW", "SEMI"].includes(bom.child_type) &&
+        bom.child_nutrition_fact
+      ) {
+        const reqQtyInGrams = convertToGrams(
+          bom.quantity_required,
+          bom.child_unit,
+        );
+
+        Object.keys(totalNut).forEach((k) => {
+          const per100gVal = parseFloat(bom.child_nutrition_fact[k]) || 0;
+          const totalContributed = (reqQtyInGrams / 100) * per100gVal;
+          totalNut[k] += totalContributed;
+        });
+      }
+    });
+  }
+
+  if (!baseQtyInGrams) baseQtyInGrams = convertToGrams(1, parentUnit || "KG");
+
+  if (ingredients && ingredients.length > 0) {
+    ingredients.forEach((item) => {
+      if (!item.is_active || !item.ingredient_detail) return;
+      const ing = item.ingredient_detail;
+      const percent =
+        ing.is_additive && ing.legal_limit_percent
+          ? parseFloat(ing.legal_limit_percent)
+          : 2;
+
+      const estimatedWeightInGrams = baseQtyInGrams * (percent / 100);
+
+      if (ing.nutrition_fact) {
+        Object.keys(totalNut).forEach((k) => {
+          const per100gVal = parseFloat(ing.nutrition_fact[k]) || 0;
+          const totalContributed = (estimatedWeightInGrams / 100) * per100gVal;
+          totalNut[k] += totalContributed;
+        });
+      }
+    });
+  }
+
+  const formattedNut = {};
+  Object.keys(totalNut).forEach((k) => {
+    if (baseQtyInGrams > 0) {
+      const per100gFinal = totalNut[k] / (baseQtyInGrams / 100);
+      formattedNut[k] = parseFloat(per100gFinal.toFixed(1)).toString();
+    } else {
+      formattedNut[k] = "0";
     }
   });
 
-  const formattedNutrition = {};
-  Object.keys(calculated).forEach((k) => {
-    formattedNutrition[k] = parseFloat(calculated[k].toFixed(2)).toString();
-  });
-  return formattedNutrition;
+  return formattedNut;
 };
 
+// 🌟 修正：RAW 手動加入多項成分時，直接加總 (因為輸入時已經是依據 per 100g 準備好的數據)
 const calculateTotalNutrition = (ingredients) => {
   const calc = {
     energy_kcal: 0,
@@ -417,14 +468,13 @@ const isNutritionEmpty = (nutData) => {
 const normalizeQCStandards = (rawArray) => {
   if (!Array.isArray(rawArray)) return [];
   return rawArray.map((std) => {
-    // 🌟 修正：不論是不是 v2，都確保它有一個唯一的 id 供 React 與前端狀態對接
     const uniqueId =
       std.id || Date.now().toString() + Math.random().toString(36).substr(2, 5);
 
     if (std.format === "v2") {
       return {
         ...std,
-        id: uniqueId, // 🌟 確保補上 id
+        id: uniqueId,
         target_min:
           std.target_min !== undefined ? std.target_min : std.min || "",
         target_max:
@@ -603,6 +653,7 @@ export default function MaterialPage() {
   const [ingSearchTerm, setIngSearchTerm] = useState("");
   const [ingSearchResults, setIngSearchResults] = useState([]);
   const [isIngDropdownOpen, setIsIngDropdownOpen] = useState(false);
+  const [isIngTfdaSearching, setIsIngTfdaSearching] = useState(false);
   const ingSearchRef = useRef(null);
 
   const initialIngForm = {
@@ -621,7 +672,6 @@ export default function MaterialPage() {
   const [ingForm, setIngForm] = useState(initialIngForm);
   const [ingTfdaQuery, setIngTfdaQuery] = useState("");
   const [ingTfdaResults, setIngTfdaResults] = useState([]);
-  const [isIngTfdaSearching, setIsIngTfdaSearching] = useState(false);
   const [isIngTfdaDropdownOpen, setIsIngTfdaDropdownOpen] = useState(false);
   const ingTfdaRef = useRef(null);
 
@@ -798,7 +848,6 @@ export default function MaterialPage() {
     }
     const updatedIngredients = [...formData.ingredients, ingredient];
 
-    // 🌟 聯集時加入 boms
     const newAllergens = getMergedAllergens(
       formData.manual_allergen_info,
       updatedIngredients,
@@ -822,7 +871,6 @@ export default function MaterialPage() {
     const updatedIngredients = formData.ingredients.filter(
       (i) => i.id !== ingId,
     );
-    // 🌟 聯集時加入 boms
     const newAllergens = getMergedAllergens(
       formData.manual_allergen_info,
       updatedIngredients,
@@ -852,7 +900,6 @@ export default function MaterialPage() {
         );
       }
 
-      // 🌟 聯集時加入 boms
       const newAllergenInfo = getMergedAllergens(
         newManualAllergens,
         prev.ingredients,
@@ -986,7 +1033,6 @@ export default function MaterialPage() {
         const updatedIngredients = formData.ingredients.map((i) =>
           i.id === editingIngId ? savedIng : i,
         );
-        // 🌟 聯集時加入 boms
         const newAllergens = getMergedAllergens(
           formData.manual_allergen_info,
           updatedIngredients,
@@ -1026,26 +1072,31 @@ export default function MaterialPage() {
         "warning",
       );
     }
-    const calcNutrition = calculateNutritionFromBOMs(formData.boms);
+    const calcNutrition = calculateNutritionFromBOMsAndIngredients(
+      formData.boms,
+      formData.ingredients,
+      formData.unit,
+    );
     setFormData((prev) => ({ ...prev, nutrition_fact: calcNutrition }));
     showAlert("展算成功", "已依據底層 BOM 比例覆蓋營養數值。", "success");
   };
 
-  // 🌟 View Modal：動態提取來自配方 (BOM) 的成分
   const handleOpenViewModal = (material) => {
+    const extractedIngredients =
+      material.ingredients?.map((i) => i.ingredient_detail) || [];
+
     let displayNut = material.nutrition_fact || emptyNutrition;
     if (
       ["SEMI", "PRODUCT"].includes(material.type) &&
       isNutritionEmpty(displayNut)
     ) {
-      displayNut = calculateNutritionFromBOMs(material.boms || []);
+      displayNut = calculateNutritionFromBOMsAndIngredients(
+        material.boms || [],
+        extractedIngredients,
+        material.unit,
+      );
     }
 
-    // 手動添加的成分
-    const extractedIngredients =
-      material.ingredients?.map((i) => i.ingredient_detail) || [];
-
-    // 自動從 BOM 配方帶入的成分
     const bomIngredientsMap = new Map();
     (material.boms || [])
       .filter((b) => b.is_active !== false)
@@ -1074,7 +1125,7 @@ export default function MaterialPage() {
       ...material,
       display_nutrition: displayNut,
       display_ingredients: extractedIngredients,
-      display_bom_ingredients: finalBomIngredients, // 新增：供預覽渲染
+      display_bom_ingredients: finalBomIngredients,
       display_qc: displayQC,
     });
   };
@@ -1087,7 +1138,6 @@ export default function MaterialPage() {
     setIsModalOpen(true);
   };
 
-  // 🌟 Edit Modal：初始化與展開過敏原/成分
   const handleOpenEditModal = (material) => {
     if (!isRD)
       return showAlert("權限不足", "僅有研發部可以編輯物料。", "warning");
@@ -1099,7 +1149,6 @@ export default function MaterialPage() {
       ? material.allergen_info.split(",").map((s) => s.trim())
       : [];
 
-    // 🌟 計算系統自動帶入的過敏原 (手動成分 + BOM配方)
     const ingAllergens = getIngredientsOnlyAllergens(
       parsedIngredients,
       material.boms || [],
@@ -1114,7 +1163,11 @@ export default function MaterialPage() {
       ["SEMI", "PRODUCT"].includes(material.type) &&
       isNutritionEmpty(editNut)
     ) {
-      editNut = calculateNutritionFromBOMs(material.boms || []);
+      editNut = calculateNutritionFromBOMsAndIngredients(
+        material.boms || [],
+        parsedIngredients,
+        material.unit,
+      );
     }
 
     const editQC = normalizeQCStandards(material.qc_standards);
@@ -1138,6 +1191,7 @@ export default function MaterialPage() {
       boms: material.boms || [],
       origin: material.origin || "",
       qc_standards: editQC,
+      storage_life: material.storage_life || "",
     });
 
     setIsModalOpen(true);
@@ -1272,7 +1326,6 @@ export default function MaterialPage() {
     startIndex + itemsPerPage,
   );
 
-  // 🌟 動態取得此表單目前所有 BOM 下層帶入的成分 (Edit Mode)
   const formBomIngredients = useMemo(() => {
     const map = new Map();
     const manualIds = new Set((formData.ingredients || []).map((i) => i.id));
@@ -2127,7 +2180,7 @@ export default function MaterialPage() {
                                         <PenTool
                                           size={14}
                                           className="text-slate-400"
-                                          title="手動建檔"
+                                          title="手提建檔"
                                         />
                                       )}
                                       {res.name}
@@ -2443,7 +2496,7 @@ export default function MaterialPage() {
                             value={formData.storage_life}
                             onChange={handleInputChange}
                             className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none text-sm font-bold text-slate-800 transition-all shadow-sm"
-                            placeholder="12個月"
+                            placeholder="例如: 12個月 或 1年"
                           />
                         </div>
                         <div>
@@ -2639,6 +2692,9 @@ export default function MaterialPage() {
                 <div className="bg-blue-50/50 p-5 rounded-2xl border border-blue-100">
                   <label className="block text-[11px] font-bold text-blue-700 mb-2 flex items-center gap-1.5 uppercase tracking-wider">
                     <Database size={14} /> 從 TFDA 國家資料庫帶入數據 (選填)
+                    <span className="text-[10px] text-blue-500 font-normal ml-2 tracking-normal">
+                      ※ TFDA 搜尋時會自動忽略括號內文字 (如: 複合原料展開)
+                    </span>
                   </label>
                   <div className="relative" ref={ingTfdaRef}>
                     <div className="flex gap-3">

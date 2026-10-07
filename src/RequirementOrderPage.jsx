@@ -21,37 +21,37 @@ import { useAuthStore } from "./store/authStore";
 
 const USEAGE_THRESHOLD = 1.8;
 
-const getTodayString = (formatted = false) => {
+function getTodayString(formatted = false) {
   const d = new Date();
   const yyyy = d.getFullYear();
   const mm = String(d.getMonth() + 1).padStart(2, "0");
   const dd = String(d.getDate()).padStart(2, "0");
   return formatted ? `${yyyy}-${mm}-${dd}` : `${yyyy}${mm}${dd}`;
-};
+}
 
 // ==========================================
 // 🌟 1. 核心：有理數 (分數) 高精度運算引擎
-// 避免 JavaScript IEEE 754 浮點數連乘除產生的精度飄移
+// (使用 function 宣告確保 Hoisting 安全)
 // ==========================================
-const gcd = (a, b) => (b === 0n ? a : gcd(b, a % b));
+function gcd(a, b) {
+  return b === 0n ? a : gcd(b, a % b);
+}
 
-const toFraction = (val) => {
+function toFraction(val) {
   try {
     if (val === null || val === undefined || val === "")
       return { n: 0n, d: 1n };
     const str = String(val).trim();
 
-    // 🌟 第一層防護：若包含注音、英文字母等非數字字元，提早退回 0
+    // 提早攔截：避免注音或無效字元導致 BigInt 崩潰
     if (isNaN(Number(str))) return { n: 0n, d: 1n };
 
     if (!str.includes(".")) return { n: BigInt(str), d: 1n };
 
     let [intPart, decPart] = str.split(".");
-    // 處理只有小數點或負號的過渡狀態 (例如輸入 "-." 或 ".")
     if (!intPart || intPart === "-") intPart = intPart === "-" ? "-0" : "0";
     if (!decPart) decPart = "0";
 
-    // 去除小數點尾數多餘的 0
     decPart = decPart.replace(/0+$/, "");
     if (decPart === "") decPart = "0";
 
@@ -64,19 +64,18 @@ const toFraction = (val) => {
     const divisor = gcd(n < 0n ? -n : n, d);
     return { n: n / divisor, d: d / divisor };
   } catch (error) {
-    console.warn("Fraction conversion caught invalid input:", val);
     return { n: 0n, d: 1n };
   }
-};
+}
 
-const mulFrac = (f1, f2) => {
+function mulFrac(f1, f2) {
   const n = f1.n * f2.n;
   const d = f1.d * f2.d;
   const divisor = gcd(n < 0n ? -n : n, d);
   return { n: n / divisor, d: d / divisor };
-};
+}
 
-const divFrac = (f1, f2) => {
+function divFrac(f1, f2) {
   if (f2.n === 0n) return { n: 0n, d: 1n };
   const n = f1.n * f2.d;
   const d = f1.d * f2.n;
@@ -84,74 +83,57 @@ const divFrac = (f1, f2) => {
   const finalD = d < 0n ? -d : d;
   const divisor = gcd(finalN < 0n ? -finalN : finalN, finalD);
   return { n: finalN / divisor, d: finalD / divisor };
-};
+}
 
-const addFrac = (f1, f2) => {
+function addFrac(f1, f2) {
   const n = f1.n * f2.d + f2.n * f1.d;
   const d = f1.d * f2.d;
   const divisor = gcd(n < 0n ? -n : n, d);
   return { n: n / divisor, d: d / divisor };
-};
+}
 
-const fracToNumber = (f) => Number(f.n) / Number(f.d);
+function fracToNumber(f) {
+  return Number(f.n) / Number(f.d);
+}
 
 // ==========================================
 // 🌟 2. 顯示精度格式化引擎
 // ==========================================
-const formatNum = (num, type) => {
-  if (num === null || num === undefined || isNaN(num) || num === "") return "0";
-  if (type === "PACK") return Math.ceil(num).toString();
+function roundToDisplay(num, type) {
+  if (num === null || num === undefined || isNaN(num) || num === "") return 0;
+  if (type === "PACK") return Math.ceil(Number(num));
 
   const value = Number(num);
-  if (value === 0) return "0";
+  if (value === 0) return 0;
 
-  // 大於 0.01 (10g) 固定顯示到小數點第二位
   if (Math.abs(value) >= 0.01) {
-    return value.toLocaleString("en-US", {
+    return Math.round(value * 100) / 100;
+  } else {
+    return Number(value.toFixed(4));
+  }
+}
+
+function formatNum(num, type) {
+  const rounded = roundToDisplay(num, type);
+  if (rounded === 0) return "0";
+  if (type === "PACK") return rounded.toString();
+
+  if (Math.abs(rounded) >= 0.01) {
+    return rounded.toLocaleString("en-US", {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     });
   } else {
-    // 極小數值 (mg)，顯示到小數點第三或第四位
-    return Number(value.toFixed(4)).toString();
+    return rounded.toString();
   }
-};
+}
 
-const TypeTag = ({ type }) => {
-  const config = {
-    RAW: {
-      label: "原物料",
-      css: "bg-emerald-50 text-emerald-700 border-emerald-200",
-    },
-    SEMI: {
-      label: "半成品",
-      css: "bg-purple-50 text-purple-700 border-purple-200",
-    },
-    PACK: { label: "包材", css: "bg-amber-50 text-amber-700 border-amber-200" },
-    PRODUCT: { label: "成品", css: "bg-blue-50 text-blue-700 border-blue-200" },
-  };
-  const typeData = config[type] || {
-    label: type,
-    css: "bg-slate-100 text-slate-700 border-slate-200",
-  };
-  return (
-    <span
-      className={`inline-block text-center min-w-[72px] px-3 py-1 rounded-lg text-sm uppercase tracking-widest font-semibold border flex-shrink-0 shadow-sm ${typeData.css}`}
-    >
-      {typeData.label}
-    </span>
-  );
-};
-
-// ==========================================
-// 🌟 遞迴穿透引擎 (用於法規判定，套用分數運算)
-// ==========================================
-const getContainedAdditives = (
+function getContainedAdditives(
   matId,
   boms,
   materials,
   multiplierFrac = { n: 1n, d: 1n },
-) => {
+) {
   const results = {};
   const children = boms.filter((b) => String(b.parent?.id) === String(matId));
 
@@ -173,7 +155,6 @@ const getContainedAdditives = (
           _qtyFrac: { n: 0n, d: 1n },
           qty: 0,
         };
-
       const r = results[childMat.id];
       r._qtyFrac = addFrac(r._qtyFrac, qtyF);
       r.qty = fracToNumber(r._qtyFrac);
@@ -187,7 +168,6 @@ const getContainedAdditives = (
       Object.values(deepResults).forEach((dr) => {
         if (!results[dr.id])
           results[dr.id] = { ...dr, _qtyFrac: { n: 0n, d: 1n }, qty: 0 };
-
         const r = results[dr.id];
         r._qtyFrac = addFrac(r._qtyFrac, dr._qtyFrac);
         r.qty = fracToNumber(r._qtyFrac);
@@ -195,6 +175,32 @@ const getContainedAdditives = (
     }
   });
   return results;
+}
+
+const TypeTag = ({ type }) => {
+  const config = {
+    RAW: {
+      label: "原物料",
+      css: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    },
+    SEMI: {
+      label: "半成品",
+      css: "bg-purple-50 text-purple-700 border-purple-200",
+    },
+    PACK: { label: "包材", css: "bg-amber-50 text-amber-700 border-amber-200" },
+    PRODUCT: { label: "成品", css: "bg-blue-50 text-blue-700 border-blue-200" },
+  };
+  const typeData = config[type] || {
+    label: type,
+    css: "bg-slate-100 text-slate-700 border-slate-200",
+  };
+  return (
+    <span
+      className={`inline-block text-center min-w-[72px] px-3 py-1 rounded-lg text-sm uppercase tracking-widest font-bold border flex-shrink-0 shadow-sm ${typeData.css}`}
+    >
+      {typeData.label}
+    </span>
+  );
 };
 
 // ==========================================
@@ -220,9 +226,8 @@ const FilterableDropdown = ({
   );
 
   const selectedOpt = options.find((o) => String(o.id) === String(value));
-
-  const defaultClass = "w-full min-h-[44px] px-4 py-2 rounded-xl text-sm";
-  const combinedClass = className || defaultClass;
+  const combinedClass =
+    className || "w-full min-h-[44px] px-4 py-2 rounded-xl text-sm";
 
   useEffect(() => {
     const handleClickOutside = (e) => {
@@ -307,8 +312,7 @@ const FilterableDropdown = ({
               })
             ) : (
               <div className="px-4 py-8 text-center text-slate-400 text-sm font-medium flex flex-col items-center justify-center gap-2">
-                <Package size={28} className="opacity-20" />
-                無結果
+                <Package size={28} className="opacity-20" /> 無結果
               </div>
             )}
           </div>
@@ -324,7 +328,6 @@ const FilterableDropdown = ({
 const AdditiveWarningPanel = ({ alloc, materials, boms }) => {
   if (!alloc || !alloc._base_qty) return null;
   const baseQty = alloc._base_qty;
-
   const additiveSummary = {};
 
   Object.keys(alloc).forEach((matId) => {
@@ -345,16 +348,13 @@ const AdditiveWarningPanel = ({ alloc, materials, boms }) => {
           name: matInfo.name,
           limit: parseFloat(matInfo.legal_limit_percent),
           totalUsed: 0,
-          sources: [],
         };
       additiveSummary[matId].totalUsed += totalUsed;
     } else if (matInfo.type === "SEMI" || matInfo.type === "PRODUCT") {
-      const embedded = getContainedAdditives(
-        matId,
-        boms,
-        materials,
-        toFraction("1"),
-      );
+      const embedded = getContainedAdditives(matId, boms, materials, {
+        n: 1n,
+        d: 1n,
+      });
       Object.values(embedded).forEach((ea) => {
         const contributedQty = totalUsed * ea.qty;
         if (!additiveSummary[ea.id])
@@ -363,7 +363,6 @@ const AdditiveWarningPanel = ({ alloc, materials, boms }) => {
             name: ea.name,
             limit: parseFloat(ea.legal_limit_percent),
             totalUsed: 0,
-            sources: [],
           };
         additiveSummary[ea.id].totalUsed += contributedQty;
       });
@@ -385,34 +384,34 @@ const AdditiveWarningPanel = ({ alloc, materials, boms }) => {
 
   return (
     <div className="mb-6 bg-red-50/80 border border-red-200 rounded-2xl p-5 shadow-sm animate-in fade-in zoom-in-95">
-      <h4 className="text-red-800 font-semibold text-sm flex items-center gap-2 mb-4">
+      <h4 className="text-red-800 font-bold text-sm flex items-center gap-2 mb-4">
         <FlaskConical size={18} strokeWidth={2.5} /> 法規添加物限量超標警示
       </h4>
       <div className="space-y-3">
         {warnings.map((w, i) => (
           <div
             key={i}
-            className="bg-white rounded-xl p-4 border border-red-100 flex flex-col sm:flex-row justify-between sm:items-center gap-3 shadow-sm"
+            className="bg-white rounded-[1rem] p-4 border border-red-100 flex flex-col sm:flex-row justify-between sm:items-center gap-3 shadow-sm"
           >
             <div>
-              <span className="font-semibold text-slate-900 mr-3 text-sm">
+              <span className="font-bold text-slate-900 mr-3 text-[15px]">
                 {w.name}
               </span>
-              <span className="text-sm bg-red-100 text-red-700 px-3 py-1 rounded-lg font-medium">
+              <span className="text-xs bg-red-100 text-red-700 px-2.5 py-1 rounded-lg font-bold border border-red-200">
                 法定上限 {formatNum(w.limit)}%
               </span>
             </div>
-            <div className="text-sm font-medium text-slate-700 flex items-center gap-3 bg-slate-50 px-4 py-2 rounded-xl border border-slate-100">
+            <div className="text-sm font-medium text-slate-700 flex items-center gap-3 bg-slate-50 px-4 py-2.5 rounded-xl border border-slate-100">
               <span>
                 總用量:{" "}
-                <span className="font-mono font-semibold text-red-600">
+                <span className="font-mono font-bold text-red-600">
                   {formatNum(w.totalUsed)} KG
                 </span>
               </span>
               <span className="text-slate-300">|</span>
               <span>
-                實際佔比:{" "}
-                <span className="font-mono font-semibold text-red-600 text-base">
+                佔比:{" "}
+                <span className="font-mono font-bold text-red-600 text-base">
                   {formatNum(w.usagePercent)}%
                 </span>
               </span>
@@ -420,16 +419,16 @@ const AdditiveWarningPanel = ({ alloc, materials, boms }) => {
           </div>
         ))}
       </div>
-      <p className="text-sm text-red-500 font-medium mt-4 flex items-center gap-2">
+      <p className="text-xs text-red-500 font-bold mt-4 flex items-center gap-2">
         <AlertTriangle size={16} />{" "}
-        調整批號用量後，實際添加物比例已超出食安法規上限，目前已被系統鎖定無法發行生產單。
+        調整批號用量後，實際添加物比例已超出食安法規上限，目前已被系統鎖定。
       </p>
     </div>
   );
 };
 
 // ==========================================
-// 批號操作子元件
+// 🌟 3. Apple Style 重構版 BatchRow
 // ==========================================
 const BatchRow = ({
   orderId,
@@ -445,7 +444,8 @@ const BatchRow = ({
     setTempValue(batch.used);
   }, [batch.used]);
 
-  const isModified = tempValue !== batch.used;
+  const isModified = String(tempValue) !== String(batch.used);
+
   const handleInternalSave = () => {
     let val = tempValue;
     if (val !== "") {
@@ -473,98 +473,87 @@ const BatchRow = ({
 
   return (
     <div
-      className={`relative flex flex-col bg-white border p-5 rounded-2xl transition-all duration-300 w-full min-h-[120px] ${isModified ? "border-amber-400 ring-4 ring-amber-400/10 shadow-md" : "border-slate-200 hover:border-blue-300 hover:shadow-md shadow-sm"}`}
+      className={`relative flex flex-col bg-white border border-slate-200/80 rounded-[1.5rem] p-5 w-full min-h-[160px] transition-all duration-300 ${isModified ? "shadow-[0_8px_30px_rgb(0,0,0,0.08)] border-amber-300 ring-2 ring-amber-400/20" : "shadow-sm hover:shadow-md"}`}
     >
-      <div className="flex justify-between items-start mb-5 gap-4">
-        <div className="min-w-0">
-          <div className="flex items-center gap-3 mb-2">
-            <span
-              className={`w-3 h-3 rounded-full shrink-0 ${usedQty > 0 ? (isFullyUsed ? "bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.6)]" : "bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.6)]") : "bg-slate-300"}`}
-            ></span>
-            <h4
-              className="text-sm font-semibold text-slate-800 truncate"
-              title={batch.batch_number}
-            >
+      <div className="flex justify-between items-start mb-4">
+        <div className="flex flex-col gap-1.5 min-w-0">
+          <div className="flex items-center gap-2">
+            <div
+              className={`w-2.5 h-2.5 rounded-full ${usedQty > 0 ? (isFullyUsed ? "bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.6)]" : "bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.6)]") : "bg-slate-200"}`}
+            />
+            <h4 className="text-[17px] font-bold text-slate-800 tracking-tight truncate font-mono">
               {batch.batch_number}
             </h4>
           </div>
           {batch.received_date && (
-            <div className="text-sm font-medium text-slate-400 ml-6">
+            <span className="text-[11px] font-bold text-slate-400 bg-slate-50 border border-slate-100 px-2 py-0.5 rounded-md w-fit">
               EXP: {new Date(batch.received_date).toLocaleDateString()}
-            </div>
-          )}
-        </div>
-        <div className="flex flex-col items-end shrink-0">
-          {!readyOnly ? (
-            <div className="flex items-center gap-3">
-              <div className="relative">
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  pattern="[0-9]*"
-                  value={tempValue}
-                  onChange={(e) => setTempValue(e.target.value)}
-                  className={`w-28 h-11 px-3 text-right text-sm font-semibold font-mono border rounded-xl transition-all duration-300 focus:outline-none shadow-sm ${isModified ? "bg-amber-50 border-amber-400 text-amber-900 focus:ring-4 focus:ring-amber-400/20" : usedQty > 0 ? "border-blue-300 bg-blue-50/50 text-blue-800 focus:ring-4 focus:ring-blue-500/10" : "border-slate-200 text-slate-700 bg-slate-50 focus:bg-white focus:ring-4 focus:ring-blue-500/10"}`}
-                />
-                <span className="absolute -top-1 -right-1 flex h-3 w-3">
-                  {isModified && (
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-                  )}
-                  <span
-                    className={`relative inline-flex rounded-full h-3 w-3 ${isModified ? "bg-amber-500" : "hidden"}`}
-                  ></span>
-                </span>
-              </div>
-              <div
-                className={`overflow-hidden transition-all duration-300 ease-in-out opacity-100`}
-              >
-                <button
-                  onClick={handleInternalSave}
-                  className="px-4 h-11 bg-amber-500 text-white text-sm font-medium rounded-xl hover:bg-amber-600 active:scale-95 shadow-sm whitespace-nowrap transition-colors"
-                >
-                  儲存
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div className="bg-slate-50 px-4 py-2 rounded-xl border border-slate-200 text-center min-w-[60px]">
-              <span
-                className={`text-sm font-semibold font-mono ${usedQty > 0 ? "text-blue-600" : "text-slate-400"}`}
-              >
-                {tempValue}
-              </span>
-            </div>
+            </span>
           )}
         </div>
       </div>
-      <div className="mt-auto">
-        <div className="flex justify-between items-end mb-3 text-sm font-medium text-slate-500">
-          <span>
-            本次分配:{" "}
+
+      <div className="flex items-center gap-3 mb-5">
+        {!readyOnly ? (
+          <>
+            <div className="relative flex-1">
+              <input
+                type="text"
+                inputMode="decimal"
+                value={tempValue}
+                onChange={(e) => setTempValue(e.target.value)}
+                className={`w-full h-12 pl-4 pr-10 text-right text-lg font-mono font-bold rounded-[14px] outline-none transition-all duration-300 border ${isModified ? "bg-amber-50/50 border-amber-300 text-amber-700 focus:bg-white focus:ring-4 focus:ring-amber-500/15" : usedQty > 0 ? "bg-blue-50/30 border-blue-200 text-blue-700 focus:bg-white focus:ring-4 focus:ring-blue-500/15" : "bg-slate-50 border-slate-200 text-slate-700 focus:bg-white focus:border-blue-400 focus:ring-4 focus:ring-blue-500/15"}`}
+              />
+              <span className="absolute right-4 top-1/2 -translate-y-1/2 text-sm font-semibold text-slate-400 pointer-events-none select-none">
+                {unit}
+              </span>
+            </div>
+            <button
+              onClick={handleInternalSave}
+              disabled={!isModified}
+              className={`h-12 px-5 rounded-[14px] font-bold text-[15px] transition-all duration-300 active:scale-95 shadow-sm border ${isModified ? "bg-amber-500 text-white border-amber-600 shadow-amber-500/20 hover:bg-amber-600" : "bg-slate-50 text-slate-400 border-slate-200 cursor-not-allowed"}`}
+            >
+              儲存
+            </button>
+          </>
+        ) : (
+          <div className="w-full h-12 bg-slate-50 border border-slate-100 rounded-[14px] flex items-center justify-end px-4">
             <span
-              className={`text-base font-semibold font-mono ml-1 ${usedQty > 0 ? "text-blue-600" : ""}`}
+              className={`text-lg font-mono font-bold ${usedQty > 0 ? "text-blue-600" : "text-slate-400"}`}
+            >
+              {formatNum(tempValue, matType)}{" "}
+              <span className="text-sm font-medium text-slate-400">{unit}</span>
+            </span>
+          </div>
+        )}
+      </div>
+
+      <div className="mt-auto">
+        <div className="flex justify-between items-end mb-2.5">
+          <div className="flex flex-col">
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">
+              本次分配
+            </span>
+            <span
+              className={`text-[15px] font-bold font-mono ${usedQty > 0 ? "text-blue-600" : "text-slate-700"}`}
             >
               {formatNum(usedQty, matType)}
-            </span>{" "}
-            {unit}
-          </span>
-          <span>
-            庫存剩餘:{" "}
-            <span className="text-base font-semibold font-mono text-slate-700 ml-1">
-              {formatNum(remainingQty, matType)}
-            </span>{" "}
-            {unit}
-          </span>
-        </div>
-        <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden border border-slate-200 shadow-inner">
-          <div
-            className={`h-full rounded-full transition-all duration-500 ease-out relative ${isFullyUsed ? "bg-amber-400" : usedQty > 0 ? "bg-blue-500" : "bg-transparent"}`}
-            style={{ width: `${usagePercent}%` }}
-          >
-            {usedQty > 0 && !isFullyUsed && (
-              <div className="absolute top-0 right-0 bottom-0 w-8 bg-gradient-to-r from-transparent to-white/30"></div>
-            )}
+            </span>
           </div>
+          <div className="flex flex-col text-right">
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">
+              剩餘庫存
+            </span>
+            <span className="text-[15px] font-bold text-slate-500 font-mono">
+              {formatNum(remainingQty, matType)}
+            </span>
+          </div>
+        </div>
+        <div className="h-1.5 w-full bg-slate-100/80 rounded-full overflow-hidden border border-slate-200/50">
+          <div
+            className={`h-full rounded-full transition-all duration-500 ${isFullyUsed ? "bg-amber-400" : usedQty > 0 ? "bg-blue-500" : "bg-transparent"}`}
+            style={{ width: `${usagePercent}%` }}
+          ></div>
         </div>
       </div>
     </div>
@@ -572,7 +561,7 @@ const BatchRow = ({
 };
 
 // ==========================================
-// 🌟 核心：支援無限遞迴展開的 庫存分配列表 Component
+// 核心：支援無限遞迴展開的 庫存分配列表 Component
 // ==========================================
 const MaterialAllocationList = ({
   itemId,
@@ -716,10 +705,10 @@ const MaterialAllocationList = ({
           return (
             <div
               key={matId}
-              className={`border rounded-2xl overflow-hidden transition-all shadow-sm ${borderColor}`}
+              className={`border rounded-3xl overflow-hidden transition-all shadow-sm ${borderColor}`}
             >
               <div
-                className={`p-5 flex flex-col md:flex-row justify-between items-start md:items-center ${canExpand ? "cursor-pointer hover:bg-slate-50/80" : ""} transition-colors ${bgColor}`}
+                className={`p-5 md:p-6 flex flex-col md:flex-row justify-between items-start md:items-center ${canExpand ? "cursor-pointer hover:bg-slate-50/80" : ""} transition-colors ${bgColor}`}
                 onClick={() => {
                   if (canExpand) toggleMaterialExpanded(expandedKey);
                 }}
@@ -730,18 +719,18 @@ const MaterialAllocationList = ({
                   </span>
                   <TypeTag type={mat.type} />
                   {isAdditive && (
-                    <span className="bg-orange-100 text-orange-700 px-3 py-1 rounded-lg text-sm font-medium flex items-center gap-1.5 shadow-sm shrink-0">
+                    <span className="bg-orange-100 text-orange-700 px-3 py-1 rounded-lg text-sm font-bold flex items-center gap-1.5 shadow-sm shrink-0 border border-orange-200">
                       <FlaskConical size={14} strokeWidth={2.5} /> 法定添加物
                     </span>
                   )}
-                  <span className="font-semibold text-slate-800 truncate text-base">
+                  <span className="font-bold text-slate-800 truncate text-[17px]">
                     <span className="text-slate-400 mr-1 font-mono text-sm">
                       {seqLabel}
                     </span>
                     {mat.materialName}
                   </span>
                   {mat.remark && mat.remark.length > 0 && (
-                    <span className="text-sm text-slate-500 font-medium whitespace-nowrap ml-1 bg-white border border-slate-200 px-2 py-0.5 rounded-lg shadow-sm">
+                    <span className="text-sm text-slate-500 font-bold whitespace-nowrap ml-1 bg-white border border-slate-200 px-2 py-0.5 rounded-lg shadow-sm">
                       {mat.remark}
                     </span>
                   )}
@@ -749,30 +738,30 @@ const MaterialAllocationList = ({
 
                 <div className="flex flex-wrap items-center justify-end gap-3 text-sm w-full md:w-auto mt-3 md:mt-0">
                   {hasAdditiveError && (
-                    <div className="flex items-center gap-2 bg-red-100/80 text-red-700 px-3 py-1.5 rounded-xl border border-red-200 shadow-sm animate-pulse">
+                    <div className="flex items-center gap-2 bg-red-100 text-red-700 px-3 py-1.5 rounded-xl border border-red-200 shadow-sm">
                       <AlertTriangle size={16} strokeWidth={2.5} />
-                      <span className="font-semibold">
-                        超標 {formatNum(usagePercent, "PERCENT")}%
+                      <span className="font-bold">
+                        超標 {formatNum(usagePercent, 2)}%
                       </span>
-                      <span className="text-sm font-medium bg-white/80 px-2 py-0.5 rounded-md text-red-800">
+                      <span className="text-sm font-bold bg-white px-2 py-0.5 rounded-md text-red-800 shadow-sm border border-red-100">
                         最多 {formatNum(maxAllowedQty, "RAW")} {mat.unit}
                       </span>
                     </div>
                   )}
                   {!hasAdditiveError && isUnder ? (
-                    <span className="font-semibold text-amber-700 bg-amber-50 px-4 py-1.5 rounded-xl border border-amber-200 shadow-sm">
+                    <span className="font-bold text-amber-700 bg-amber-50 px-4 py-2 rounded-xl border border-amber-200 shadow-sm">
                       缺料{" "}
                       {formatNum(mat.requiredQty - totalAllocated, mat.type)}{" "}
                       {mat.unit}
                     </span>
                   ) : !hasAdditiveError && !isSemi ? (
                     <span
-                      className={`font-medium px-4 py-1.5 rounded-xl border shadow-sm ${isOver ? "bg-purple-50 text-purple-700 border-purple-200" : "bg-emerald-50 text-emerald-700 border-emerald-200"}`}
+                      className={`font-bold px-4 py-2 rounded-xl border shadow-sm ${isOver ? "bg-purple-50 text-purple-700 border-purple-200" : "bg-emerald-50 text-emerald-700 border-emerald-200"}`}
                     >
                       已分配 {formatNum(totalAllocated, mat.type)} {mat.unit}
                     </span>
                   ) : isSemi ? (
-                    <span className="font-medium px-4 py-1.5 rounded-xl border bg-purple-50 text-purple-700 border-purple-200 shadow-sm">
+                    <span className="font-bold px-4 py-2 rounded-xl border bg-purple-50 text-purple-700 border-purple-200 shadow-sm">
                       需生產 {formatNum(mat.requiredQty, mat.type)} {mat.unit}
                     </span>
                   ) : null}
@@ -780,26 +769,27 @@ const MaterialAllocationList = ({
               </div>
 
               {isExpanded && !isSemi && (
-                <div className="bg-slate-50/50 p-6 border-t border-slate-100 w-full min-w-0">
-                  <div className="mb-4 flex flex-col md:flex-row justify-between items-start md:items-center border-b border-slate-200 pb-3 gap-3">
-                    <span className="text-sm font-medium text-slate-500">
-                      批號分配清單
+                <div className="bg-slate-50/50 pt-5 pb-6 border-t border-slate-200/80 w-full min-w-0 shadow-inner">
+                  <div className="px-6 mb-3 flex flex-col md:flex-row justify-between items-start md:items-center border-b border-slate-200/80 pb-4 gap-3">
+                    <span className="text-sm font-bold text-slate-800 tracking-wide flex items-center gap-2">
+                      📦 批號分配清單
                     </span>
                     <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium bg-white px-4 py-1.5 rounded-xl border border-slate-200 text-slate-600 shadow-sm">
+                      <span className="text-[13px] font-bold bg-white px-4 py-2 rounded-[12px] border border-slate-200 text-slate-500 shadow-sm flex items-center gap-2">
                         總需求:{" "}
-                        <b className="text-slate-800 font-mono text-base ml-1">
+                        <b className="text-slate-900 font-mono text-[17px]">
                           {formatNum(mat.requiredQty, mat.type)}
                         </b>{" "}
                         {mat.unit}
                       </span>
                     </div>
                   </div>
-                  <div className="flex overflow-x-auto gap-5 pb-5 pt-2 snap-x custom-scrollbar w-full min-w-0">
+                  {/* 🌟 增加負邊距以容納陰影不被裁切，並確保 X Scrollable */}
+                  <div className="flex overflow-x-auto gap-4 pb-6 pt-3 px-6 -mx-2 snap-x custom-scrollbar w-full min-w-0">
                     {sortedBatches.map((b) => (
                       <div
                         key={b.id}
-                        className="w-[85vw] sm:w-[320px] flex-shrink-0 snap-start"
+                        className="w-[85vw] sm:w-[340px] flex-shrink-0 snap-start px-1"
                       >
                         <BatchRow
                           orderId={itemId}
@@ -826,20 +816,20 @@ const MaterialAllocationList = ({
                     mrpAdditiveErrors[childDisplayId];
 
                   return (
-                    <div className="bg-slate-50/80 p-6 border-t border-slate-200 w-full min-w-0 shadow-inner">
-                      <div className="mb-5 flex flex-col md:flex-row justify-between items-start md:items-center border-b border-slate-200 pb-4 gap-3">
+                    <div className="bg-slate-50/80 p-6 md:p-8 border-t border-slate-200 w-full min-w-0 shadow-inner">
+                      <div className="mb-6 flex flex-col md:flex-row justify-between items-start md:items-center border-b border-slate-200 pb-4 gap-3">
                         <div className="flex items-center gap-3">
-                          <span className="text-sm bg-purple-100 text-purple-800 px-3 py-1.5 rounded-lg font-bold tracking-wide border border-purple-200 shadow-sm flex items-center gap-2">
-                            <span className="w-2 h-2 rounded-full bg-purple-500"></span>
+                          <span className="text-sm bg-purple-100 text-purple-800 px-4 py-2 rounded-xl font-bold tracking-wide border border-purple-200 shadow-sm flex items-center gap-2">
+                            <span className="w-2.5 h-2.5 rounded-full bg-purple-500 shadow-[0_0_6px_rgba(168,85,247,0.6)]"></span>
                             子單據: {childPlan.mrp_id}
                           </span>
                           {hasChildAdditiveError && (
-                            <span className="text-red-600 text-sm tracking-wide font-semibold bg-red-100 px-2.5 py-1 rounded-md border border-red-300 shadow-sm">
+                            <span className="text-red-600 text-sm tracking-wide font-bold bg-red-100 px-3 py-2 rounded-xl border border-red-300 shadow-sm">
                               ⚠️ 法規超標
                             </span>
                           )}
                         </div>
-                        <div className="flex flex-nowrap items-center justify-end gap-2 text-xs font-semibold text-slate-400">
+                        <div className="flex flex-nowrap items-center justify-end gap-2 text-xs font-bold text-slate-400 uppercase tracking-widest">
                           子配方細節展開
                         </div>
                       </div>
@@ -994,19 +984,16 @@ const RequirementOrderPage = () => {
   const parsePackInfo = (packName, isInner) => {
     let parsedUnit = isInner ? "包" : "箱";
     let parsedCapacity = 1;
-
     if (packName.includes("桶")) parsedUnit = "桶";
     else if (packName.includes("箱")) parsedUnit = "箱";
     else if (packName.includes("袋")) parsedUnit = "袋";
     else if (packName.includes("瓶")) parsedUnit = "瓶";
     else if (packName.includes("罐")) parsedUnit = "罐";
-
     const match = packName.match(/([\d.]+)\s*(KG|L|g|ml)/i);
     if (match) {
       parsedCapacity = Number(match[1]);
-      if (match[2].toLowerCase() === "g" || match[2].toLowerCase() === "ml") {
+      if (match[2].toLowerCase() === "g" || match[2].toLowerCase() === "ml")
         parsedCapacity = parsedCapacity / 1000;
-      }
     }
     return { parsedUnit, parsedCapacity };
   };
@@ -1024,7 +1011,7 @@ const RequirementOrderPage = () => {
         );
         setFormItems((prev) =>
           prev.map((item) => {
-            if (item.id === rowId && item.profile_id === "custom") {
+            if (item.id === rowId && item.profile_id === "custom")
               return {
                 ...item,
                 unit: parsedUnit,
@@ -1032,7 +1019,6 @@ const RequirementOrderPage = () => {
                   packMat.pack_capacity || parsedCapacity,
                 ).toString(),
               };
-            }
             return item;
           }),
         );
@@ -1053,7 +1039,7 @@ const RequirementOrderPage = () => {
         );
         setFormItems((prev) =>
           prev.map((item) => {
-            if (item.id === rowId && item.profile_id === "custom") {
+            if (item.id === rowId && item.profile_id === "custom")
               return {
                 ...item,
                 sales_pack_unit: parsedUnit,
@@ -1061,7 +1047,6 @@ const RequirementOrderPage = () => {
                   packMat.pack_capacity || parsedCapacity,
                 ).toString(),
               };
-            }
             return item;
           }),
         );
@@ -1074,25 +1059,18 @@ const RequirementOrderPage = () => {
       const n = Number(val);
       return isNaN(n) ? "0" : n.toString();
     };
-
     const outerUnit = item.unit || "箱";
     const innerUnit = item.sales_pack_unit || "包";
     const innerCap = cleanNumStr(item.inner_capacity);
     const packQty = cleanNumStr(item.sales_pack_quantity);
     const outerCap = cleanNumStr(item.outer_capacity);
-
     const hasInner =
       !!item.inner_pack_id ||
       (Number(item.inner_capacity) > 0 && Number(item.sales_pack_quantity) > 0);
     const hasOuter = !!item.outer_pack_id || Number(item.outer_capacity) > 0;
-
     if (!hasInner && !hasOuter) return "";
-
-    if (hasInner) {
-      return `${innerCap}KG*${packQty}${innerUnit}/${outerUnit}`;
-    } else {
-      return `${outerCap}KG/${outerUnit}`;
-    }
+    if (hasInner) return `${innerCap}KG*${packQty}${innerUnit}/${outerUnit}`;
+    else return `${outerCap}KG/${outerUnit}`;
   };
 
   const toggleMaterialExpanded = (key) =>
@@ -1117,7 +1095,6 @@ const RequirementOrderPage = () => {
           fetchWithAuth("/api/mrp/daily_sequence"),
           fetchWithAuth("/api/customer_orders/daily_sequence"),
         ]);
-
       if (
         !matRes.ok ||
         !bomRes.ok ||
@@ -1129,13 +1106,23 @@ const RequirementOrderPage = () => {
       )
         throw new Error("資料載入失敗，請確認 API 狀態");
 
-      const matJson = await matRes.json();
-      const bomJson = await bomRes.json();
-      const batchJson = await batchRes.json();
-      const venJson = await venRes.json();
-      const mrpJson = await mrpRes.json();
-      const seqJson = await seqRes.json();
-      const coSeqJson = await coSeqRes.json();
+      const [
+        matJson,
+        bomJson,
+        batchJson,
+        venJson,
+        mrpJson,
+        seqJson,
+        coSeqJson,
+      ] = await Promise.all([
+        matRes.json(),
+        bomRes.json(),
+        batchRes.json(),
+        venRes.json(),
+        mrpRes.json(),
+        seqRes.json(),
+        coSeqRes.json(),
+      ]);
 
       const loadedMaterials = matJson.data || [];
       setMaterials(loadedMaterials);
@@ -1153,10 +1140,8 @@ const RequirementOrderPage = () => {
           return prev;
         });
       }
-
-      if (coSeqJson.data && coSeqJson.data.sequence) {
+      if (coSeqJson.data && coSeqJson.data.sequence)
         setCoDailySequence(coSeqJson.data.sequence);
-      }
 
       let loadedAllocations = {};
       remoteMrp.forEach((plan) => {
@@ -1167,7 +1152,6 @@ const RequirementOrderPage = () => {
                 ? JSON.parse(plan.batch_inventory_info)
                 : plan.batch_inventory_info;
             let validAllocObj = {};
-
             if (Array.isArray(parsedInfo)) {
               validAllocObj = {
                 _base_qty: parseFloat(plan.required_qty),
@@ -1191,20 +1175,17 @@ const RequirementOrderPage = () => {
                   validAllocObj = parsedInfo[firstKey];
               }
             }
-
             if (validAllocObj && !validAllocObj._base_qty) {
               validAllocObj._base_qty = parseFloat(plan.required_qty);
               validAllocObj._productId = plan.product_id;
             }
-
             const displayId = plan.frontend_temp_id || plan.id;
             if (
               Object.keys(validAllocObj).filter(
                 (k) => k !== "_base_qty" && k !== "_productId",
               ).length > 0
-            ) {
+            )
               loadedAllocations[displayId] = validAllocObj;
-            }
           } catch (e) {
             console.error("解析 batch_inventory_info 失敗", e);
           }
@@ -1304,8 +1285,7 @@ const RequirementOrderPage = () => {
           (m) => String(m.id) === String(item.product_id),
         );
         if (!product) return item;
-
-        if (profileId === "custom" || !profileId) {
+        if (profileId === "custom" || !profileId)
           return {
             ...item,
             profile_id: profileId,
@@ -1320,38 +1300,19 @@ const RequirementOrderPage = () => {
             outer_capacity: "",
             inner_capacity: "",
           };
-        }
-        if (!profileId) {
-          return {
-            ...item,
-            profile_id: "",
-            spec: "",
-            unit: product.unit || "箱",
-            unit_price: "",
-            sales_unit_quantity: 1,
-            sales_pack_unit: "包",
-            sales_pack_quantity: 10,
-            outer_pack_id: null,
-            inner_pack_id: null,
-          };
-        }
-
         const profile = product.product_profiles?.find(
           (p) => String(p.id) === String(profileId),
         );
         if (!profile) return item;
-
         const getPackId = (packData) => {
           if (!packData) return null;
           if (typeof packData === "object") return packData.id;
           return Number(packData);
         };
-
         const outId =
           getPackId(profile.outer_pack_id) || getPackId(profile.outer_pack);
         const inId =
           getPackId(profile.inner_pack_id) || getPackId(profile.inner_pack);
-
         return {
           ...item,
           profile_id: profile.id,
@@ -1442,8 +1403,8 @@ const RequirementOrderPage = () => {
           productId: mat.id,
           name: mat.name,
           type: mat.type,
-          qty: fracToNumber(currentQtyFrac), // 用於純顯示或最後 JSON 儲存
-          _qtyFrac: currentQtyFrac, // 🌟 用於繼續精準遞迴
+          qty: fracToNumber(currentQtyFrac),
+          _qtyFrac: currentQtyFrac,
           unit: "KG",
           productCode: mat.code,
           remark: currentRemark,
@@ -1458,8 +1419,6 @@ const RequirementOrderPage = () => {
             const baseQtyF = toFraction(c.base_quantity || "1");
             const reqQtyF = toFraction(c.quantity_required || "0");
             const ratioF = divFrac(reqQtyF, baseQtyF);
-
-            // 🌟 分數相乘，完全避開 JS 浮點數誤差
             const childQtyFrac = mulFrac(currentQtyFrac, ratioF);
 
             const childDraftId = `${motherId}-${childDraftSeq++}`;
@@ -1501,7 +1460,7 @@ const RequirementOrderPage = () => {
   }, [formItems, materials, boms]);
 
   // ==========================================
-  // 🌟 庫存分配引擎 (整合 Fraction)
+  // 🌟 庫存分配引擎 (整合 Fraction 與顯示精度圓整)
   // ==========================================
   useEffect(() => {
     if (orderItems.length === 0 && mrpPlans.length === 0) return;
@@ -1629,7 +1588,10 @@ const RequirementOrderPage = () => {
           (m) => String(m.id) === String(matIdStr),
         );
         const isPack = matInfo?.type === "PACK";
-        let requiredQty = fracToNumber(itemReqs[matIdStr].qtyFrac);
+
+        const exactRequiredQty = fracToNumber(itemReqs[matIdStr].qtyFrac);
+        let requiredQty = roundToDisplay(exactRequiredQty, matInfo?.type);
+
         let remark = itemReqs[matIdStr].remark;
         if (isPack) requiredQty = Math.ceil(requiredQty);
 
@@ -1663,7 +1625,7 @@ const RequirementOrderPage = () => {
                   ? ""
                   : isPack
                     ? Math.ceil(used).toString()
-                    : parseFloat(used.toFixed(5)).toString(), // 分配時使用普通小數截斷即可
+                    : roundToDisplay(used, matInfo?.type).toString(),
             };
           })
           .filter((b) => b.available > 0);
@@ -1881,8 +1843,11 @@ const RequirementOrderPage = () => {
         delete cleanBatchInfo._base_qty;
         delete cleanBatchInfo._productId;
 
+        const cleanItem = { ...item };
+        delete cleanItem._qtyFrac;
+
         itemMap[item.id] = {
-          ...item,
+          ...cleanItem,
           batch_inventory_info: cleanBatchInfo,
           children_mrp: [],
         };
@@ -2222,7 +2187,6 @@ const RequirementOrderPage = () => {
         subtotal: co.total_amount || order.total_amount,
       }));
     }
-
     const paddedItems = [...items];
     while (paddedItems.length < 10) paddedItems.push(null);
 
@@ -2249,7 +2213,6 @@ const RequirementOrderPage = () => {
             <div className="flex-1 text-right">版次:03 第 1 頁,共 1 頁</div>
           </div>
         </div>
-
         <table className="w-full border-collapse border border-black mb-2 text-sm">
           <tbody>
             <tr>
@@ -2296,7 +2259,6 @@ const RequirementOrderPage = () => {
             </tr>
           </tbody>
         </table>
-
         <table className="w-full border-collapse border border-black text-center text-sm">
           <thead>
             <tr className="font-normal">
@@ -2381,7 +2343,6 @@ const RequirementOrderPage = () => {
             ))}
           </tbody>
         </table>
-
         <table className="w-full border-collapse border border-black border-t-0 text-sm">
           <tbody>
             <tr>
@@ -2424,7 +2385,6 @@ const RequirementOrderPage = () => {
             </tr>
           </tbody>
         </table>
-
         <div className="flex justify-between mt-3 px-6 text-sm">
           <div>主 管：</div>
           <div>經 辦：</div>
@@ -2440,9 +2400,7 @@ const RequirementOrderPage = () => {
     if (!data) return null;
     return (
       <div className="hidden print:block w-full bg-white text-black font-sans mx-auto print:pt-4">
-        <style>
-          {`@media print { @page { size: A4 landscape; margin: 15mm; } body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }`}
-        </style>
+        <style>{`@media print { @page { size: A4 landscape; margin: 15mm; } body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }`}</style>
         <CustomerOrderTemplate order={data} />
       </div>
     );
@@ -2543,7 +2501,6 @@ const RequirementOrderPage = () => {
                       className="w-full h-11 px-4 py-2 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 text-slate-800 text-sm font-medium transition-all shadow-sm"
                     />
                   </div>
-
                   <div className="lg:col-span-2">
                     <label className="block text-sm font-medium text-slate-500 mb-2">
                       出貨地址
@@ -2560,7 +2517,6 @@ const RequirementOrderPage = () => {
                       className="w-full h-11 px-4 py-2 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 text-slate-800 text-sm font-medium transition-all shadow-sm"
                     />
                   </div>
-
                   <div className="lg:col-span-1">
                     <label className="block text-sm font-medium text-slate-500 mb-2">
                       物流商選擇 <span className="text-red-500">*</span>
@@ -2592,7 +2548,6 @@ const RequirementOrderPage = () => {
                 </div>
               </div>
 
-              {/* --- 表單 Body --- */}
               <div className="p-8">
                 <div className="flex justify-between items-center mb-6">
                   <h3 className="text-lg font-semibold text-blue-600 tracking-wide flex items-center gap-3">
@@ -2607,7 +2562,6 @@ const RequirementOrderPage = () => {
                     <Plus size={18} strokeWidth={2.5} /> 新增明細
                   </button>
                 </div>
-
                 <div className="space-y-6">
                   {formItems.map((item, index) => {
                     const subtotal = Math.round(
@@ -2635,9 +2589,7 @@ const RequirementOrderPage = () => {
                             <Trash2 size={18} strokeWidth={2.5} />
                           </button>
                         )}
-
                         <div className="space-y-6">
-                          {/* 🌟 上方：產品與規格設定 */}
                           <div className="bg-slate-50/70 p-5 rounded-2xl border border-slate-100 space-y-5">
                             <label className="block text-sm font-semibold text-slate-600 tracking-wide">
                               產品與規格資訊{" "}
@@ -2709,9 +2661,7 @@ const RequirementOrderPage = () => {
                                 />
                               </div>
                             </div>
-
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-5 pt-3 border-t border-slate-200/60">
-                              {/* 銷售大單位 */}
                               <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-4">
                                 <span className="text-sm font-semibold text-slate-600 tracking-wide block">
                                   銷售大單位 (外層)
@@ -2788,8 +2738,6 @@ const RequirementOrderPage = () => {
                                   </div>
                                 </div>
                               </div>
-
-                              {/* 內部小單位 */}
                               <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-4">
                                 <span className="text-sm font-semibold text-slate-600 tracking-wide block">
                                   內部小單位 (內層, 若無可略過)
@@ -2900,8 +2848,6 @@ const RequirementOrderPage = () => {
                               </div>
                             </div>
                           </div>
-
-                          {/* 🌟 下方：左右並排「數量配置」與「金額估算」 */}
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-center">
                               <span className="text-sm font-semibold text-slate-500 tracking-wide mb-4 block">
@@ -2970,7 +2916,6 @@ const RequirementOrderPage = () => {
                     );
                   })}
                 </div>
-
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mt-10">
                   <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-8 flex flex-col h-full">
                     <label className="block text-base font-semibold text-slate-600 tracking-wide mb-4">
@@ -3020,7 +2965,6 @@ const RequirementOrderPage = () => {
                   <Database size={22} className="text-blue-500" /> 3.
                   底層物料庫存分配
                 </h3>
-
                 {formItems.map((fItem, index) => {
                   if (!fItem.product_id || Number(fItem.quantity) <= 0)
                     return null;
@@ -3033,7 +2977,7 @@ const RequirementOrderPage = () => {
                   return (
                     <div
                       key={fItem.id}
-                      className="mb-8 border border-slate-200 rounded-3xl overflow-hidden shadow-sm"
+                      className="mb-8 border border-slate-200 rounded-[2rem] overflow-hidden shadow-sm"
                     >
                       <div className="bg-slate-50/80 px-6 py-5 border-b border-slate-200 flex items-center gap-4">
                         <span className="bg-blue-500 text-white text-sm tracking-wide px-3 py-1 rounded-lg font-semibold shadow-sm whitespace-nowrap">
@@ -3046,7 +2990,6 @@ const RequirementOrderPage = () => {
                           {fItem.quantity} {fItem.unit}
                         </span>
                       </div>
-
                       <div className="flex overflow-x-auto border-b border-slate-200 custom-scrollbar bg-white px-4 pt-4">
                         {rowOrderItems.map((item) => {
                           let hasShortage = false;
@@ -3064,7 +3007,6 @@ const RequirementOrderPage = () => {
                           }
                           const isChild = String(item.id).includes("-");
                           const isActive = activeTabId === item.id;
-
                           return (
                             <div
                               key={item.id}
@@ -3092,7 +3034,6 @@ const RequirementOrderPage = () => {
                           );
                         })}
                       </div>
-
                       {activeTabId && (
                         <div className="p-6 md:p-8 bg-slate-50/30">
                           <MaterialAllocationList
@@ -3110,7 +3051,6 @@ const RequirementOrderPage = () => {
                     </div>
                   );
                 })}
-
                 <div className="mt-10 flex justify-end items-center border-t border-slate-100 pt-8">
                   <button
                     onClick={handleOpenPreview}
@@ -3173,7 +3113,6 @@ const RequirementOrderPage = () => {
                       })
                   );
                 });
-
                 const groupHasAdditiveError = group.plans.some(
                   (d) => mrpAdditiveErrors[d.frontend_temp_id || d.id],
                 );
@@ -3244,7 +3183,6 @@ const RequirementOrderPage = () => {
                         )}
                       </div>
                     </div>
-
                     <div className="overflow-x-auto p-5 md:p-6 bg-white">
                       <div className="rounded-2xl border border-slate-200 overflow-hidden bg-white shadow-sm">
                         <table className="w-full text-left border-collapse whitespace-nowrap">
@@ -3280,7 +3218,6 @@ const RequirementOrderPage = () => {
                                   });
                               const hasAdditiveError =
                                 mrpAdditiveErrors[displayId];
-
                               return (
                                 <React.Fragment key={d.id}>
                                   <tr
@@ -3448,7 +3385,6 @@ const RequirementOrderPage = () => {
           </div>
         )}
 
-        {/* 預覽訂單 Modal */}
         {isPreviewModalOpen && previewData && (
           <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-6 print:static print:block print:bg-transparent print:p-0 print:backdrop-blur-none">
             <div className="bg-slate-50 max-w-[1000px] w-full max-h-[90vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden border border-slate-200">
@@ -3464,7 +3400,6 @@ const RequirementOrderPage = () => {
                   &times;
                 </button>
               </div>
-
               <div className="overflow-y-auto p-6 md:p-8 flex-1 bg-slate-100/50">
                 <div
                   className="bg-white shadow-xl mx-auto ring-1 ring-black/5 rounded-2xl overflow-hidden"
@@ -3473,7 +3408,6 @@ const RequirementOrderPage = () => {
                   <CustomerOrderTemplate order={previewData} />
                 </div>
               </div>
-
               <div className="bg-white border-t border-slate-200 p-6 flex justify-between items-center shrink-0">
                 <button
                   onClick={handlePrintPreview}
@@ -3502,7 +3436,6 @@ const RequirementOrderPage = () => {
             </div>
           </div>
         )}
-
         <CustomDialog
           isOpen={dialog.isOpen}
           type={dialog.type}
@@ -3513,7 +3446,6 @@ const RequirementOrderPage = () => {
           onConfirm={dialog.onConfirm}
         />
       </div>
-
       {printData && <CustomerOrderPrintTemplate data={printData} />}
     </>
   );

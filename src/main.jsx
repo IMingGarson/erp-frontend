@@ -24,6 +24,7 @@ import QuotationEditPage from "./QuotationEditPage.jsx";
 import MaterialProviderPricePage from "./MaterialProviderPricePage.jsx";
 import ImpactAnalysisPage from "./ImpactAnalysisPage.jsx";
 import ProductionOrderQCPage from "./ProductionOrderQCPage.jsx";
+import AccountingPage from "./AccountingPage.jsx";
 
 const router = createBrowserRouter([
   {
@@ -102,6 +103,10 @@ const router = createBrowserRouter([
               {
                 path: "impact-analysis",
                 element: <ImpactAnalysisPage />,
+              },
+              {
+                path: "accounting-report",
+                element: <AccountingPage />,
               },
               {
                 path: "*",

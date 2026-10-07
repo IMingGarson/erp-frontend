@@ -34,6 +34,11 @@ const MENU_GROUPS = [
         label: "物料成本影響列表",
         icon: Truck,
       },
+      {
+        path: "/accounting-report",
+        label: "財務",
+        icon: Truck,
+      },
     ],
   },
   {

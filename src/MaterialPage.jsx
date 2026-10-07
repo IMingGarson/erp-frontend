@@ -302,7 +302,7 @@ const NutritionLabel = ({ nutritionData }) => {
           </tr>
           <tr>
             <td className="text-left py-1.5 pl-4 text-[13px] text-slate-700 font-medium">
-              飽鎖脂肪
+              飽和脂肪
             </td>
             <td className="py-1.5 text-center text-[13px]">
               {formatVal(data.saturated_fat)} 公克
@@ -350,6 +350,7 @@ const convertToGrams = (qty, unit) => {
 };
 
 // 🌟 動態換算引擎 (SEMI / PRODUCT 適用)
+// 🌟 動態換算引擎 (修復雙重計算與 JSON 丟失 Bug)
 const calculateNutritionFromBOMsAndIngredients = (
   boms,
   ingredients,
@@ -365,28 +366,37 @@ const calculateNutritionFromBOMsAndIngredients = (
     sugar: 0,
     sodium: 0,
   };
-
   let baseQtyInGrams = 0;
+  let hasActiveBoms = false;
 
+  // 1. 如果有 BOM，營養素強制 100% 由 BOM 展算
   if (boms && boms.length > 0) {
     boms.forEach((bom) => {
       if (bom.is_active === false) return;
+      hasActiveBoms = true;
 
       if (!baseQtyInGrams) {
         baseQtyInGrams = convertToGrams(bom.base_quantity, parentUnit);
       }
 
-      if (
-        ["RAW", "SEMI"].includes(bom.child_type) &&
-        bom.child_nutrition_fact
-      ) {
+      // 🌟 防呆：確保 JSON 被正確解析，防止字串化導致讀取失敗 (0 貢獻 Bug)
+      let childNut = bom.child_nutrition_fact;
+      if (typeof childNut === "string") {
+        try {
+          childNut = JSON.parse(childNut);
+        } catch (e) {
+          childNut = {};
+        }
+      }
+
+      if (["RAW", "SEMI"].includes(bom.child_type) && childNut) {
         const reqQtyInGrams = convertToGrams(
           bom.quantity_required,
           bom.child_unit,
         );
 
         Object.keys(totalNut).forEach((k) => {
-          const per100gVal = parseFloat(bom.child_nutrition_fact[k]) || 0;
+          const per100gVal = parseFloat(childNut[k]) || 0;
           const totalContributed = (reqQtyInGrams / 100) * per100gVal;
           totalNut[k] += totalContributed;
         });
@@ -394,43 +404,53 @@ const calculateNutritionFromBOMsAndIngredients = (
     });
   }
 
-  if (!baseQtyInGrams) baseQtyInGrams = convertToGrams(1, parentUnit || "KG");
+  const formattedNut = {};
 
+  // 🌟 若已由 BOM 計算，則直接回傳，絕對不可再疊加手動 ingredients！
+  if (hasActiveBoms) {
+    Object.keys(totalNut).forEach((k) => {
+      if (baseQtyInGrams > 0) {
+        const per100gFinal = totalNut[k] / (baseQtyInGrams / 100);
+        // 使用 toFixed(2) 以保留更精確的小數點
+        formattedNut[k] = parseFloat(per100gFinal.toFixed(2)).toString();
+      } else {
+        formattedNut[k] = "0";
+      }
+    });
+    return formattedNut;
+  }
+
+  // 2. 只有在「沒有 BOM」(例如 RAW) 的情況下，才允許由手動成分表貢獻營養素
   if (ingredients && ingredients.length > 0) {
     ingredients.forEach((item) => {
       if (!item.is_active || !item.ingredient_detail) return;
-      const ing = item.ingredient_detail;
-      const percent =
-        ing.is_additive && ing.legal_limit_percent
-          ? parseFloat(ing.legal_limit_percent)
-          : 2;
 
-      const estimatedWeightInGrams = baseQtyInGrams * (percent / 100);
+      let ingNut = item.ingredient_detail.nutrition_fact;
+      if (typeof ingNut === "string") {
+        try {
+          ingNut = JSON.parse(ingNut);
+        } catch (e) {
+          ingNut = {};
+        }
+      }
 
-      if (ing.nutrition_fact) {
+      if (ingNut) {
         Object.keys(totalNut).forEach((k) => {
-          const per100gVal = parseFloat(ing.nutrition_fact[k]) || 0;
-          const totalContributed = (estimatedWeightInGrams / 100) * per100gVal;
-          totalNut[k] += totalContributed;
+          totalNut[k] += parseFloat(ingNut[k]) || 0;
         });
       }
     });
+
+    Object.keys(totalNut).forEach((k) => {
+      formattedNut[k] = parseFloat(totalNut[k].toFixed(2)).toString();
+    });
+    return formattedNut;
   }
 
-  const formattedNut = {};
-  Object.keys(totalNut).forEach((k) => {
-    if (baseQtyInGrams > 0) {
-      const per100gFinal = totalNut[k] / (baseQtyInGrams / 100);
-      formattedNut[k] = parseFloat(per100gFinal.toFixed(1)).toString();
-    } else {
-      formattedNut[k] = "0";
-    }
-  });
-
-  return formattedNut;
+  return emptyNutrition;
 };
 
-// 🌟 修正：RAW 手動加入多項成分時，直接加總 (因為輸入時已經是依據 per 100g 準備好的數據)
+// 🌟 RAW 手動加入多項成分時，直接加總
 const calculateTotalNutrition = (ingredients) => {
   const calc = {
     energy_kcal: 0,
@@ -656,6 +676,7 @@ export default function MaterialPage() {
   const [isIngTfdaSearching, setIsIngTfdaSearching] = useState(false);
   const ingSearchRef = useRef(null);
 
+  // 🌟 加入 source_material_id
   const initialIngForm = {
     name: "",
     source_type: "MANUAL",
@@ -666,6 +687,7 @@ export default function MaterialPage() {
     legal_limit_percent: "",
     additive_license_no: "",
     license_valid_date: "",
+    source_material_id: null,
   };
   const [ingModalOpen, setIngModalOpen] = useState(false);
   const [editingIngId, setEditingIngId] = useState(null);
@@ -818,18 +840,42 @@ export default function MaterialPage() {
     return detected;
   };
 
+  // 讓下拉選單同時打 ingredients 與 materials (lite=true) 兩支 API 並聯集
   useEffect(() => {
     const delayDebounceFn = setTimeout(async () => {
       if (ingSearchTerm.trim()) {
         try {
-          const res = await fetchWithAuth(
-            `/api/ingredients?search=${encodeURIComponent(ingSearchTerm)}`,
-          );
-          if (res.ok) {
-            const json = await res.json();
-            setIngSearchResults(json.results || json.data || json || []);
-            setIsIngDropdownOpen(true);
+          const [ingRes, matRes] = await Promise.all([
+            fetchWithAuth(
+              `/api/ingredients?search=${encodeURIComponent(ingSearchTerm)}`,
+            ),
+            fetchWithAuth(
+              `/api/materials?search=${encodeURIComponent(ingSearchTerm)}&lite=true`,
+            ),
+          ]);
+
+          let combined = [];
+
+          if (ingRes.ok) {
+            const json = await ingRes.json();
+            combined = [...(json.results || json.data || json || [])];
           }
+
+          if (matRes.ok) {
+            const json = await matRes.json();
+            const items = json.results || json.data || json || [];
+            const matItems = items
+              .filter((m) => ["RAW", "SEMI"].includes(m.type))
+              .map((m) => ({
+                ...m,
+                _is_material_copy: true,
+                source_type: "MATERIAL",
+              }));
+            combined = [...combined, ...matItems];
+          }
+
+          setIngSearchResults(combined);
+          setIsIngDropdownOpen(true);
         } catch (e) {
           console.error(e);
         }
@@ -914,6 +960,47 @@ export default function MaterialPage() {
     });
   };
 
+  // 🌟 當從廠內物料複製時，將 Material 資料 Mapping 給 Ingredient Form，並綁定 FK
+  const handleOpenIngModalFromMaterial = (material) => {
+    setEditingIngId(null);
+    const parsedAllergens = material.allergen_info
+      ? material.allergen_info
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean)
+      : [];
+
+    const nut = material.nutrition_fact || {};
+
+    setIngForm({
+      name: material.name,
+      source_type: "MANUAL",
+      tfda_code: "",
+      nutrition_fact: {
+        energy_kcal: nut.energy_kcal || "0",
+        protein: nut.protein || "0",
+        fat: nut.fat || "0",
+        saturated_fat: nut.saturated_fat || "0",
+        trans_fat: nut.trans_fat || "0",
+        carbs: nut.carbs || "0",
+        sugar: nut.sugar || "0",
+        sodium: nut.sodium || "0",
+      },
+      allergen_info: parsedAllergens,
+      is_additive: false,
+      legal_limit_percent: "",
+      additive_license_no: "",
+      license_valid_date: "",
+      source_material_id: material.id, // 🌟 綁定 FK (來源物料ID)
+    });
+
+    setIngTfdaQuery("");
+    setIngTfdaResults([]);
+    setIsIngDropdownOpen(false);
+    setIngSearchTerm("");
+    setIngModalOpen(true);
+  };
+
   const handleOpenIngModal = (ingredientToEdit = null) => {
     if (ingredientToEdit) {
       setEditingIngId(ingredientToEdit.id);
@@ -933,6 +1020,7 @@ export default function MaterialPage() {
             : "",
         additive_license_no: ingredientToEdit.additive_license_no || "",
         license_valid_date: ingredientToEdit.license_valid_date || "",
+        source_material_id: ingredientToEdit.source_material || null, // 確保編輯時保留 FK
       });
       setIngTfdaQuery("");
     } else {
@@ -993,6 +1081,7 @@ export default function MaterialPage() {
     setIsIngTfdaDropdownOpen(false);
   };
 
+  // 🌟 這裡直接將 source_material_id 一併送入後端
   const handleSaveIngredient = async (e) => {
     e.preventDefault();
     if (!ingForm.name) return showAlert("警告", "請填寫成分名稱", "warning");
@@ -1010,6 +1099,7 @@ export default function MaterialPage() {
         ingForm.is_additive && ingForm.license_valid_date
           ? ingForm.license_valid_date
           : null,
+      source_material_id: ingForm.source_material_id,
     };
 
     const method = editingIngId ? "PUT" : "POST";
@@ -1706,7 +1796,6 @@ export default function MaterialPage() {
                           成分展開清單
                         </h4>
 
-                        {/* 🌟 區隔手動加入與配方帶入的成分 */}
                         {(viewingMaterial.display_ingredients &&
                           viewingMaterial.display_ingredients.length > 0) ||
                         (viewingMaterial.display_bom_ingredients &&
@@ -2152,7 +2241,7 @@ export default function MaterialPage() {
                               type="text"
                               value={ingSearchTerm}
                               onChange={(e) => setIngSearchTerm(e.target.value)}
-                              placeholder="搜尋並加入成分 (名稱或 TFDA 代碼)..."
+                              placeholder="搜尋並加入成分 (名稱或廠內物料代碼)..."
                               className="w-full pl-9 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-4 focus:ring-amber-500/10 focus:border-amber-400 text-sm font-bold text-slate-800 transition-all shadow-sm"
                             />
                           </div>
@@ -2162,9 +2251,15 @@ export default function MaterialPage() {
                             {ingSearchResults.length > 0 ? (
                               ingSearchResults.map((res) => (
                                 <div
-                                  key={res.id}
+                                  key={
+                                    res._is_material_copy
+                                      ? `mat-${res.id}`
+                                      : `ing-${res.id}`
+                                  }
                                   onClick={() =>
-                                    handleAddIngredientToMaterial(res)
+                                    res._is_material_copy
+                                      ? handleOpenIngModalFromMaterial(res)
+                                      : handleAddIngredientToMaterial(res)
                                   }
                                   className="p-4 hover:bg-amber-50 cursor-pointer transition-colors group flex justify-between items-center"
                                 >
@@ -2176,24 +2271,38 @@ export default function MaterialPage() {
                                           className="text-blue-500"
                                           title="來自 TFDA 資料庫"
                                         />
+                                      ) : res._is_material_copy ? (
+                                        <Database
+                                          size={14}
+                                          className="text-purple-500"
+                                          title="廠內物料"
+                                        />
                                       ) : (
                                         <PenTool
                                           size={14}
                                           className="text-slate-400"
-                                          title="手提建檔"
+                                          title="手動建檔"
                                         />
                                       )}
                                       {res.name}
-                                      {res.is_additive && (
-                                        <span className="ml-2 text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded">
-                                          添加物
+                                      {res.is_additive &&
+                                        !res._is_material_copy && (
+                                          <span className="ml-2 text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded">
+                                            添加物
+                                          </span>
+                                        )}
+                                      {res._is_material_copy && (
+                                        <span className="ml-2 text-[10px] bg-purple-100 text-purple-700 border border-purple-200 px-1.5 py-0.5 rounded">
+                                          轉換為成分
                                         </span>
                                       )}
                                     </div>
                                     <div className="text-[10px] text-slate-500 font-mono">
-                                      {res.tfda_code
+                                      {res.source_type === "TFDA"
                                         ? `TFDA: ${res.tfda_code}`
-                                        : "手動建檔"}
+                                        : res._is_material_copy
+                                          ? `廠內代號: ${res.code}`
+                                          : "現有成分庫"}
                                     </div>
                                   </div>
                                   <Plus
@@ -2204,7 +2313,7 @@ export default function MaterialPage() {
                               ))
                             ) : (
                               <div className="p-4 text-center text-sm font-bold text-slate-500">
-                                找不到相符的成分
+                                找不到相符的資料
                               </div>
                             )}
 

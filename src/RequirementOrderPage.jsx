@@ -699,7 +699,7 @@ const MaterialAllocationList = ({
               String(b.child?.id) === String(matId),
           );
           const seqLabel = currentBom?.sequence_num
-            ? `(序號: ${currentBom.sequence_num}) `
+            ? `(順序: ${currentBom.sequence_num}) `
             : "";
 
           return (

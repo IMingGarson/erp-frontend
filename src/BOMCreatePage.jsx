@@ -334,7 +334,7 @@ export default function BOMCreatePage() {
         const today = new Date().toISOString().split("T")[0];
 
         const loadedItems = await Promise.all(
-          bomList.map(async (bom) => {
+          bomList.map(async (bom, index) => {
             const childId = bom.child?.id || bom.child;
             const fullMat = allMaterials.find((m) => m.id === childId);
             const childCode = bom.child?.code || "";
@@ -403,7 +403,7 @@ export default function BOMCreatePage() {
               ingredients: fullMat?.ingredients || [],
               contained_additives: containedAdditives,
               nutrition_fact: fullMat ? fullMat.nutrition_fact : {},
-              sequence_num: bom.sequence_num || "", // 🌟 載入序號
+              sequence_num: bom.sequence_num || String(index + 1), // 🌟 載入序號，無則帶入順序
             };
           }),
         );
@@ -536,7 +536,7 @@ export default function BOMCreatePage() {
           set_cost: "",
           selected_price_id: null,
           selected_quote_info: null,
-          sequence_num: "",
+          sequence_num: String(prev.items.length + 1), // 🌟 預設給予自動遞增順序
         },
       ],
     }));
@@ -562,6 +562,7 @@ export default function BOMCreatePage() {
     if (sortConfig.key === sortKey && sortConfig.direction === "desc")
       newDirection = "asc";
     setSortConfig({ key: sortKey, direction: newDirection });
+
     setFormData((prev) => {
       const sortedItems = [...prev.items].sort((a, b) => {
         let valA = 0,
@@ -591,7 +592,14 @@ export default function BOMCreatePage() {
         if (valA > valB) return newDirection === "asc" ? 1 : -1;
         return 0;
       });
-      return { ...prev, items: sortedItems };
+
+      // 🌟 用量排序/小計排序後，一併重新編排序號 1, 2, 3...
+      const resequencedItems = sortedItems.map((item, idx) => ({
+        ...item,
+        sequence_num: String(idx + 1),
+      }));
+
+      return { ...prev, items: resequencedItems };
     });
   };
 

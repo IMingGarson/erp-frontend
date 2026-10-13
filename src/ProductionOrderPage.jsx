@@ -417,7 +417,9 @@ const ProductLabelTemplate = ({
   const allergenStr =
     activeAllergens.length > 0 ? `本品含有${activeAllergens.join("、")}` : "";
 
-  const mfgDateDisplay = mfgDate ? mfgDate.replace(/-/g, ".") : " 年  月  日";
+  const dateArr = order.created_at.split("T")[0].split("-");
+  const mfgDateDisplay = `${dateArr[0]}.${dateArr[1]}.${dateArr[2]}`;
+
   const expDateDisplay = mfgDate
     ? calculateExpDateForLabel(mfgDate, p.storage_life)
     : "詳見包裝標示";
@@ -2317,31 +2319,14 @@ export default function ProductionOrderPage() {
               <div className="flex flex-col lg:flex-row flex-1 overflow-hidden">
                 {/* 左側：設定控制面板 */}
                 <div className="w-full lg:w-[350px] bg-white border-r border-slate-200/60 p-6 flex flex-col gap-6 overflow-y-auto custom-scrollbar">
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-500 mb-1.5 uppercase">
-                      製造日期
-                    </label>
-                    <input
-                      type="date"
-                      value={labelModal.mfgDate}
-                      onChange={(e) =>
-                        setLabelModal({
-                          ...labelModal,
-                          mfgDate: e.target.value,
-                        })
-                      }
-                      className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-amber-500/20 focus:border-amber-400 outline-none transition-all shadow-sm"
-                    />
-
-                    <div className="text-[12px] text-slate-600 leading-relaxed font-bold mt-2 flex items-center gap-1.5">
-                      <Calendar size={14} className="text-amber-600" />
-                      此物料保存期限：
-                      <span className="text-amber-600">
-                        {labelModal.order?.product_profile?.storage_life ||
-                          labelModal.fullMatData?.storage_life ||
-                          "未設定"}
-                      </span>
-                    </div>
+                  <div className="text-[12px] text-slate-600 leading-relaxed font-bold mt-2 flex items-center gap-1.5">
+                    <Calendar size={14} className="text-amber-600" />
+                    此物料保存期限：
+                    <span className="text-amber-600">
+                      {labelModal.order?.product_profile?.storage_life ||
+                        labelModal.fullMatData?.storage_life ||
+                        "未設定"}
+                    </span>
                   </div>
 
                   <div className="bg-amber-50/50 p-4 rounded-2xl border border-amber-100 flex flex-col gap-4">

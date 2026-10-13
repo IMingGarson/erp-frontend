@@ -1283,7 +1283,7 @@ export default function InventoryPage() {
                           </span>
                           <span className="text-sm">{group.unit}</span>
                         </div>
-                        <button
+                        {/* <button
                           onClick={(e) => {
                             e.stopPropagation();
                             preparePrintAllCOA(group);
@@ -1291,7 +1291,7 @@ export default function InventoryPage() {
                           className="px-4 py-2 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-xl hover:bg-indigo-600 hover:text-white transition-colors text-xs font-bold shadow-sm inline-flex items-center gap-1.5"
                         >
                           <Printer size={14} /> 列印此物料總表
-                        </button>
+                        </button> */}
                       </div>
                     </div>
 
@@ -1347,7 +1347,7 @@ export default function InventoryPage() {
                                         {formatDisplayNum(batch.remaining_qty)}
                                       </span>
                                     </div>
-                                    <div
+                                    {/* <div
                                       className="flex gap-2"
                                       onClick={(e) => e.stopPropagation()}
                                     >
@@ -1357,7 +1357,7 @@ export default function InventoryPage() {
                                       >
                                         <ClipboardCheck size={14} /> 登打檢驗
                                       </button>
-                                    </div>
+                                    </div> */}
                                   </div>
                                 </div>
 

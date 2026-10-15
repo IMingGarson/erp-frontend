@@ -62,6 +62,8 @@ const MENU_GROUPS = [
       { path: "/requirement", label: "訂購單管理", icon: ClipboardList },
       { path: "/delivery-notes", label: "銷貨單管理", icon: PackageCheck },
       { path: "/production", label: "生產單管理", icon: Factory },
+      { path: "/package-order", label: "包裝單管理", icon: PackageCheck },
+
       {
         path: "/purchase-requisitions",
         label: "請購單管理",

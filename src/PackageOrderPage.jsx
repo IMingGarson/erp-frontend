@@ -649,7 +649,7 @@ export default function PackageOrderPage() {
     <div className="p-6 md:p-10 max-w-[1400px] mx-auto bg-slate-50 min-h-screen font-sans text-slate-800">
       <div className="flex justify-between items-center mb-6 gap-4">
         <h2 className="text-2xl md:text-3xl font-bold text-slate-900 tracking-tight">
-          包裝單管理 (Package Orders)
+          包裝單管理
         </h2>
       </div>
 

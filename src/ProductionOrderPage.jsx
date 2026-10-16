@@ -1522,7 +1522,6 @@ const ProductionOrderPrintTemplate = ({ data, type, sortBySequence }) => {
         {`
           @media print {
             @page { 
-              /* 🌟 核心修正：如果是印標籤，釋放 A4 限制，讓印表機自適應貼紙大小 */
               ${isLabel ? "margin: 3mm; size: auto;" : "size: A4 portrait; margin: 0;"}
             }
             body { 
@@ -1533,7 +1532,6 @@ const ProductionOrderPrintTemplate = ({ data, type, sortBySequence }) => {
             }
             .page-break { page-break-after: always; }
             .print-container {
-               /* 🌟 標籤專屬設定：強制垂直水平置中 */
                ${isLabel ? "display: flex; justify-content: center; align-items: center; width: 100%; padding: 5mm 0;" : "padding: 10mm; width: 100%;"}
             }
           }

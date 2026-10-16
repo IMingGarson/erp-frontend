@@ -4,8 +4,16 @@ import { Search, Printer, Trash2, FileText, Plus, Edit } from "lucide-react";
 import CustomDialog from "./components/customDialog";
 import { fetchWithAuth } from "./utils/fetchWithAuth";
 
+// ==========================================
+// 🌟 輔助函數
+// ==========================================
+const formatNum = (num, maxDecimals = 4) => {
+  if (num === null || num === undefined || isNaN(num) || num === "") return "0";
+  return parseFloat(Number(num).toFixed(maxDecimals)).toString();
+};
+
 // --- 擬真列印預覽元件 ---
-const DocumentPreview = ({ quotation, vendors, allMaterials, boms }) => {
+const DocumentPreview = ({ quotation, vendors, bomMap }) => {
   if (!quotation) return null;
 
   const customer = vendors.find(
@@ -15,40 +23,12 @@ const DocumentPreview = ({ quotation, vendors, allMaterials, boms }) => {
     ? quotation.issue_date.replace(/-/g, "/")
     : "";
 
-  // 取得成品的 BOM 原料清單
-  const getBomItems = (productId) => {
-    if (!productId) return [];
-    return boms
-      .filter((b) => String(b.parent?.id) === String(productId))
-      .map((bom) => {
-        const childCode = bom.child?.code || "";
-        const childName = bom.child?.name || "";
-        const childUnit = bom.child?.unit || "KG";
-
-        const fullMat = allMaterials.find(
-          (m) => String(m.id) === String(bom.child?.id),
-        );
-
-        const baseQty = parseFloat(bom.base_quantity || 1);
-        const reqQty = parseFloat(bom.quantity_required || 0);
-        const usageQty = reqQty / baseQty;
-
-        return {
-          ...bom,
-          childCode,
-          childName,
-          childUnit,
-          cost: Math.round(parseFloat(fullMat?.estimated_cost || 0)),
-          qty: usageQty,
-        };
-      });
-  };
-
   return (
     <div
       className="flex flex-col gap-8 bg-slate-200 p-8 rounded-lg overflow-y-auto max-h-[75vh] custom-scrollbar print:bg-white print:p-0 print:overflow-visible print:block print:max-h-none"
       style={{ fontFamily: "'MingLiU', 'PMingLiU', serif" }}
     >
+      {/* 產品報價單首頁 */}
       <div className="bg-white p-10 shadow-lg mx-auto w-full max-w-[210mm] min-h-[290mm] text-black relative print:shadow-none print:w-full print:max-w-none print:m-0 print:p-[10mm] print:h-[290mm] flex flex-col">
         {/* Header */}
         <div className="flex justify-between items-start mb-6 shrink-0">
@@ -150,10 +130,9 @@ const DocumentPreview = ({ quotation, vendors, allMaterials, boms }) => {
           </tbody>
         </table>
 
-        {/* 🌟 拿掉 min-h 限制，單純靠 flex-1 把內容往下推 */}
         <div className="flex-1"></div>
 
-        {/* Footer Notes (🌟 縮小 pt 與 margin) */}
+        {/* Footer Notes */}
         <div className="mt-auto text-xs leading-relaxed space-y-4 pt-6 shrink-0">
           <div>
             <span className="text-sm">產品備註：</span>
@@ -203,7 +182,7 @@ const DocumentPreview = ({ quotation, vendors, allMaterials, boms }) => {
           </div>
         </div>
 
-        {/* Signatures (🌟 縮小 margin-top) */}
+        {/* Signatures */}
         <div className="flex justify-between mt-8 text-sm shrink-0">
           <div className="w-1/4">審 核：</div>
           <div className="w-1/4">經 辦：</div>
@@ -216,13 +195,36 @@ const DocumentPreview = ({ quotation, vendors, allMaterials, boms }) => {
       {/* 內部視角：成本估算單 - 每個品項一頁          */}
       {/* ========================================== */}
       {(quotation.items || []).map((item, idx) => {
-        const productId = item.product_detail?.id;
         const mat = item.product_detail || {};
-        const bomItems = getBomItems(productId);
+        const productId = String(mat.id);
 
-        const totalMaterialCost = Math.round(
-          bomItems.reduce((sum, b) => sum + b.cost * b.qty, 0),
+        let rawItems = [];
+        let semiQtyPerUnit = 1;
+
+        if (mat.type === "PRODUCT" && bomMap.product_to_semi[productId]) {
+          const semiId = bomMap.product_to_semi[productId];
+          rawItems = bomMap.semi_to_boms[semiId] || [];
+          semiQtyPerUnit = 1;
+        } else if (mat.type === "SEMI") {
+          rawItems = bomMap.semi_to_boms[productId] || [];
+        }
+
+        // 🌟 核心修正：讓每一筆明細先四捨五入成整數，徹底消滅浮點數尾數與加總落差
+        const finalBomItems = rawItems.map((b) => {
+          const roundedRowCost = Math.round(b.total_cost * semiQtyPerUnit);
+          return {
+            ...b,
+            qty: b.qty * semiQtyPerUnit,
+            row_total_cost: roundedRowCost,
+          };
+        });
+
+        // 整數相加，不再使用 Math.round()
+        const totalMaterialCost = finalBomItems.reduce(
+          (sum, b) => sum + b.row_total_cost,
+          0,
         );
+
         const manualCost = Math.round(
           Object.values(item.costs_breakdown || {})
             .filter((c) => c.name !== "原料成本")
@@ -231,7 +233,6 @@ const DocumentPreview = ({ quotation, vendors, allMaterials, boms }) => {
         const totalEstimatedCost = totalMaterialCost + manualCost;
 
         return (
-          /* 🌟 加入 print:h-[296mm] 與 print:p-[10mm] */
           <div
             key={`cost-${idx}`}
             className="page-break bg-white p-10 shadow-lg mx-auto w-full max-w-[210mm] min-h-[297mm] text-black relative print:shadow-none print:w-full print:max-w-none print:m-0 print:p-[10mm] print:h-[296mm] flex flex-col"
@@ -332,14 +333,14 @@ const DocumentPreview = ({ quotation, vendors, allMaterials, boms }) => {
                 </tr>
               </thead>
               <tbody>
-                {bomItems.length === 0 ? (
+                {finalBomItems.length === 0 ? (
                   <tr>
                     <td colSpan="9" className="text-center py-4 text-gray-400">
                       尚無配方資料
                     </td>
                   </tr>
                 ) : (
-                  bomItems.map((b, bIdx) => (
+                  finalBomItems.map((b, bIdx) => (
                     <tr
                       key={bIdx}
                       className="border-b border-dashed border-gray-200"
@@ -349,13 +350,15 @@ const DocumentPreview = ({ quotation, vendors, allMaterials, boms }) => {
                       <td className="py-1.5 px-1">{b.childName}</td>
                       <td className="py-1.5 px-1 text-center">{b.childUnit}</td>
                       <td className="py-1.5 px-1 text-right">
-                        {b.qty.toFixed(5)}
+                        {formatNum(b.qty, 2)}
                       </td>
-                      <td className="py-1.5 px-1 text-right">{b.cost}</td>
+                      <td className="py-1.5 px-1 text-right">
+                        {Math.round(b.cost)}
+                      </td>
                       <td className="py-1.5 px-1 text-center"></td>
                       <td className="py-1.5 px-1"></td>
-                      <td className="py-1.5 px-1 text-right">
-                        {Math.round(b.cost * b.qty)}
+                      <td className="py-1.5 px-1 text-right font-bold text-slate-800">
+                        {b.row_total_cost}
                       </td>
                     </tr>
                   ))
@@ -363,14 +366,13 @@ const DocumentPreview = ({ quotation, vendors, allMaterials, boms }) => {
               </tbody>
             </table>
 
-            {/* 🌟 拿掉 min-h 限制 */}
             <div className="flex-1"></div>
 
             <div className="mt-4 text-xs shrink-0">
               <p>單據備註：</p>
             </div>
 
-            {/* Signatures (🌟 縮小 margin-top) */}
+            {/* Signatures */}
             <div className="flex justify-between mt-auto pt-8 text-sm shrink-0">
               <div>審 核：</div>
               <div>經 辦：</div>
@@ -386,7 +388,7 @@ const DocumentPreview = ({ quotation, vendors, allMaterials, boms }) => {
 };
 
 // --- 列印專用隱藏容器 ---
-const QuotationPrintTemplate = ({ data, vendors, allMaterials, boms }) => {
+const QuotationPrintTemplate = ({ data, vendors, bomMap }) => {
   if (!data) return null;
   return (
     <div className="hidden print:block w-full bg-white text-black font-sans mx-auto print:pt-4">
@@ -399,12 +401,7 @@ const QuotationPrintTemplate = ({ data, vendors, allMaterials, boms }) => {
           }
         `}
       </style>
-      <DocumentPreview
-        quotation={data}
-        vendors={vendors}
-        allMaterials={allMaterials}
-        boms={boms}
-      />
+      <DocumentPreview quotation={data} vendors={vendors} bomMap={bomMap} />
     </div>
   );
 };
@@ -415,8 +412,10 @@ const QuotationListPage = () => {
 
   const [quotations, setQuotations] = useState([]);
   const [vendors, setVendors] = useState([]);
-  const [allMaterials, setAllMaterials] = useState([]);
-  const [boms, setBoms] = useState([]);
+  const [bomMap, setBomMap] = useState({
+    product_to_semi: {},
+    semi_to_boms: {},
+  });
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -450,22 +449,20 @@ const QuotationListPage = () => {
     const fetchAllData = async () => {
       setLoading(true);
       try {
-        const [quotRes, vendorRes, matRes, bomRes] = await Promise.all([
+        const [quotRes, vendorRes, bomRes] = await Promise.all([
           fetchWithAuth("/api/quotations"),
           fetchWithAuth("/api/vendors"),
-          fetchWithAuth("/api/materials"),
-          fetchWithAuth("/api/boms"),
+          fetchWithAuth("/api/boms/mapping"),
         ]);
 
         const quotJson = await quotRes.json();
         const vendorJson = await vendorRes.json();
-        const matJson = await matRes.json();
-        const bomJson = await bomRes.json();
+        const bomData = await bomRes.json();
+        const bomMapData = bomData.data || bomData;
 
         setQuotations(quotJson.data || quotJson || []);
         setVendors(vendorJson.data || vendorJson || []);
-        setAllMaterials(matJson.data || matJson || []);
-        setBoms(bomJson.data || bomJson || []);
+        setBomMap(bomMapData || { product_to_semi: {}, semi_to_boms: {} });
       } catch (err) {
         setError(err.message);
       } finally {
@@ -516,7 +513,6 @@ const QuotationListPage = () => {
             "success",
           );
 
-          // 重新抓取資料
           const quotRes = await fetchWithAuth("/api/quotations");
           const quotJson = await quotRes.json();
           setQuotations(quotJson.data || quotJson || []);
@@ -705,8 +701,7 @@ const QuotationListPage = () => {
                                 <DocumentPreview
                                   quotation={quot}
                                   vendors={vendors}
-                                  allMaterials={allMaterials}
-                                  boms={boms}
+                                  bomMap={bomMap}
                                 />
                               </div>
                             </td>
@@ -739,8 +734,7 @@ const QuotationListPage = () => {
         <QuotationPrintTemplate
           data={printData}
           vendors={vendors}
-          allMaterials={allMaterials}
-          boms={boms}
+          bomMap={bomMap}
         />
       )}
     </>

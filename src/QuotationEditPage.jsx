@@ -11,27 +11,26 @@ import {
   Building2,
   Calculator,
   Printer,
-  XCircle,
   Lock,
   Package,
 } from "lucide-react";
 import CustomDialog from "./components/customDialog";
 import { fetchWithAuth } from "./utils/fetchWithAuth";
 
-// 格式化數字，移除不必要的結尾 0
+// ==========================================
+// 🌟 輔助函數
+// ==========================================
 const formatNum = (num, maxDecimals = 4) => {
   if (num === null || num === undefined || isNaN(num) || num === "") return "0";
   return parseFloat(Number(num).toFixed(maxDecimals)).toString();
 };
 
-// 解決 JS IEEE 754 浮點數精準度問題的運算器
 const precise = {
   add: (a, b) => parseFloat((Number(a) + Number(b)).toPrecision(12)),
   mul: (a, b) => parseFloat((Number(a) * Number(b)).toPrecision(12)),
   div: (a, b) => parseFloat((Number(a) / Number(b)).toPrecision(12)),
 };
 
-// 格式化金額，帶千分位且移除結尾 0
 const formatCurrency = (num) => {
   if (num === null || num === undefined || isNaN(num)) return "0";
   return Number(num).toLocaleString("en-US", {
@@ -42,7 +41,7 @@ const formatCurrency = (num) => {
 
 const COST_OPTIONS = [
   { key: "material_cost", name: "原料成本" },
-  { key: "packaging_cost", name: "包材成本" }, // 🌟 保證包材成本選項
+  { key: "packaging_cost", name: "包材成本" },
   { key: "manual_cost", name: "人工成本" },
 ];
 
@@ -73,26 +72,29 @@ const AddCostDropdown = ({ existingKeys, onSelect }) => {
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className="text-[11px] bg-slate-100 hover:bg-slate-200 text-slate-700 px-2.5 py-1.5 rounded font-bold transition-colors flex items-center gap-1 border border-slate-200 shadow-sm"
+        className="text-[11px] bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg font-bold transition-colors flex items-center gap-1 border border-slate-200 shadow-sm"
       >
-        <Plus size={13} /> 新增項目
+        <Plus size={13} /> 新增成本項目
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 top-full mt-1 w-32 bg-white border border-slate-200 rounded-md shadow-lg z-10 flex flex-col py-1 animate-in fade-in zoom-in-95 duration-100">
+        <div className="absolute right-0 top-full mt-1 w-32 bg-white border border-slate-200 rounded-xl shadow-lg z-10 flex flex-col py-1.5 animate-in fade-in zoom-in-95 duration-100">
           {COST_OPTIONS.map((opt) => {
             const isDisabled = existingKeys.includes(opt.key);
+            const isManualOnly = opt.key !== "manual_cost";
+            const disabledState = isDisabled || isManualOnly;
+
             return (
               <button
                 key={opt.key}
                 type="button"
-                disabled={isDisabled}
+                disabled={disabledState}
                 onClick={() => {
                   onSelect(opt.key);
                   setIsOpen(false);
                 }}
-                className={`text-left px-3 py-2 text-[13px] font-bold transition-colors ${
-                  isDisabled
+                className={`text-left px-4 py-2 text-[13px] font-bold transition-colors ${
+                  disabledState
                     ? "text-slate-300 cursor-not-allowed"
                     : "text-slate-700 hover:bg-blue-50 hover:text-blue-700"
                 }`}
@@ -107,13 +109,10 @@ const AddCostDropdown = ({ existingKeys, onSelect }) => {
   );
 };
 
-const DocumentPreview = ({
-  formData,
-  vendors,
-  materials,
-  allMaterials,
-  boms,
-}) => {
+// ==========================================
+// 🌟 列印預覽元件
+// ==========================================
+const DocumentPreview = ({ formData, vendors, allMaterials, boms }) => {
   const customer = vendors.find(
     (v) => String(v.id) === String(formData.customer),
   );
@@ -154,6 +153,172 @@ const DocumentPreview = ({
       className="flex flex-col gap-8 bg-slate-200 p-8 rounded-lg overflow-y-auto max-h-[75vh] custom-scrollbar print:bg-white print:p-0 print:overflow-visible print:block print:max-h-none"
       style={{ fontFamily: "'MingLiU', 'PMingLiU', serif" }}
     >
+      {/* 產品報價單首頁 */}
+      <div className="bg-white p-10 shadow-lg mx-auto w-full max-w-[210mm] min-h-[297mm] text-black relative print:shadow-none print:w-full print:max-w-none print:m-0 print:p-[15mm] flex flex-col page-break">
+        <div className="flex justify-between items-start mb-6 shrink-0">
+          <div className="w-1/3 text-[12px] leading-relaxed">
+            <h2 className="text-[15px] font-bold mb-1">基香食品有限公司</h2>
+            <p>桃園市觀音區崙坪里1鄰1-10號</p>
+            <p>電話: 03-4988228</p>
+          </div>
+          <div className="w-1/3 text-center">
+            <h1 className="text-[26px] font-bold tracking-[0.5em] mb-1 pb-1 inline-block border-b-[3px] border-double border-black">
+              產品報價單
+            </h1>
+            <p className="text-[12px]">傳真: 03-4988159</p>
+          </div>
+          <div className="w-1/3 text-right text-[12px]">
+            <p>第 1 頁,共 1 頁</p>
+          </div>
+        </div>
+
+        <div className="flex justify-between text-[12px] mb-4 shrink-0">
+          <div className="space-y-1">
+            <p>
+              <span className="inline-block w-16">客戶名稱:</span>{" "}
+              {customer?.name || formData.customer_name || ""}
+            </p>
+            <p>
+              <span className="inline-block w-16">客戶統編:</span>{" "}
+              {customer?.tax_id || ""}
+            </p>
+            <p>
+              <span className="inline-block w-16">客戶電話:</span>{" "}
+              {customer?.phone || ""}
+            </p>
+            <p>
+              <span className="inline-block w-16">送貨地址:</span>{" "}
+              {customer?.delivery_address || customer?.address || ""}
+            </p>
+          </div>
+          <div className="space-y-1">
+            <p>
+              <span className="inline-block w-16">客戶編號:</span>{" "}
+              {customer?.code || ""}
+            </p>
+            <p>
+              <span className="inline-block w-16">聯 絡 人:</span>{" "}
+              {customer?.contact_person || ""}
+            </p>
+            <p>
+              <span className="inline-block w-16">客戶傳真:</span>{" "}
+              {customer?.fax || ""}
+            </p>
+          </div>
+          <div className="space-y-1 text-right">
+            <p>
+              <span className="inline-block w-16 text-left">單據日期:</span>{" "}
+              {today}
+            </p>
+            <p>
+              <span className="inline-block w-16 text-left">單據編號:</span>{" "}
+              {formData.quotation_number || "系統核發"}
+            </p>
+          </div>
+        </div>
+
+        <table className="w-full text-[12px] border-collapse shrink-0">
+          <thead>
+            <tr className="border-t border-b border-black text-left">
+              <th className="py-2 px-1 w-8">序</th>
+              <th className="py-2 px-1 w-20">貨品編號</th>
+              <th className="py-2 px-1">品名</th>
+              <th className="py-2 px-1 w-14 text-center">數量</th>
+              <th className="py-2 px-1 w-14 text-center">單位</th>
+              <th className="py-2 px-1 w-24 text-right">單價(元/單位)</th>
+              <th className="py-2 px-1 w-28 text-center">規格</th>
+              <th className="py-2 px-1 w-20">附註(未稅)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {formData.items.map((item, idx) => {
+              const mat =
+                allMaterials.find(
+                  (m) => String(m.id) === String(item.product),
+                ) || item.product_detail;
+              return (
+                <tr
+                  key={idx}
+                  className="border-b border-dashed border-gray-300"
+                >
+                  <td className="py-2 px-1 text-center">{idx + 1}</td>
+                  <td className="py-2 px-1">{mat?.code}</td>
+                  <td className="py-2 px-1">{mat?.name}</td>
+                  <td className="py-2 px-1 text-center">
+                    {item.sales_unit_quantity || 1}
+                  </td>
+                  <td className="py-2 px-1 text-center">
+                    {item.sales_unit || ""}
+                  </td>
+                  <td className="py-2 px-1 text-right">
+                    {Math.round(parseFloat(item.final_price_per_kg || 0))}
+                  </td>
+                  <td className="py-2 px-1 text-center">{item.spec || ""}</td>
+                  <td className="py-2 px-1"></td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+
+        <div className="flex-1 min-h-[100px]"></div>
+
+        <div className="mt-auto text-[12px] leading-relaxed space-y-4 pt-10 shrink-0">
+          <div>
+            <span className="text-[13px] font-bold">產品備註：</span>
+            <div className="pl-6 space-y-1 mt-1 text-gray-800">
+              <p>
+                1.
+                接收報價單請於三日內簽名回傳，逾期未簽名回傳則視為同意此報價。
+              </p>
+              <p>2. 原物料漲幅超過5% 或作業上有其他異動將重新報價。</p>
+              <p>3. 訂貨後需一次出貨完畢並結清款項。</p>
+              <p>
+                4.
+                調味粉產品：最低出貨量單品項以『箱』為單位，無庫存產品，單一品項出貨量未滿
+                100kg 除負擔運費外須加換線處理費500元。
+              </p>
+              <p>5. 果醬、調味醬產品：最低訂貨量為『 100 kg』。</p>
+              <p className="mt-2 font-bold tracking-widest text-[13px]">
+                ** 此報價金額未包含關稅 **
+              </p>
+            </div>
+          </div>
+          <div>
+            <span className="text-[13px] font-bold">專用原料清單：</span>
+          </div>
+          <div>
+            <span className="text-[13px] font-bold">通用備註：</span>
+            <div className="pl-6 space-y-1 mt-1 text-gray-800">
+              <p>1. 如需內部檢驗報告，請於訂購時提出需求。</p>
+              <p>
+                2. 累計採購量未達經濟批量之產品，其外部檢驗費用將由客戶負擔。
+              </p>
+              <p>
+                3.
+                本報價單30天內有效，非常態庫存產品出貨日期由訂購日起計15～20工作天，請提早訂購。
+              </p>
+              <p>
+                4.
+                上述產品專用之原料，若結束生產後尚有剩餘原料，請以當時採購之原價購回。
+              </p>
+              <p>
+                5.
+                代客研發產品若有採購計畫異動請提早告知，以利進行製程庫存調整。
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex justify-between mt-16 text-[13px] shrink-0">
+          <div className="w-1/4">審 核：</div>
+          <div className="w-1/4">經 辦：</div>
+          <div className="w-1/4">會 簽：</div>
+          <div className="w-1/4">客戶簽回：</div>
+        </div>
+      </div>
+
+      {/* 各品項估算單明細 */}
       {formData.items.map((item, idx) => {
         const mat =
           allMaterials.find((m) => String(m.id) === String(item.product)) ||
@@ -166,10 +331,9 @@ const DocumentPreview = ({
           parseFloat(item.costs_breakdown?.material_cost?.value || 0),
         );
 
-        // 包含包裝與人工等其他成本
         const manualCostPerUnit = Math.round(
           Object.entries(item.costs_breakdown || {})
-            .filter(([k, c]) => k !== "material_cost")
+            .filter(([k]) => k !== "material_cost")
             .reduce(
               (sum, [k, c]) => precise.add(sum, parseFloat(c.value) || 0),
               0,
@@ -388,14 +552,14 @@ const FilterableDropdown = ({
 
       if (spaceBelow < dropdownHeight && rect.top > dropdownHeight) {
         setDropdownStyle({
-          bottom: `${window.innerHeight - rect.top + 6}px`,
+          bottom: `${window.innerHeight - rect.top + 4}px`,
           top: "auto",
           left: `${rect.left}px`,
           width: `${rect.width}px`,
         });
       } else {
         setDropdownStyle({
-          top: `${rect.bottom + 6}px`,
+          top: `${rect.bottom + 4}px`,
           bottom: "auto",
           left: `${rect.left}px`,
           width: `${rect.width}px`,
@@ -426,7 +590,7 @@ const FilterableDropdown = ({
       <div
         ref={selectRef}
         onClick={handleToggle}
-        className={`w-full h-[42px] px-3.5 py-2 border rounded-xl text-[13px] flex justify-between items-center transition-all shadow-sm cursor-pointer ${
+        className={`w-full h-[42px] px-3.5 py-2 border rounded-xl text-[13px] flex justify-between items-center transition-colors shadow-sm cursor-pointer ${
           disabled
             ? "bg-slate-100 text-slate-400 cursor-not-allowed border-slate-200"
             : isOpen
@@ -506,14 +670,18 @@ const FilterableDropdown = ({
   );
 };
 
+// ==========================================
+// 🌟 主頁面
+// ==========================================
 const QuotationEditPage = () => {
   const navigate = useNavigate();
   const { id } = useParams();
 
   const [vendors, setVendors] = useState([]);
   const [allMaterials, setAllMaterials] = useState([]);
-  const [materials, setMaterials] = useState([]);
   const [boms, setBoms] = useState([]);
+  const [packageOrders, setPackageOrders] = useState([]);
+
   const [loading, setLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
@@ -540,26 +708,21 @@ const QuotationEditPage = () => {
     if (cb) cb();
   };
 
-  const packMaterials = useMemo(() => {
-    return [
-      { id: "", name: "-- 無需對應包材 --", code: "", pack_capacity: null },
-      ...allMaterials.filter((m) => ["PACK"].includes(m.type)),
-    ];
-  }, [allMaterials]);
-
   useEffect(() => {
     const fetchInitialData = async () => {
       try {
-        const [vendorRes, matRes, bomRes, quotRes] = await Promise.all([
+        const [vendorRes, matRes, bomRes, poRes, quotRes] = await Promise.all([
           fetchWithAuth("/api/vendors?is_active=true"),
-          fetchWithAuth("/api/materials"),
+          fetchWithAuth("/api/materials?lite=true&type__in=SEMI,PRODUCT,PACK"),
           fetchWithAuth("/api/boms"),
+          fetchWithAuth("/api/package_orders"),
           fetchWithAuth(`/api/quotations/${id}`),
         ]);
 
         const vendorJson = await vendorRes.json();
         const matJson = await matRes.json();
         const bomJson = await bomRes.json();
+        const poJson = await poRes.json();
         const quotJson = await quotRes.json();
 
         setVendors(vendorJson.data || vendorJson || []);
@@ -567,12 +730,9 @@ const QuotationEditPage = () => {
 
         const allMats = matJson.data || matJson || [];
         setAllMaterials(allMats);
-        setMaterials(
-          allMats.filter(
-            (m) =>
-              m.type === "PRODUCT" && ["IN_DEV", "IN_PROD"].includes(m.phase),
-          ),
-        );
+
+        const pos = poJson.data || poJson || [];
+        setPackageOrders(pos);
 
         const currentQuot = quotJson.data || quotJson;
 
@@ -584,56 +744,35 @@ const QuotationEditPage = () => {
           customer_name: currentQuot.customer_name,
           status: currentQuot.status,
           items: currentQuot.items.map((item) => {
+            console.log("COST", item.product_detail.estimated_cost);
             let breakdown = item.costs_breakdown || {};
 
-            if (
-              !breakdown.material_cost ||
-              !breakdown.material_cost.value ||
-              breakdown.material_cost.value === "0" ||
-              breakdown.material_cost.value === 0
-            ) {
-              breakdown = {
-                ...breakdown,
-                material_cost: {
-                  name: "原料成本",
-                  value: String(
-                    Math.round(
-                      parseFloat(item.product_detail?.estimated_cost || 0),
-                    ),
-                  ),
-                },
-              };
-            } else {
-              breakdown.material_cost.name = "原料成本";
-            }
+            breakdown.material_cost = {
+              name: "原料成本",
+              value: String(Math.round(item.product_detail.estimated_cost)),
+            };
+            if (!breakdown.packaging_cost)
+              breakdown.packaging_cost = { name: "包材成本", value: "0" };
 
-            if (!breakdown.packaging_cost) {
-              breakdown.packaging_cost = {
-                name: "包材成本",
-                value: "0",
-              };
-            } else {
-              breakdown.packaging_cost.name = "包材成本";
-            }
-
-            const fullMat = allMats.find(
-              (m) => String(m.id) === String(item.product_detail?.id),
+            // 🌟 將 product 對應到正確的 package order 或 semi
+            const matchedPo = pos.find(
+              (p) => String(p.product) === String(item.product_detail?.id),
             );
-            const matchedProfile =
-              fullMat?.product_profiles?.find(
-                (p) => p.spec === item.spec && p.sales_unit === item.sales_unit,
-              ) || fullMat?.product_profiles?.[0];
+            const target_id = matchedPo
+              ? `po_${matchedPo.id}`
+              : `semi_${item.product_detail?.id}`;
 
             return {
               ...item,
+              target_id, // 🌟 UI 識別欄位
               product: item.product_detail?.id || "",
               spec: item.spec || "",
               sales_unit: item.sales_unit || "箱",
               sales_unit_quantity: String(item.sales_unit_quantity || 1),
               sales_pack_unit: item.sales_pack_unit || "無",
               sales_pack_quantity: String(item.sales_pack_quantity || 0),
-              outer_pack: matchedProfile?.outer_pack || item.outer_pack || "",
-              inner_pack: matchedProfile?.inner_pack || item.inner_pack || "",
+              outer_pack: item.outer_pack || "",
+              inner_pack: item.inner_pack || "",
               pricing_multiplier: String(item.pricing_multiplier || 1.0),
               final_price_per_kg: String(item.final_price_per_kg || ""),
               costs_breakdown: breakdown,
@@ -656,6 +795,27 @@ const QuotationEditPage = () => {
     fetchInitialData();
   }, [id, navigate]);
 
+  // 🌟 將所有 Package Orders 與 SEMI 合併為一個下拉選單選項
+  const quoteTargetOptions = useMemo(() => {
+    const prodOpts = packageOrders.map((po) => ({
+      id: `po_${po.id}`,
+      type: "PRODUCT",
+      code: po.product_code,
+      name: po.product_name,
+      po: po,
+    }));
+    const semiOpts = allMaterials
+      .filter((m) => m.type === "SEMI")
+      .map((m) => ({
+        id: `semi_${m.id}`,
+        type: "SEMI",
+        code: m.code,
+        name: m.name,
+        mat: m,
+      }));
+    return [...prodOpts, ...semiOpts];
+  }, [packageOrders, allMaterials]);
+
   const handleAddItem = () => {
     setFormData((prev) => ({
       ...prev,
@@ -663,16 +823,17 @@ const QuotationEditPage = () => {
         ...prev.items,
         {
           id: `temp_${Date.now()}`,
+          target_id: "",
           product: "",
-          spec: "1KG/包",
-          sales_unit: "包",
+          spec: "",
+          sales_unit: "",
           sales_unit_quantity: "1",
           sales_pack_unit: "",
           sales_pack_quantity: "0",
           outer_pack: "",
           inner_pack: "",
           costs_breakdown: {
-            material_cost: { name: "原料成本", value: "" },
+            material_cost: { name: "原料成本", value: "0" },
             packaging_cost: { name: "包材成本", value: "0" },
           },
           pricing_multiplier: "1.0",
@@ -689,130 +850,88 @@ const QuotationEditPage = () => {
     }));
   };
 
+  const handleNumericTextInput = (val, allowDecimal = true) => {
+    if (val === "") return "";
+    let clean = val.replace(/[^0-9.]/g, "");
+    if (!allowDecimal) clean = clean.replace(/\./g, "");
+    const parts = clean.split(".");
+    if (parts.length > 2) clean = parts[0] + "." + parts.slice(1).join("");
+    return clean;
+  };
+
   const updateItemField = (index, field, value) => {
     setFormData((prev) => {
       const newItems = [...prev.items];
-      let updatedItem = { ...newItems[index], [field]: value };
+      newItems[index] = { ...newItems[index], [field]: value };
+      return { ...prev, items: newItems };
+    });
+  };
 
-      // ===============================================
-      // 🌟 核心：包裝連動與規格字串 (Auto-Spec) 產生
-      // ===============================================
-      if (
-        [
-          "outer_pack",
-          "inner_pack",
-          "sales_unit",
-          "sales_pack_unit",
-          "sales_pack_quantity",
-          "sales_unit_quantity",
-        ].includes(field)
-      ) {
-        let nextOuterPack =
-          field === "outer_pack" ? value : updatedItem.outer_pack;
-        let nextInnerPack =
-          field === "inner_pack" ? value : updatedItem.inner_pack;
-        let nextSalesUnit =
-          field === "sales_unit" ? value : updatedItem.sales_unit;
-        let nextPackUnit =
-          field === "sales_pack_unit" ? value : updatedItem.sales_pack_unit;
+  // 🌟 處理選擇包裝單或半成品，自動展算與鎖定資料
+  const handleSelectTarget = (index, selectedId) => {
+    const target = quoteTargetOptions.find((o) => o.id === selectedId);
+    if (!target) return;
 
-        let nextSalesQtyStr =
-          field === "sales_unit_quantity"
-            ? value
-            : updatedItem.sales_unit_quantity;
-        let nextPackQtyStr =
-          field === "sales_pack_quantity"
-            ? value
-            : updatedItem.sales_pack_quantity;
+    setFormData((prev) => {
+      const newItems = [...prev.items];
+      let updatedItem = { ...newItems[index], target_id: selectedId };
 
-        const outerMat = allMaterials.find(
-          (m) => String(m.id) === String(nextOuterPack),
-        );
-        const innerMat = allMaterials.find(
-          (m) => String(m.id) === String(nextInnerPack),
+      if (target.type === "PRODUCT") {
+        const po = target.po;
+        const prodMat = allMaterials.find(
+          (m) => String(m.id) === String(po.product),
         );
 
-        // 🌟 判斷大單位取消與連動 Regex 抓取單位
-        if (field === "outer_pack") {
-          if (!value) {
-            nextSalesQtyStr = "0";
-            nextSalesUnit = "";
-          } else if (outerMat) {
-            const match = outerMat.name.match(/([箱桶袋包罐瓶])/);
-            if (match) nextSalesUnit = match[1];
-          }
-          updatedItem.sales_unit_quantity = nextSalesQtyStr;
-          updatedItem.sales_unit = nextSalesUnit;
-        }
-
-        // 🌟 判斷小單位取消與連動 Regex 抓取單位
-        if (field === "inner_pack") {
-          if (!value) {
-            nextPackQtyStr = "0";
-            nextPackUnit = "";
-          } else if (innerMat) {
-            const match = innerMat.name.match(/([箱桶袋包罐瓶])/);
-            if (match) nextPackUnit = match[1];
-          }
-          updatedItem.sales_pack_quantity = nextPackQtyStr;
-          updatedItem.sales_pack_unit = nextPackUnit;
-        }
-
-        const parsedSalesQty = Number(nextSalesQtyStr) || 0;
-        const parsedPackQty = Number(nextPackQtyStr) || 0;
-
-        // 1. 自動核算包材總成本： 1個外箱 + (n個內袋)
         let packCost = 0;
-        if (outerMat && parsedSalesQty > 0)
-          packCost += parseFloat(outerMat.estimated_cost || 0) * parsedSalesQty;
-        if (innerMat && parsedPackQty > 0)
-          packCost += parseFloat(innerMat.estimated_cost || 0) * parsedPackQty;
+        (po.packaging_info || []).forEach((p) => {
+          const m = allMaterials.find(
+            (mat) => String(mat.id) === String(p.material_id),
+          );
+          if (m) packCost += (parseFloat(m.estimated_cost) || 0) * (p.qty || 1);
+        });
+
+        const totalCost = parseFloat(prodMat?.estimated_cost) || 0;
+        console.log("prodMat", prodMat);
+
+        updatedItem.product = po.product;
+        updatedItem.spec = po.spec || "";
+        updatedItem.sales_unit = po.sales_unit || "箱";
+        updatedItem.sales_unit_quantity = String(po.sales_unit_quantity || 1);
+        updatedItem.sales_pack_unit = po.sales_pack_unit || "包";
+        updatedItem.sales_pack_quantity = String(po.sales_pack_quantity || 0);
+        updatedItem.outer_pack = po.outer_pack || "";
+        updatedItem.inner_pack = po.inner_pack || "";
 
         updatedItem.costs_breakdown = {
           ...updatedItem.costs_breakdown,
+          material_cost: {
+            name: "原料成本",
+            value: String(Math.round(totalCost)),
+          },
           packaging_cost: {
             name: "包材成本",
             value: String(Math.round(packCost)),
           },
         };
+      } else {
+        const semi = target.mat;
+        updatedItem.product = semi.id;
+        updatedItem.spec = "";
+        updatedItem.sales_unit = semi.unit || "KG";
+        updatedItem.sales_unit_quantity = "1";
+        updatedItem.sales_pack_unit = "";
+        updatedItem.sales_pack_quantity = "0";
+        updatedItem.outer_pack = "";
+        updatedItem.inner_pack = "";
 
-        // 2. 自動產生 Spec 字串 (移除小數點)
-        const outerCap = outerMat?.pack_capacity
-          ? parseInt(outerMat.pack_capacity)
-          : 0;
-        const innerCap = innerMat?.pack_capacity
-          ? parseInt(innerMat.pack_capacity)
-          : 0;
-
-        if (nextInnerPack && parsedPackQty > 0) {
-          // 雙層結構：例如 1KG*10包/箱
-          const weight = innerCap ? `${innerCap}KG` : "1KG";
-          updatedItem.spec = `${weight}*${parsedPackQty}${nextPackUnit || "包"}/${nextSalesUnit || "箱"}`;
-        } else if (nextOuterPack && parsedSalesQty > 0) {
-          // 單層結構：例如 10KG/桶
-          const weight = outerCap ? `${outerCap}KG` : "10KG";
-          updatedItem.spec = `${weight}/${nextSalesUnit || "桶"}`;
-        } else {
-          updatedItem.spec = "";
-        }
-      }
-
-      // 處理產品異動時更新原料成本
-      if (field === "product" && value) {
-        const selectedMat = allMaterials.find(
-          (m) => String(m.id) === String(value),
-        );
-        if (selectedMat) {
-          updatedItem.costs_breakdown = {
-            ...updatedItem.costs_breakdown,
-            material_cost: {
-              name: "原料成本",
-              value: String(
-                Math.round(parseFloat(selectedMat.estimated_cost || 0)),
-              ),
-            },
-          };
-        }
+        updatedItem.costs_breakdown = {
+          ...updatedItem.costs_breakdown,
+          material_cost: {
+            name: "原料成本",
+            value: String(Math.round(parseFloat(semi.estimated_cost) || 0)),
+          },
+          packaging_cost: { name: "包材成本", value: "0" },
+        };
       }
 
       newItems[index] = updatedItem;
@@ -857,16 +976,6 @@ const QuotationEditPage = () => {
     });
   };
 
-  // 數字型文字安全過濾（僅允許整數或小數點）
-  const handleNumericTextInput = (val, allowDecimal = true) => {
-    if (val === "") return "";
-    let clean = val.replace(/[^0-9.]/g, "");
-    if (!allowDecimal) clean = clean.replace(/\./g, "");
-    const parts = clean.split(".");
-    if (parts.length > 2) clean = parts[0] + "." + parts.slice(1).join("");
-    return clean;
-  };
-
   const calculatedTotals = useMemo(() => {
     let total = 0;
     formData.items.forEach((item) => {
@@ -909,7 +1018,7 @@ const QuotationEditPage = () => {
         type: "alert",
         status: "warning",
         title: "資料不完整",
-        message: "所有品項皆須選擇產品並輸入有效的最終報價金額",
+        message: "所有品項皆須選擇成品或半成品，並輸入有效的最終報價金額",
       });
 
     setDialog({
@@ -928,7 +1037,7 @@ const QuotationEditPage = () => {
           const payload = {
             ...formData,
             items: formData.items.map((item) => {
-              const { id, product_detail, ...rest } = item;
+              const { id, product_detail, target_id, ...rest } = item;
               const processed =
                 typeof id === "string" && id.startsWith("temp_")
                   ? rest
@@ -945,8 +1054,6 @@ const QuotationEditPage = () => {
 
               processed.outer_pack = processed.outer_pack || null;
               processed.inner_pack = processed.inner_pack || null;
-              processed.outer_pack_id = processed.outer_pack;
-              processed.inner_pack_id = processed.inner_pack;
 
               return processed;
             }),
@@ -974,7 +1081,7 @@ const QuotationEditPage = () => {
             status: "success",
             title: "更新成功",
             message: "報價單已成功更新！",
-            onCloseCallback: () => window.location.reload(),
+            onCloseCallback: () => navigate("/quotations"),
           });
         } catch (err) {
           setDialog({
@@ -1028,9 +1135,14 @@ const QuotationEditPage = () => {
           <span className="text-base">💡</span> 系統功能說明
         </p>
         <ul className="list-disc list-inside space-y-1 ml-5 text-slate-700 font-medium">
-          <li>選定客戶後即可配置產品、拆解內部製造成本與設定報價係數。</li>
-          <li>包材結構採用分組設定，完整支援外箱大單位與內袋輔助單位對應。</li>
-          <li>所有數值欄位均支援文字直接編輯，系統自動核算估計成本與總計。</li>
+          <li>
+            請從下拉選單選擇 <strong>成品</strong> 或 <strong>半成品</strong>{" "}
+            作為報價標的。
+          </li>
+          <li>
+            選擇後系統會自動鎖定並帶入包材結構與成本，您僅需填寫人工成本與設定報價係數。
+          </li>
+          <li>所有基礎原料與包材成本皆由系統同步計算，確保報價精準無誤。</li>
         </ul>
       </div>
 
@@ -1125,18 +1237,13 @@ const QuotationEditPage = () => {
                   orderQty,
                 );
 
-                // 動態抓取所選包裝的材積以便在畫面上提示
-                const currentOuterMat = packMaterials.find(
+                const currentOuterMat = allMaterials.find(
                   (m) => String(m.id) === String(item.outer_pack),
                 );
-                const currentInnerMat = packMaterials.find(
+                const currentInnerMat = allMaterials.find(
                   (m) => String(m.id) === String(item.inner_pack),
                 );
 
-                // 取整數
-                const outerCap = currentOuterMat?.pack_capacity
-                  ? parseInt(currentOuterMat.pack_capacity)
-                  : 0;
                 const innerCap = currentInnerMat?.pack_capacity
                   ? parseInt(currentInnerMat.pack_capacity)
                   : 0;
@@ -1146,7 +1253,6 @@ const QuotationEditPage = () => {
                     key={item.id}
                     className="bg-white border border-slate-200/90 rounded-3xl shadow-sm hover:shadow-md transition-all overflow-hidden relative"
                   >
-                    {/* 品項卡片 Header */}
                     <div className="bg-slate-100/70 px-6 py-3.5 border-b border-slate-200/80 flex justify-between items-center">
                       <span className="text-[12px] font-black uppercase tracking-widest text-slate-500">
                         品項 #{index + 1}
@@ -1161,188 +1267,105 @@ const QuotationEditPage = () => {
                     </div>
 
                     <div className="p-6 grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-                      {/* 左側：產品選擇與包材結構 */}
+                      {/* 左側：包裝單選擇與唯讀規格 */}
                       <div className="lg:col-span-5 flex flex-col gap-5 border-b lg:border-b-0 lg:border-r border-slate-200/80 pb-6 lg:pb-0 lg:pr-8">
                         <div>
                           <label className="block text-[12px] font-bold text-slate-600 mb-2 uppercase tracking-wider">
-                            報價產品 <span className="text-red-500">*</span>
+                            選擇報價標的 (成品 / 半成品){" "}
+                            <span className="text-red-500">*</span>
                           </label>
                           <FilterableDropdown
-                            value={item.product}
-                            onChange={(val) =>
-                              updateItemField(index, "product", val)
-                            }
-                            options={materials}
-                            placeholder="搜尋成品料號或名稱"
-                            renderItem={(m) => (
+                            value={item.target_id}
+                            onChange={(val) => handleSelectTarget(index, val)}
+                            options={quoteTargetOptions}
+                            placeholder="搜尋成品或半成品..."
+                            renderItem={(opt) => (
                               <div className="flex justify-between items-center w-full">
-                                <span className="text-[13px] text-slate-400 font-mono">
-                                  [{m.code}]
+                                <span
+                                  className={`text-[11px] font-mono px-2 py-0.5 rounded font-bold ${
+                                    opt.type === "PRODUCT"
+                                      ? "bg-blue-100 text-blue-700 border border-blue-200"
+                                      : "bg-purple-100 text-purple-700 border border-purple-200"
+                                  }`}
+                                >
+                                  {opt.type === "PRODUCT" ? "成品" : "半成品"}
                                 </span>
-                                <span className="text-[13px] text-slate-800 font-bold ml-2">
-                                  {m.name}
+                                <span className="text-[13px] text-slate-800 font-bold ml-2 truncate text-right">
+                                  [{opt.code}] {opt.name}
                                 </span>
                               </div>
                             )}
                           />
                         </div>
 
-                        {/* 🌟 修改順序：包裝先於規格 */}
-                        <div className="bg-slate-50/80 p-4 rounded-2xl border border-slate-200/80 flex flex-col gap-3.5">
-                          <div className="flex items-center gap-1.5 text-blue-700 font-black text-[12px] uppercase tracking-wider border-b border-slate-200/60 pb-2">
+                        <div className="bg-slate-50/50 p-4 rounded-2xl border border-slate-200/80 flex flex-col gap-3.5 relative overflow-hidden">
+                          <div className="flex items-center gap-1.5 text-slate-500 font-black text-[12px] uppercase tracking-wider border-b border-slate-200/60 pb-2">
                             <Package size={15} strokeWidth={2.5} />{" "}
-                            包材結構與換算設定
+                            包材與規格檢視
                           </div>
 
-                          {/* 銷售大單位 (外層) */}
-                          <div className="bg-white p-3.5 rounded-xl border border-slate-200/70 shadow-2xs space-y-3">
-                            <div className="flex items-center justify-between">
-                              <span className="text-[11px] font-black uppercase text-slate-500 tracking-wider">
-                                銷售大單位 (外層)
+                          <div className="flex flex-col gap-2 text-[13px]">
+                            <div className="flex items-center gap-2">
+                              <span className="text-[11px] text-slate-400 font-bold uppercase tracking-wider w-16">
+                                包材單位
                               </span>
-                            </div>
-                            <div className="grid grid-cols-4 gap-3">
-                              <div className="col-span-2 md:col-span-4">
-                                <FilterableDropdown
-                                  value={item.outer_pack}
-                                  onChange={(val) =>
-                                    updateItemField(index, "outer_pack", val)
-                                  }
-                                  options={packMaterials}
-                                  placeholder="-- 無需對應外包裝 --"
-                                  renderItem={(m) =>
-                                    m.id ? `[${m.code}] ${m.name}` : m.name
-                                  }
-                                />
-                              </div>
-                              <div className="col-span-2">
-                                <label className="block text-[11px] font-bold text-slate-400 mb-1">
-                                  包裝容量(KG)
-                                </label>
-                                <div className="w-full px-3 py-1.5 h-[38px] bg-slate-100 border border-slate-200 rounded-lg text-center font-mono font-bold text-[13px] text-slate-500">
-                                  {outerCap > 0 ? outerCap : "-"}
-                                </div>
-                              </div>
-                              <div className="col-span-1">
-                                <label className="block text-[11px] font-bold text-slate-400 mb-1">
-                                  單位名稱
-                                </label>
-                                <input
-                                  type="text"
-                                  value={item.sales_unit}
-                                  onChange={(e) =>
-                                    updateItemField(
-                                      index,
-                                      "sales_unit",
-                                      e.target.value,
-                                    )
-                                  }
-                                  className="w-full px-2 py-1.5 h-[38px] border border-slate-200 rounded-lg text-center font-bold text-[13px] focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none"
-                                />
-                              </div>
-                              <div className="col-span-1">
-                                <label className="block text-[11px] font-bold text-slate-400 mb-1">
-                                  數量
-                                </label>
-                                <input
-                                  type="text"
-                                  inputMode="decimal"
-                                  value={item.sales_unit_quantity}
-                                  onChange={(e) =>
-                                    updateItemField(
-                                      index,
-                                      "sales_unit_quantity",
-                                      handleNumericTextInput(e.target.value),
-                                    )
-                                  }
-                                  className="w-full px-2 py-1.5 h-[38px] border border-slate-200 rounded-lg text-center font-mono font-bold text-[13px] focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none"
-                                />
+                              <div className="flex items-center">
+                                {currentOuterMat ? (
+                                  <>
+                                    <span className="font-mono text-slate-700 font-bold">
+                                      {`[${currentOuterMat.code}]`}&nbsp;
+                                      {currentOuterMat.name}&nbsp;x&nbsp;
+                                    </span>
+                                    <span className="font-mono text-slate-700 font-bold">
+                                      {formatNum(item.sales_unit_quantity, 0)}
+                                    </span>
+                                    <span className="font-sans font-medium text-slate-600 mx-1">
+                                      {item.sales_unit}
+                                    </span>
+                                  </>
+                                ) : (
+                                  <span className="font-bold text-slate-400">
+                                    -
+                                  </span>
+                                )}
                               </div>
                             </div>
-                          </div>
-
-                          {/* 內部小單位 (內層) */}
-                          <div className="bg-white p-3.5 rounded-xl border border-slate-200/70 shadow-2xs space-y-3">
-                            <div className="flex items-center justify-between">
-                              <span className="text-[11px] font-black uppercase text-slate-500 tracking-wider">
-                                內部小單位 (內層, 若無可略過)
+                            <div className="flex items-center gap-2">
+                              <span className="text-[11px] text-slate-400 font-bold uppercase tracking-wider w-16">
+                                輔助單位
                               </span>
-                            </div>
-                            <div className="grid grid-cols-4 gap-3">
-                              <div className="col-span-2 md:col-span-4">
-                                <FilterableDropdown
-                                  value={item.inner_pack}
-                                  onChange={(val) =>
-                                    updateItemField(index, "inner_pack", val)
-                                  }
-                                  options={packMaterials}
-                                  placeholder="-- 無需對應內包裝 --"
-                                  renderItem={(m) =>
-                                    m.id ? `[${m.code}] ${m.name}` : m.name
-                                  }
-                                />
-                              </div>
-                              <div className="col-span-2">
-                                <label className="block text-[11px] font-bold text-slate-400 mb-1">
-                                  包裝容量(KG)
-                                </label>
-                                <div className="w-full px-3 py-1.5 h-[38px] bg-slate-100 border border-slate-200 rounded-lg text-center font-mono font-bold text-[13px] text-slate-500">
-                                  {innerCap > 0 ? innerCap : "-"}
-                                </div>
-                              </div>
-                              <div className="col-span-1">
-                                <label className="block text-[11px] font-bold text-slate-400 mb-1">
-                                  單位名稱
-                                </label>
-                                <input
-                                  type="text"
-                                  value={item.sales_pack_unit}
-                                  onChange={(e) =>
-                                    updateItemField(
-                                      index,
-                                      "sales_pack_unit",
-                                      e.target.value,
-                                    )
-                                  }
-                                  className="w-full px-2 py-1.5 h-[38px] border border-slate-200 rounded-lg text-center font-bold text-[13px] focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none"
-                                />
-                              </div>
-                              <div className="col-span-1">
-                                <label className="block text-[11px] font-bold text-slate-400 mb-1">
-                                  內含
-                                </label>
-                                <input
-                                  type="text"
-                                  inputMode="decimal"
-                                  value={item.sales_pack_quantity}
-                                  onChange={(e) =>
-                                    updateItemField(
-                                      index,
-                                      "sales_pack_quantity",
-                                      handleNumericTextInput(e.target.value),
-                                    )
-                                  }
-                                  className="w-full px-2 py-1.5 h-[38px] border border-slate-200 rounded-lg text-center font-mono font-bold text-[13px] focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none"
-                                />
+                              <div className="flex items-center">
+                                {currentInnerMat ? (
+                                  <>
+                                    <span className="font-mono text-slate-700 font-bold">
+                                      {`[${currentInnerMat.code}]`}&nbsp;
+                                      {currentInnerMat.name}&nbsp;x&nbsp;
+                                    </span>
+                                    <span className="font-mono text-slate-700 font-bold">
+                                      {formatNum(item.sales_pack_quantity, 0)}
+                                    </span>
+                                    <span className="font-sans font-medium text-slate-600 mx-1">
+                                      {item.sales_pack_unit}
+                                    </span>
+                                  </>
+                                ) : (
+                                  <span className="font-bold text-slate-400">
+                                    -
+                                  </span>
+                                )}
                               </div>
                             </div>
                           </div>
-                        </div>
+                          <div className="w-full h-px bg-slate-200/60 my-1"></div>
 
-                        {/* 🌟 規格字串移到下方，依舊保留手動微調的能力 */}
-                        <div className="mt-2">
-                          <label className="block text-[12px] font-bold text-slate-600 mb-2 uppercase tracking-wider flex justify-between">
-                            <span>包裝規格文字 (自動拼湊)</span>
-                          </label>
-                          <input
-                            type="text"
-                            value={item.spec}
-                            onChange={(e) =>
-                              updateItemField(index, "spec", e.target.value)
-                            }
-                            placeholder="如：1KG*10包/箱"
-                            className="w-full px-3.5 py-2 h-[42px] border border-slate-300/80 rounded-xl focus:border-blue-500 focus:ring-4 focus:ring-blue-500/15 outline-none text-[13px] font-bold text-slate-800 transition-all shadow-sm"
-                          />
+                          <div className="flex flex-col gap-1 text-[13px]">
+                            <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
+                              規格標示字串
+                            </span>
+                            <span className="font-bold text-slate-700">
+                              {item.spec || "-"}
+                            </span>
+                          </div>
                         </div>
                       </div>
 
@@ -1362,66 +1385,84 @@ const QuotationEditPage = () => {
                           </div>
 
                           <div className="space-y-2.5">
-                            {costsKeys.map((costKey) => (
-                              <div
-                                key={costKey}
-                                className="flex gap-2 items-center"
-                              >
-                                <input
-                                  type="text"
-                                  value={item.costs_breakdown[costKey].name}
-                                  readOnly
-                                  className="w-28 px-3 py-2 h-[40px] border border-slate-200 rounded-xl outline-none text-[13px] font-bold bg-slate-100 text-slate-600 shrink-0"
-                                />
-                                <div className="relative flex-1 flex items-center min-w-0">
-                                  <span className="absolute left-3 text-slate-400 text-[13px] font-bold">
-                                    $
-                                  </span>
+                            {costsKeys.map((costKey) => {
+                              console.log(
+                                costKey,
+                                item.costs_breakdown[costKey],
+                              );
+                              // 🌟 鎖定原料與包材成本
+                              const isLocked =
+                                costKey === "material_cost" ||
+                                costKey === "packaging_cost";
+
+                              return (
+                                <div
+                                  key={costKey}
+                                  className="flex gap-2 items-center"
+                                >
                                   <input
                                     type="text"
-                                    inputMode="decimal"
-                                    value={item.costs_breakdown[costKey].value}
-                                    onChange={(e) =>
-                                      updateCostBreakdown(
-                                        index,
-                                        costKey,
-                                        "value",
-                                        handleNumericTextInput(e.target.value),
-                                      )
-                                    }
-                                    placeholder="0"
-                                    className="w-full pl-7 pr-3 py-2 h-[40px] border border-slate-300/80 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none text-[14px] text-right font-mono font-bold text-slate-800"
+                                    value={item.costs_breakdown[costKey].name}
+                                    readOnly
+                                    className="w-24 px-3 py-2 h-[40px] border border-slate-200 rounded-xl outline-none text-[12px] font-bold bg-slate-100 text-slate-500 shrink-0 shadow-sm"
                                   />
-                                </div>
-                                <div className="shrink-0">
-                                  {/* 🌟 包材與原料皆不可刪除 */}
-                                  {costKey === "material_cost" ||
-                                  costKey === "packaging_cost" ? (
-                                    <div
-                                      className="w-[36px] h-[40px] flex items-center justify-center text-slate-300 bg-slate-50 border border-slate-200/60 rounded-xl cursor-not-allowed"
-                                      title="基礎成本項目不可刪除"
-                                    >
-                                      <Lock size={14} />
-                                    </div>
-                                  ) : (
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        removeCostField(index, costKey)
+                                  <div className="relative flex-1 flex items-center min-w-0">
+                                    <span className="absolute left-3 text-slate-400 text-[13px] font-bold">
+                                      $
+                                    </span>
+                                    <input
+                                      type="text"
+                                      inputMode="decimal"
+                                      readOnly={isLocked}
+                                      value={
+                                        item.costs_breakdown[costKey].value
                                       }
-                                      className="w-[36px] h-[40px] flex items-center justify-center text-red-500 hover:text-white bg-red-50 hover:bg-red-500 rounded-xl border border-red-200 transition-colors shadow-sm"
-                                      title="移除此項目"
-                                    >
-                                      <Trash2 size={14} />
-                                    </button>
-                                  )}
+                                      onChange={(e) =>
+                                        updateCostBreakdown(
+                                          index,
+                                          costKey,
+                                          "value",
+                                          handleNumericTextInput(
+                                            e.target.value,
+                                          ),
+                                        )
+                                      }
+                                      placeholder="0"
+                                      className={`w-full pl-7 pr-3 py-2 h-[40px] border rounded-xl outline-none text-[14px] text-right font-mono font-bold shadow-sm transition-all ${
+                                        isLocked
+                                          ? "bg-slate-50 border-slate-200 text-slate-500 cursor-not-allowed"
+                                          : "bg-white border-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 text-slate-800"
+                                      }`}
+                                    />
+                                  </div>
+                                  <div className="shrink-0">
+                                    {isLocked ? (
+                                      <div
+                                        className="w-[36px] h-[40px] flex items-center justify-center text-slate-400 bg-slate-50 border border-slate-200/60 rounded-xl cursor-not-allowed shadow-sm"
+                                        title="由系統推算，不可刪除或手動修改"
+                                      >
+                                        <Lock size={14} />
+                                      </div>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          removeCostField(index, costKey)
+                                        }
+                                        className="w-[36px] h-[40px] flex items-center justify-center text-red-500 hover:text-white bg-red-50 hover:bg-red-500 rounded-xl border border-red-200 transition-colors shadow-sm"
+                                        title="移除此項目"
+                                      >
+                                        <Trash2 size={14} />
+                                      </button>
+                                    )}
+                                  </div>
                                 </div>
-                              </div>
-                            ))}
+                              );
+                            })}
                           </div>
                         </div>
 
-                        <div className="pt-4 border-t border-slate-200/80 flex justify-between items-center bg-slate-50/50 p-4 rounded-2xl">
+                        <div className="pt-4 border-t border-slate-200/80 flex justify-between items-center bg-slate-50/50 p-4 rounded-2xl border border-slate-100 shadow-sm">
                           <span className="text-[12px] font-bold text-slate-500 uppercase tracking-wider">
                             估算單位成本
                           </span>
@@ -1458,7 +1499,7 @@ const QuotationEditPage = () => {
                             <label className="block text-[12px] font-bold text-slate-600 mb-2 uppercase tracking-wider">
                               建議售價 (每單位)
                             </label>
-                            <div className="bg-slate-100/80 px-3.5 py-2 h-[42px] text-[13px] flex items-center justify-between border border-slate-200 rounded-xl">
+                            <div className="bg-slate-100/80 px-3.5 py-2 h-[42px] text-[13px] flex items-center justify-between border border-slate-200 rounded-xl shadow-sm">
                               <span className="text-[14px] font-mono font-bold text-slate-500">
                                 ${formatCurrency(suggestedPrice)}
                               </span>
@@ -1486,13 +1527,13 @@ const QuotationEditPage = () => {
                                   )
                                 }
                                 placeholder={suggestedPrice.toString()}
-                                className="w-full pl-8 pr-3.5 py-2 h-[44px] border-2 border-blue-200 rounded-xl focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20 outline-none text-[17px] font-mono font-black text-blue-700 shadow-sm"
+                                className="w-full pl-8 pr-3.5 py-2 h-[44px] border-2 border-blue-200 rounded-xl focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20 outline-none text-[17px] font-mono font-black text-blue-700 shadow-sm transition-all"
                               />
                             </div>
                           </div>
                         </div>
 
-                        <div className="pt-4 border-t border-slate-200/80 flex flex-col justify-end bg-blue-50/40 p-4 rounded-2xl border border-blue-100">
+                        <div className="pt-4 border-t border-slate-200/80 flex flex-col justify-end bg-blue-50/40 p-4 rounded-2xl border border-blue-100 shadow-sm">
                           <span className="text-[11px] text-blue-600 font-black uppercase tracking-wider mb-1">
                             品項小計 (未稅)
                           </span>
@@ -1531,7 +1572,6 @@ const QuotationEditPage = () => {
       </form>
 
       {/* 預覽視窗 Modal */}
-      {/* (省略... 保持與你原本寫的完全一樣) */}
       {isPreviewOpen && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md flex items-center justify-center z-50 p-4 print:static print:block print:bg-transparent print:p-0 print:backdrop-blur-none">
           <div className="bg-white rounded-3xl shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200 border border-slate-200 print:shadow-none print:w-full print:max-w-none print:max-h-none print:overflow-visible print:block">
@@ -1542,7 +1582,7 @@ const QuotationEditPage = () => {
               <div className="flex items-center gap-3">
                 <button
                   onClick={handlePrint}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-[13px] font-bold rounded-xl flex items-center gap-1.5 transition-all shadow-sm active:scale-95"
+                  className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-[13px] font-bold rounded-xl flex items-center gap-1.5 transition-all shadow-sm active:scale-95"
                 >
                   <Printer size={15} /> 列印單據
                 </button>
@@ -1559,7 +1599,6 @@ const QuotationEditPage = () => {
               <DocumentPreview
                 formData={formData}
                 vendors={vendors}
-                materials={materials}
                 allMaterials={allMaterials}
                 boms={boms}
               />

@@ -663,7 +663,7 @@ export default function PackageOrderPage() {
             <strong>自動產生對應的新成品</strong>。
           </li>
           <li>系統便會自動推算規格文本並試算包材總成本。</li>
-          <li>設定好的包裝單，可在配方頁面以及訂購單產生頁面使用。</li>
+          <li>設定好的包裝單，可在報價單以及訂購單產生頁面使用。</li>
         </ul>
       </div>
 

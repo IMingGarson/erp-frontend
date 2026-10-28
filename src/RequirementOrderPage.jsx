@@ -31,7 +31,6 @@ function getTodayString(formatted = false) {
 
 // ==========================================
 // 🌟 1. 核心：有理數 (分數) 高精度運算引擎
-// (使用 function 宣告確保 Hoisting 安全)
 // ==========================================
 function gcd(a, b) {
   return b === 0n ? a : gcd(b, a % b);
@@ -43,7 +42,6 @@ function toFraction(val) {
       return { n: 0n, d: 1n };
     const str = String(val).trim();
 
-    // 提早攔截：避免注音或無效字元導致 BigInt 崩潰
     if (isNaN(Number(str))) return { n: 0n, d: 1n };
 
     if (!str.includes(".")) return { n: BigInt(str), d: 1n };
@@ -118,14 +116,9 @@ function formatNum(num, type) {
   if (rounded === 0) return "0";
   if (type === "PACK") return rounded.toString();
 
-  if (Math.abs(rounded) >= 0.01) {
-    return rounded.toLocaleString("en-US", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    });
-  } else {
-    return rounded.toString();
-  }
+  return rounded.toLocaleString("en-US", {
+    maximumFractionDigits: 4,
+  });
 }
 
 function getContainedAdditives(
@@ -272,7 +265,7 @@ const FilterableDropdown = ({
       </button>
 
       {isOpen && !disabled && (
-        <div className="absolute z-50 top-[calc(100%+8px)] left-0 w-full bg-white/90 backdrop-blur-xl border border-slate-200 rounded-2xl shadow-xl flex flex-col max-h-72 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
+        <div className="absolute z-50 top-[calc(100%+8px)] left-0 min-w-full w-max max-w-[90vw] md:max-w-none bg-white/90 backdrop-blur-xl border border-slate-200 rounded-2xl shadow-xl flex flex-col max-h-72 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
           <div className="p-3 border-b border-slate-100 bg-slate-50/50 shrink-0 sticky top-0 z-10">
             <div className="relative">
               <Search
@@ -299,7 +292,7 @@ const FilterableDropdown = ({
                       setIsOpen(false);
                       setSearchTerm("");
                     }}
-                    className={`flex items-center justify-between px-4 py-3 text-sm rounded-xl cursor-pointer transition-all font-medium mb-1 ${isSelected ? "bg-blue-600 text-white shadow-md" : "text-slate-700 hover:bg-blue-50 hover:text-blue-700"}`}
+                    className={`flex items-center justify-between px-4 py-3 text-sm rounded-xl cursor-pointer transition-all font-medium mb-1 whitespace-nowrap ${isSelected ? "bg-blue-600 text-white shadow-md" : "text-slate-700 hover:bg-blue-50 hover:text-blue-700"}`}
                   >
                     <span className="truncate pr-2">
                       {renderItem ? renderItem(opt) : opt.name}
@@ -784,7 +777,6 @@ const MaterialAllocationList = ({
                       </span>
                     </div>
                   </div>
-                  {/* 🌟 增加負邊距以容納陰影不被裁切，並確保 X Scrollable */}
                   <div className="flex overflow-x-auto gap-4 pb-6 pt-3 px-6 -mx-2 snap-x custom-scrollbar w-full min-w-0">
                     {sortedBatches.map((b) => (
                       <div
@@ -873,6 +865,11 @@ const RequirementOrderPage = () => {
   const [batches, setBatches] = useState([]);
   const [vendors, setVendors] = useState([]);
   const [mrpPlans, setMrpPlans] = useState([]);
+  const [packageOrders, setPackageOrders] = useState([]);
+
+  // 🌟 新增：用來存放選擇客戶後抓回來的報價單明細
+  const [customerQuotes, setCustomerQuotes] = useState([]);
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [dailySequence, setDailySequence] = useState(1);
@@ -902,13 +899,13 @@ const RequirementOrderPage = () => {
     profile_id: "",
     spec: "",
     quantity: "",
-    unit: "箱",
+    unit: "", // 🌟 預設為空白
     sales_unit_quantity: "1",
     sales_pack_unit: "包",
     sales_pack_quantity: "",
     outer_capacity: "",
     inner_capacity: "",
-    unit_price: "",
+    unit_price: "", // 🌟 預設為空白
     outer_pack_id: null,
     inner_pack_id: null,
   });
@@ -981,79 +978,6 @@ const RequirementOrderPage = () => {
     fetchData();
   }, []);
 
-  const parsePackInfo = (packName, isInner) => {
-    let parsedUnit = isInner ? "包" : "箱";
-    let parsedCapacity = 1;
-    if (packName.includes("桶")) parsedUnit = "桶";
-    else if (packName.includes("箱")) parsedUnit = "箱";
-    else if (packName.includes("袋")) parsedUnit = "袋";
-    else if (packName.includes("瓶")) parsedUnit = "瓶";
-    else if (packName.includes("罐")) parsedUnit = "罐";
-    const match = packName.match(/([\d.]+)\s*(KG|L|g|ml)/i);
-    if (match) {
-      parsedCapacity = Number(match[1]);
-      if (match[2].toLowerCase() === "g" || match[2].toLowerCase() === "ml")
-        parsedCapacity = parsedCapacity / 1000;
-    }
-    return { parsedUnit, parsedCapacity };
-  };
-
-  const handleOuterPackChange = (rowId, packId) => {
-    handleItemChange(rowId, "outer_pack_id", packId);
-    if (packId) {
-      const packMat = packMaterials.find(
-        (p) => String(p.id) === String(packId),
-      );
-      if (packMat) {
-        const { parsedUnit, parsedCapacity } = parsePackInfo(
-          packMat.name,
-          false,
-        );
-        setFormItems((prev) =>
-          prev.map((item) => {
-            if (item.id === rowId && item.profile_id === "custom")
-              return {
-                ...item,
-                unit: parsedUnit,
-                outer_capacity: Number(
-                  packMat.pack_capacity || parsedCapacity,
-                ).toString(),
-              };
-            return item;
-          }),
-        );
-      }
-    }
-  };
-
-  const handleInnerPackChange = (rowId, packId) => {
-    handleItemChange(rowId, "inner_pack_id", packId);
-    if (packId) {
-      const packMat = packMaterials.find(
-        (p) => String(p.id) === String(packId),
-      );
-      if (packMat) {
-        const { parsedUnit, parsedCapacity } = parsePackInfo(
-          packMat.name,
-          true,
-        );
-        setFormItems((prev) =>
-          prev.map((item) => {
-            if (item.id === rowId && item.profile_id === "custom")
-              return {
-                ...item,
-                sales_pack_unit: parsedUnit,
-                inner_capacity: Number(
-                  packMat.pack_capacity || parsedCapacity,
-                ).toString(),
-              };
-            return item;
-          }),
-        );
-      }
-    }
-  };
-
   const getGeneratedSpec = (item) => {
     const cleanNumStr = (val) => {
       const n = Number(val);
@@ -1085,16 +1009,25 @@ const RequirementOrderPage = () => {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [matRes, bomRes, batchRes, venRes, mrpRes, seqRes, coSeqRes] =
-        await Promise.all([
-          fetchWithAuth("/api/materials"),
-          fetchWithAuth("/api/boms"),
-          fetchWithAuth("/api/batches"),
-          fetchWithAuth("/api/vendors"),
-          fetchWithAuth("/api/mrp"),
-          fetchWithAuth("/api/mrp/daily_sequence"),
-          fetchWithAuth("/api/customer_orders/daily_sequence"),
-        ]);
+      const [
+        matRes,
+        bomRes,
+        batchRes,
+        venRes,
+        mrpRes,
+        seqRes,
+        coSeqRes,
+        poRes,
+      ] = await Promise.all([
+        fetchWithAuth("/api/materials"),
+        fetchWithAuth("/api/boms"),
+        fetchWithAuth("/api/batches"),
+        fetchWithAuth("/api/vendors"),
+        fetchWithAuth("/api/mrp"),
+        fetchWithAuth("/api/mrp/daily_sequence"),
+        fetchWithAuth("/api/customer_orders/daily_sequence"),
+        fetchWithAuth("/api/package_orders"),
+      ]);
       if (
         !matRes.ok ||
         !bomRes.ok ||
@@ -1102,7 +1035,8 @@ const RequirementOrderPage = () => {
         !venRes.ok ||
         !mrpRes.ok ||
         !seqRes.ok ||
-        !coSeqRes.ok
+        !coSeqRes.ok ||
+        !poRes.ok
       )
         throw new Error("資料載入失敗，請確認 API 狀態");
 
@@ -1114,6 +1048,7 @@ const RequirementOrderPage = () => {
         mrpJson,
         seqJson,
         coSeqJson,
+        poJson,
       ] = await Promise.all([
         matRes.json(),
         bomRes.json(),
@@ -1122,14 +1057,17 @@ const RequirementOrderPage = () => {
         mrpRes.json(),
         seqRes.json(),
         coSeqRes.json(),
+        poRes.json(),
       ]);
 
-      const loadedMaterials = matJson.data || [];
+      const loadedMaterials = matJson.data || matJson.results || matJson || [];
       setMaterials(loadedMaterials);
-      setBoms(bomJson.data || []);
-      setBatches(batchJson.data || []);
-      setVendors(venJson.data || []);
-      const remoteMrp = mrpJson.data || [];
+      setBoms(bomJson.data || bomJson.results || bomJson || []);
+      setBatches(batchJson.data || batchJson.results || batchJson || []);
+      setVendors(venJson.data || venJson.results || venJson || []);
+      setPackageOrders(poJson.data || poJson.results || poJson || []);
+
+      const remoteMrp = mrpJson.data || mrpJson.results || mrpJson || [];
       setMrpPlans(remoteMrp);
 
       if (seqJson.data && seqJson.data.sequence) {
@@ -1199,13 +1137,18 @@ const RequirementOrderPage = () => {
     }
   };
 
-  const readyProducts = useMemo(
-    () => materials.filter((m) => m.type === "PRODUCT"),
-    [materials],
-  );
+  const readyProducts = useMemo(() => {
+    return materials.filter(
+      (m) =>
+        m.type === "PRODUCT" &&
+        customerQuotes.some(
+          (q) => String(q.product_detail?.id) === String(m.id),
+        ),
+    );
+  }, [materials, customerQuotes]);
 
   const handleDeleteDraft = (id) => {
-    showConfirm("確認刪除", "確定刪除此單項嗎？", async () => {
+    showConfirm("確認刪除", "確定刪除此單據嗎？", async () => {
       setIsSubmitting(true);
       try {
         const delRes = await fetchWithAuth(`/api/mrp/${id}`, {
@@ -1222,14 +1165,14 @@ const RequirementOrderPage = () => {
       } catch (err) {
         showAlert("錯誤", err.message, "error");
       } finally {
+        showAlert("成功", "已刪除該單據", "info");
         setIsSubmitting(false);
       }
     });
   };
 
-  const handleSelectVendor = (v) =>
+  const handleSelectVendor = async (v) => {
     setVendorData({
-      ...vendorData,
       id: v.id,
       name: v.name,
       code: v.code,
@@ -1238,7 +1181,34 @@ const RequirementOrderPage = () => {
       fax: v.fax || "",
       address: v.address || "",
       contact: v.contact_person || "",
+      shippingDate: vendorData.shippingDate,
+      logisticsProvider: vendorData.logisticsProvider,
+      notes: vendorData.notes,
     });
+
+    setCustomerQuotes([]);
+    setFormItems([createEmptyRow(dailySequence)]);
+
+    try {
+      const res = await fetchWithAuth(
+        `/api/quotations?customer=${v.id}&status=CONFIRMED`,
+      );
+      if (res.ok) {
+        const json = await res.json();
+        const quotes = json.data || [];
+        const allItems = quotes.flatMap((q) =>
+          (q.items || []).map((item) => ({
+            ...item,
+            quotation_id: q.id,
+          })),
+        );
+        setCustomerQuotes(allItems);
+      }
+    } catch (e) {
+      console.error("無法載入客戶報價", e);
+    }
+  };
+
   const handleAddRow = () => {
     const nextSeq = dailySequence + 1;
     setDailySequence(nextSeq);
@@ -1246,6 +1216,7 @@ const RequirementOrderPage = () => {
   };
   const handleRemoveRow = (id) =>
     setFormItems((prev) => prev.filter((item) => item.id !== id));
+
   const handleItemChange = (id, field, value) =>
     setFormItems((prev) =>
       prev.map((item) => (item.id === id ? { ...item, [field]: value } : item)),
@@ -1262,7 +1233,7 @@ const RequirementOrderPage = () => {
               product_name: product.name || "",
               profile_id: "",
               spec: "",
-              unit: product.unit || "箱",
+              unit: "",
               unit_price: "",
               sales_unit_quantity: "1",
               sales_pack_unit: "包",
@@ -1277,7 +1248,7 @@ const RequirementOrderPage = () => {
     );
   };
 
-  const handleSelectProfile = (rowId, profileId) => {
+  const handleSelectProfile = (rowId, quoteItemId) => {
     setFormItems((prev) =>
       prev.map((item) => {
         if (item.id !== rowId) return item;
@@ -1285,12 +1256,13 @@ const RequirementOrderPage = () => {
           (m) => String(m.id) === String(item.product_id),
         );
         if (!product) return item;
-        if (profileId === "custom" || !profileId)
+
+        if (!quoteItemId) {
           return {
             ...item,
-            profile_id: profileId,
+            profile_id: "",
             spec: "",
-            unit: product.unit || "箱",
+            unit: "",
             unit_price: "",
             sales_unit_quantity: "1",
             sales_pack_unit: "包",
@@ -1300,48 +1272,54 @@ const RequirementOrderPage = () => {
             outer_capacity: "",
             inner_capacity: "",
           };
-        const profile = product.product_profiles?.find(
-          (p) => String(p.id) === String(profileId),
+        }
+
+        const quoteItem = customerQuotes.find(
+          (q) => String(q.id) === String(quoteItemId),
         );
-        if (!profile) return item;
-        const getPackId = (packData) => {
-          if (!packData) return null;
-          if (typeof packData === "object") return packData.id;
-          return Number(packData);
-        };
-        const outId =
-          getPackId(profile.outer_pack_id) || getPackId(profile.outer_pack);
-        const inId =
-          getPackId(profile.inner_pack_id) || getPackId(profile.inner_pack);
+        if (!quoteItem) return item;
+
+        const salesPrice = quoteItem.final_price_per_kg
+          ? String(quoteItem.final_price_per_kg)
+          : "";
+
+        const po = packageOrders.find(
+          (p) => p.product_code === item.product_code,
+        );
+
+        let outId = quoteItem.outer_pack || null;
+        let inId = quoteItem.inner_pack || null;
+
+        const outMat = materials.find((m) => String(m.id) === String(outId));
+        const inMat = materials.find((m) => String(m.id) === String(inId));
+
         return {
           ...item,
-          profile_id: profile.id,
-          spec: profile.spec || "",
-          unit: profile.sales_unit || product.unit || "箱",
-          unit_price: profile.sales_price || "",
-          sales_unit_quantity: profile.sales_unit_quantity
-            ? Number(profile.sales_unit_quantity).toString()
+          profile_id: quoteItem.id,
+          spec: quoteItem.spec || "",
+          unit: quoteItem.sales_unit || po?.sales_unit || "箱",
+          unit_price: salesPrice,
+          sales_unit_quantity: quoteItem.sales_unit_quantity
+            ? String(quoteItem.sales_unit_quantity)
             : "1",
-          sales_pack_unit: profile.sales_pack_unit || "包",
-          sales_pack_quantity: profile.sales_pack_quantity
-            ? Number(profile.sales_pack_quantity).toString()
+          sales_pack_unit:
+            quoteItem.sales_pack_unit || po?.sales_pack_unit || "包",
+          sales_pack_quantity: quoteItem.sales_pack_quantity
+            ? String(quoteItem.sales_pack_quantity)
             : "10",
           outer_pack_id: outId,
           inner_pack_id: inId,
-          outer_capacity: profile.outer_capacity
-            ? Number(profile.outer_capacity).toString()
+          outer_capacity: outMat?.pack_capacity
+            ? String(outMat.pack_capacity)
             : "10",
-          inner_capacity: profile.inner_capacity
-            ? Number(profile.inner_capacity).toString()
+          inner_capacity: inMat?.pack_capacity
+            ? String(inMat.pack_capacity)
             : "1",
         };
       }),
     );
   };
 
-  // ==========================================
-  // 🌟 主體 BOM 展開連動引擎 (結合 Fraction 演算法)
-  // ==========================================
   useEffect(() => {
     let newOrderItems = [];
     const newActiveTabIds = {};
@@ -1459,9 +1437,6 @@ const RequirementOrderPage = () => {
     });
   }, [formItems, materials, boms]);
 
-  // ==========================================
-  // 🌟 庫存分配引擎 (整合 Fraction 與顯示精度圓整)
-  // ==========================================
   useEffect(() => {
     if (orderItems.length === 0 && mrpPlans.length === 0) return;
 
@@ -1771,39 +1746,118 @@ const RequirementOrderPage = () => {
   );
 
   const handleOpenPreview = () => {
-    const validItems = formItems
-      .filter((i) => i.product_id)
-      .map((item) => ({
-        ...item,
+    const sheets = [];
+    let currentCoSeq = coDailySequence;
+
+    const validFormItems = formItems.filter((i) => i.product_id);
+
+    validFormItems.forEach((item) => {
+      const orderNo = `CO${getTodayString()}${currentCoSeq.toString().padStart(3, "0")}`;
+      currentCoSeq++;
+
+      const mainItem = {
+        seq: 1,
+        product_code: item.product_code,
+        product_name: item.product_name,
         spec: item.profile_id === "custom" ? getGeneratedSpec(item) : item.spec,
-      }));
-    const payloadData = {
-      isPreview: true,
-      order_number: "預覽單號",
-      order_date: getTodayString(true),
-      delivery_date: vendorData.shippingDate,
-      customer: {
-        name: vendorData.name,
-        code: vendorData.code,
-        tax_id: vendorData.tax_id,
-        phone: vendorData.phone,
-        fax: vendorData.fax,
-        address: vendorData.address,
-        contact: vendorData.contact,
-      },
-      logistics_info: {
-        provider: vendorData.logisticsProvider,
-        notes: vendorData.notes,
-      },
-      items: validItems,
-      totals: {
-        total_amount: calculatedTotals.total_amount,
-        tax_amount: calculatedTotals.tax_amount,
-        grand_total: calculatedTotals.grand_total,
-        document_note: documentNote,
-      },
-    };
-    setPreviewData(payloadData);
+        quantity: item.quantity,
+        unit: item.unit,
+        unit_price: item.unit_price,
+        subtotal: Math.round(
+          Number(item.quantity || 0) * Number(item.unit_price || 0),
+        ),
+      };
+
+      const packItems = [];
+      let pSeq = 1;
+
+      const quoteItem = customerQuotes.find(
+        (q) => String(q.id) === String(item.profile_id),
+      );
+
+      if (quoteItem) {
+        const po = packageOrders.find(
+          (p) => String(p.product_code) === String(item.product_code),
+        );
+        if (po && po.packaging_info) {
+          po.packaging_info.forEach((pkg) => {
+            let matId = pkg.material_id;
+            if (pkg.layer === "outer" && item.outer_pack_id)
+              matId = item.outer_pack_id;
+            if (pkg.layer === "inner" && item.inner_pack_id)
+              matId = item.inner_pack_id;
+
+            const mat = materials.find((m) => String(m.id) === String(matId));
+            if (mat && ["PACK", "STICKER", "OTHER"].includes(mat.type)) {
+              let unitToUse = mat.unit;
+              if (pkg.layer === "outer" && po.sales_unit)
+                unitToUse = po.sales_unit;
+              if (pkg.layer === "inner" && po.sales_pack_unit)
+                unitToUse = po.sales_pack_unit;
+
+              packItems.push({
+                seq: pSeq++,
+                product_code: mat.code,
+                product_name: mat.name,
+                spec: "",
+                quantity: Number(item.quantity || 0) * (Number(pkg.qty) || 1),
+                unit: unitToUse,
+                unit_price: null,
+                subtotal: null,
+              });
+            }
+          });
+        }
+      }
+
+      const baseSheetInfo = {
+        order_date: getTodayString(true),
+        delivery_date: vendorData.shippingDate,
+        customer: {
+          name: vendorData.name,
+          code: vendorData.code,
+          tax_id: vendorData.tax_id,
+          phone: vendorData.phone,
+          fax: vendorData.fax,
+          address: vendorData.address,
+          contact: vendorData.contact,
+        },
+        logistics: {
+          provider: vendorData.logisticsProvider,
+          notes: vendorData.notes,
+        },
+      };
+
+      sheets.push({
+        ...baseSheetInfo,
+        isPackaging: false,
+        order_number: `${orderNo}`,
+        items: [mainItem],
+        totals: {
+          total_amount: mainItem.subtotal,
+          tax_amount: Math.round(mainItem.subtotal * 0.05),
+          grand_total: mainItem.subtotal + Math.round(mainItem.subtotal * 0.05),
+          document_note: documentNote,
+        },
+      });
+
+      if (packItems.length > 0) {
+        sheets.push({
+          ...baseSheetInfo,
+          isPackaging: true,
+          order_number: `${orderNo}-1`,
+          items: packItems,
+          totals: {
+            total_amount: 0,
+            tax_amount: 0,
+            grand_total: 0,
+            document_note: documentNote,
+          },
+        });
+      }
+    });
+
+    setPreviewData({ isPreview: true, sheets });
     setIsPreviewModalOpen(true);
   };
 
@@ -1855,8 +1909,42 @@ const RequirementOrderPage = () => {
 
       const rootItems = [];
       orderItems.forEach((item) => {
-        if (!item.parentDraftId) rootItems.push(itemMap[item.id]);
-        else {
+        if (!item.parentDraftId) {
+          const rootItem = itemMap[item.id];
+          rootItems.push(rootItem);
+
+          // 🌟 獨立抽出包材並將其作為子 MRP 打包
+          const fItem = formItems.find((f) => f.id === item.id);
+          if (fItem) {
+            let childIdx = 1;
+            if (fItem.outer_pack_id) {
+              const outerQty = Number(fItem.quantity) || 0;
+              rootItem.children_mrp.push({
+                id: `${fItem.id}-${childIdx++}`,
+                productId: fItem.outer_pack_id,
+                qty: outerQty,
+                batch_inventory_info: {
+                  [fItem.outer_pack_id]: { requiredQty: outerQty, batches: [] },
+                },
+                children_mrp: [],
+              });
+            }
+            if (fItem.inner_pack_id) {
+              const innerQty =
+                (Number(fItem.quantity) || 0) *
+                (Number(fItem.sales_pack_quantity) || 1);
+              rootItem.children_mrp.push({
+                id: `${fItem.id}-${childIdx++}`,
+                productId: fItem.inner_pack_id,
+                qty: innerQty,
+                batch_inventory_info: {
+                  [fItem.inner_pack_id]: { requiredQty: innerQty, batches: [] },
+                },
+                children_mrp: [],
+              });
+            }
+          }
+        } else {
           const parentId = item.parentDraftId;
           if (itemMap[parentId])
             itemMap[parentId].children_mrp.push(itemMap[item.id]);
@@ -1892,6 +1980,14 @@ const RequirementOrderPage = () => {
           break;
         }
         const order_number = `CO${getTodayString()}${startingCOSeq.toString().padStart(3, "0")}`;
+
+        const quoteItem = customerQuotes.find(
+          (q) => String(q.id) === String(item.profile_id),
+        );
+        const sourceQuotationId = quoteItem ? quoteItem.quotation_id : null;
+        const outId = quoteItem ? quoteItem.outer_pack : null;
+        const inId = quoteItem ? quoteItem.inner_pack : null;
+
         const coPayload = {
           order_number: order_number,
           order_date: getTodayString(true),
@@ -1908,8 +2004,7 @@ const RequirementOrderPage = () => {
           product_id: item.product_id,
           mrp_id: matchedMrp.id,
           document_note: documentNote,
-          spec:
-            item.profile_id === "custom" ? getGeneratedSpec(item) : item.spec,
+          spec: item.spec,
           quantity: item.quantity,
           unit: item.unit,
           unit_price: item.unit_price ? Number(item.unit_price) : null,
@@ -1921,6 +2016,9 @@ const RequirementOrderPage = () => {
             provider: vendorData.logisticsProvider,
             notes: vendorData.notes,
             batch_id: submissionBatchId,
+            outer_pack_id: outId,
+            inner_pack_id: inId,
+            quotation_id: sourceQuotationId,
           },
         };
         const coRes = await fetchWithAuth("/api/customer_orders", {
@@ -2023,6 +2121,31 @@ const RequirementOrderPage = () => {
 
   const handleConvertToProduction = (id, e) => {
     if (e) e.stopPropagation();
+
+    const plan = mrpPlans.find((p) => p.id === id);
+    let outer_pack_id = null;
+    let inner_pack_id = null;
+    let spec = "";
+    let sales_unit = "";
+    let sales_pack_unit = "";
+    let quotation_id = null;
+
+    if (plan && plan.customer_orders && plan.customer_orders.length > 0) {
+      const primaryCmo = plan.customer_orders[0];
+      outer_pack_id = primaryCmo.logistics_info?.outer_pack_id || null;
+      inner_pack_id = primaryCmo.logistics_info?.inner_pack_id || null;
+      quotation_id = primaryCmo.logistics_info?.quotation_id || null;
+      spec = primaryCmo.spec || "";
+      sales_unit = primaryCmo.unit || "";
+
+      const po = packageOrders.find(
+        (p) => p.product_code === primaryCmo.product_code,
+      );
+      if (po && po.sales_pack_unit) {
+        sales_pack_unit = po.sales_pack_unit;
+      }
+    }
+
     showConfirm(
       "製作生產單",
       "確認要將此單據轉為生產單嗎？\n這將會實際扣除批號庫存。",
@@ -2033,7 +2156,15 @@ const RequirementOrderPage = () => {
           const res = await fetchWithAuth("/api/mrp/convert_to_production", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ mrp_id: id }),
+            body: JSON.stringify({
+              mrp_id: id,
+              outer_pack_id,
+              inner_pack_id,
+              spec,
+              sales_unit,
+              sales_pack_unit,
+              quotation_id,
+            }),
           });
           const json = await res.json();
           if (res.ok) {
@@ -2061,12 +2192,45 @@ const RequirementOrderPage = () => {
           const promises = group.plans
             .filter((d) => d.status.toUpperCase() === "PENDING")
             .map(async (d) => {
+              let outer_pack_id = null;
+              let inner_pack_id = null;
+              let spec = "";
+              let sales_unit = "";
+              let sales_pack_unit = "";
+              let quotation_id = null;
+
+              if (d.customer_orders && d.customer_orders.length > 0) {
+                const primaryCmo = d.customer_orders[0];
+                outer_pack_id =
+                  primaryCmo.logistics_info?.outer_pack_id || null;
+                inner_pack_id =
+                  primaryCmo.logistics_info?.inner_pack_id || null;
+                quotation_id = primaryCmo.logistics_info?.quotation_id || null;
+                spec = primaryCmo.spec || "";
+                sales_unit = primaryCmo.unit || "";
+
+                const po = packageOrders.find(
+                  (p) => p.product_code === primaryCmo.product_code,
+                );
+                if (po && po.sales_pack_unit) {
+                  sales_pack_unit = po.sales_pack_unit;
+                }
+              }
+
               const res = await fetchWithAuth(
                 "/api/mrp/convert_to_production",
                 {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ mrp_id: d.id }),
+                  body: JSON.stringify({
+                    mrp_id: d.id,
+                    outer_pack_id,
+                    inner_pack_id,
+                    spec,
+                    sales_unit,
+                    sales_pack_unit,
+                    quotation_id,
+                  }),
                 },
               );
               const json = await res.json();
@@ -2128,270 +2292,395 @@ const RequirementOrderPage = () => {
   const CustomerOrderTemplate = ({ order }) => {
     if (!order) return null;
     const isPreview = order.isPreview;
-    let customer, logistics, orderNo, orderDate, deliveryDate, totals, items;
+    let sheets = [];
 
+    // 🌟 展開與展平顯示資料，保證流水號連續，並區分出主單與包裝單
     if (isPreview) {
-      customer = order.customer;
-      logistics = order.logistics_info;
-      orderNo = order.order_number;
-      orderDate = order.order_date;
-      deliveryDate = order.delivery_date;
-      totals = order.totals;
-      items = order.items.map((item) => ({
-        product_code: item.product_code,
-        product_name: item.product_name,
-        spec: item.spec,
-        quantity: item.quantity,
-        unit: item.unit,
-        unit_price: item.unit_price,
-        subtotal: Math.round(
-          Number(item.quantity || 0) * Number(item.unit_price || 0),
-        ),
-      }));
+      sheets = order.sheets;
     } else {
       const cmoArray =
         order.customer_orders && Array.isArray(order.customer_orders)
           ? order.customer_orders
           : [order.customer_orders || order];
-      const primaryCmo = cmoArray[0] || {};
-      customer = primaryCmo.customer_info || order.customer_info || {};
-      logistics = primaryCmo.logistics_info || order.logistics_info || {};
+
       const orderNos = Array.from(
         new Set(cmoArray.map((c) => c.order_number).filter(Boolean)),
       );
-      orderNo =
+
+      let currentSeq = 1;
+      let packSeq = 1;
+      const productItems = [];
+      const packItems = [];
+
+      cmoArray.forEach((co) => {
+        productItems.push({
+          seq: currentSeq++,
+          product_code: co.product_code || order.product_code,
+          product_name: co.product_name || order.product_name,
+          spec: co.spec || order.spec,
+          quantity: co.quantity || order.required_qty,
+          unit: co.unit || order.unit,
+          unit_price: co.unit_price || order.unit_price,
+          subtotal: co.total_amount || order.total_amount,
+        });
+
+        if (co.package_items && co.package_items.length > 0) {
+          const po = packageOrders.find(
+            (p) => p.product_code === (co.product_code || order.product_code),
+          );
+          const outer_pack_id = co.logistics_info?.outer_pack_id;
+          const inner_pack_id = co.logistics_info?.inner_pack_id;
+
+          co.package_items.forEach((pkg) => {
+            let unitToUse = pkg.unit;
+            if (po && po.packaging_info) {
+              const pkgInfo = po.packaging_info.find((p) => {
+                const mat = materials.find((m) => m.code === pkg.product_code);
+
+                if (mat && String(p.material_id) === String(mat.id))
+                  return true;
+                if (
+                  mat &&
+                  p.layer === "outer" &&
+                  String(outer_pack_id) === String(mat.id)
+                )
+                  return true;
+                if (
+                  mat &&
+                  p.layer === "inner" &&
+                  String(inner_pack_id) === String(mat.id)
+                )
+                  return true;
+
+                return false;
+              });
+
+              if (pkgInfo) {
+                if (pkgInfo.layer === "outer" && po.sales_unit)
+                  unitToUse = po.sales_unit;
+                if (pkgInfo.layer === "inner" && po.sales_pack_unit)
+                  unitToUse = po.sales_pack_unit;
+              }
+            }
+
+            packItems.push({
+              seq: packSeq++,
+              product_code: pkg.product_code,
+              product_name: pkg.product_name,
+              spec: "",
+              quantity: pkg.quantity,
+              unit: unitToUse,
+              unit_price: null,
+              subtotal: null,
+            });
+          });
+        }
+      });
+
+      const primaryCmo = cmoArray[0] || {};
+      const orderNoStr =
         orderNos.length > 1
           ? `${orderNos[0]} 等${orderNos.length}筆`
           : orderNos[0] || order.order_number || "";
-      orderDate = primaryCmo.order_date || order.order_date || "";
-      deliveryDate = primaryCmo.delivery_date || order.delivery_date || "";
+
       const totalAmt =
         cmoArray.reduce(
           (sum, curr) => sum + Number(curr.total_amount || 0),
           0,
         ) || order.total_amount;
       const taxAmt = Math.round(totalAmt * 0.05);
-      totals = {
-        total_amount: totalAmt,
-        tax_amount: taxAmt,
-        grand_total: totalAmt + taxAmt,
-        document_note: primaryCmo.document_note || order.document_note || "",
+
+      const baseSheetInfo = {
+        order_date: primaryCmo.order_date || order.order_date || "",
+        delivery_date: primaryCmo.delivery_date || order.delivery_date || "",
+        customer: primaryCmo.customer_info || order.customer_info || {},
+        logistics: primaryCmo.logistics_info || order.logistics_info || {},
       };
-      items = cmoArray.map((co) => ({
-        product_code: co.product_code || order.product_code,
-        product_name: co.product_name || order.product_name,
-        spec: co.spec || order.spec,
-        quantity: co.quantity || order.required_qty,
-        unit: co.unit || order.unit,
-        unit_price: co.unit_price || order.unit_price,
-        subtotal: co.total_amount || order.total_amount,
-      }));
+
+      sheets.push({
+        ...baseSheetInfo,
+        isPackaging: false,
+        order_number: orderNoStr,
+        items: productItems,
+        totals: {
+          total_amount: totalAmt,
+          tax_amount: taxAmt,
+          grand_total: totalAmt + taxAmt,
+          document_note: primaryCmo.document_note || order.document_note || "",
+        },
+      });
+
+      if (packItems.length > 0) {
+        let packOrderNo = orderNoStr;
+        if (orderNoStr.includes(" 等")) {
+          packOrderNo = orderNoStr.replace(" 等", "-1 等");
+        } else {
+          packOrderNo = orderNoStr + "-1";
+        }
+
+        sheets.push({
+          ...baseSheetInfo,
+          isPackaging: true,
+          order_number: packOrderNo,
+          items: packItems,
+          totals: {
+            total_amount: 0,
+            tax_amount: 0,
+            grand_total: 0,
+            document_note:
+              primaryCmo.document_note || order.document_note || "",
+          },
+        });
+      }
     }
-    const paddedItems = [...items];
-    while (paddedItems.length < 10) paddedItems.push(null);
+
+    const renderSheet = (title, items, displayOrderNo, isPack, sheetData) => {
+      const paddedItems = [...items];
+      while (paddedItems.length < 10) paddedItems.push(null);
+
+      const sheetTotals = sheetData.totals;
+
+      return (
+        <div
+          key={`${title}-${displayOrderNo}`}
+          className="bg-white font-sans text-black relative p-6 print:p-0 print:mb-0 mb-8 last:mb-0"
+          style={{ pageBreakAfter: "always" }}
+        >
+          <div className="mb-2 w-full">
+            <div className="flex justify-between items-end">
+              <div className="flex-1">
+                <div className="text-lg">基香食品有限公司</div>
+                <div className="text-sm">桃園市觀音區崙坪里1鄰1-10號</div>
+              </div>
+              <div className="flex-1 text-center">
+                <h1 className="text-3xl font-bold tracking-[0.5em] m-0 ml-[0.5em] whitespace-nowrap">
+                  {title}
+                </h1>
+              </div>
+              <div className="flex-1"></div>
+            </div>
+            <div className="flex justify-between text-sm mt-2">
+              <div className="flex-1">電 話: 03-4988228</div>
+              <div className="flex-1 text-center pr-[4.5rem]">
+                傳 真: 03-4988159
+              </div>
+              <div className="flex-1 text-right">版次:03 第 1 頁,共 1 頁</div>
+            </div>
+          </div>
+          <table className="w-full border-collapse border border-black mb-2 text-sm">
+            <tbody>
+              <tr>
+                <td className="border border-black px-3 py-1 align-top w-[40%]">
+                  客戶名稱：{sheetData.customer.name || ""}
+                </td>
+                <td className="border border-black px-3 py-1 align-top w-[30%]">
+                  客戶編號：{sheetData.customer.code || ""}
+                </td>
+                <td className="border border-black px-3 py-1 align-top w-[30%]">
+                  單據日期：{sheetData.order_date}
+                </td>
+              </tr>
+              <tr>
+                <td className="border border-black px-3 py-1 align-top">
+                  客戶統編：{sheetData.customer.tax_id || ""}
+                </td>
+                <td className="border border-black px-3 py-1 align-top">
+                  聯 絡 人：{sheetData.customer.contact || ""}
+                </td>
+                <td className="border border-black px-3 py-1 align-top">
+                  單據編號：{displayOrderNo}
+                </td>
+              </tr>
+              <tr>
+                <td className="border border-black px-3 py-1 align-top">
+                  客戶電話：{sheetData.customer.phone || ""}
+                </td>
+                <td className="border border-black px-3 py-1 align-top">
+                  客戶傳真：{sheetData.customer.fax || ""}
+                </td>
+                <td className="border border-black px-3 py-1 align-top">
+                  交貨日期：{sheetData.delivery_date}
+                </td>
+              </tr>
+              <tr>
+                <td
+                  className="border border-black px-3 py-1 align-top"
+                  colSpan="3"
+                >
+                  送貨地址：{sheetData.customer.address || ""}{" "}
+                  {sheetData.logistics.notes &&
+                    ` (備註: ${sheetData.logistics.notes})`}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <table className="w-full border-collapse border border-black text-center text-sm">
+            <thead>
+              <tr className="font-normal">
+                <th className="border border-black px-2 py-1 w-[4%] font-normal">
+                  序
+                </th>
+                <th className="border border-black px-2 py-1 w-[14%] font-normal">
+                  貨品編號
+                </th>
+                <th className="border border-black px-2 py-1 w-[22%] font-normal">
+                  品名
+                </th>
+                <th className="border border-black px-2 py-1 w-[16%] font-normal">
+                  規格
+                </th>
+                <th className="border border-black px-2 py-1 w-[9%] font-normal">
+                  數量
+                </th>
+                <th className="border border-black px-2 py-1 w-[5%] font-normal">
+                  單位
+                </th>
+                <th className="border border-black px-2 py-1 w-[8%] font-normal">
+                  單價
+                </th>
+                <th className="border border-black px-2 py-1 w-[10%] font-normal">
+                  小計
+                </th>
+                <th className="border border-black px-2 py-1 w-[12%] font-normal">
+                  備註
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {paddedItems.map((item, idx) => (
+                <tr key={idx}>
+                  <td className="border border-black px-2 py-1 text-center">
+                    {item ? item.seq : ""}
+                  </td>
+                  <td
+                    className={`border border-black px-2 py-1 ${item ? "text-left" : "text-transparent"}`}
+                  >
+                    {item ? item.product_code : "."}
+                  </td>
+                  <td
+                    className={`border border-black px-2 py-1 ${item ? "text-left" : "text-transparent"}`}
+                  >
+                    {item ? item.product_name : "."}
+                  </td>
+                  <td
+                    className={`border border-black px-2 py-1 ${item ? "text-left" : "text-transparent"}`}
+                  >
+                    {item ? item.spec : "."}
+                  </td>
+                  <td className="border border-black px-2 py-1 text-right">
+                    {item && item.quantity != null
+                      ? Number(item.quantity).toLocaleString(undefined, {
+                          maximumFractionDigits: 4,
+                        })
+                      : ""}
+                  </td>
+                  <td className="border border-black px-2 py-1 text-center">
+                    {item ? item.unit : ""}
+                  </td>
+                  <td className="border border-black px-2 py-1 text-right">
+                    {item && item.unit_price != null
+                      ? Number(item.unit_price).toLocaleString(undefined, {
+                          maximumFractionDigits: 4,
+                        })
+                      : ""}
+                  </td>
+                  <td className="border border-black px-2 py-1 text-right">
+                    {item && item.subtotal != null
+                      ? Number(item.subtotal).toLocaleString(undefined, {
+                          maximumFractionDigits: 4,
+                        })
+                      : ""}
+                  </td>
+                  <td
+                    className={`border border-black px-2 py-1 ${item ? "text-left" : ""}`}
+                  ></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <table className="w-full border-collapse border border-black border-t-0 text-sm">
+            <tbody>
+              <tr>
+                <td className="border-r border-b border-black px-3 py-1 align-top w-[35%]">
+                  合計金額：
+                  {Number(sheetTotals.total_amount || 0).toLocaleString(
+                    undefined,
+                    {
+                      maximumFractionDigits: 4,
+                    },
+                  )}
+                </td>
+                <td className="border-r border-b border-black px-3 py-1 align-top w-[30%] text-center">
+                  營業稅：
+                  {Number(sheetTotals.tax_amount || 0).toLocaleString(
+                    undefined,
+                    {
+                      maximumFractionDigits: 4,
+                    },
+                  )}
+                </td>
+                <td className="border-b border-black px-3 py-1 align-top w-[35%]">
+                  總計金額：
+                  {Number(sheetTotals.grand_total || 0).toLocaleString(
+                    undefined,
+                    {
+                      maximumFractionDigits: 4,
+                    },
+                  )}
+                </td>
+              </tr>
+              <tr>
+                <td className="px-3 py-2 align-top" colSpan="3">
+                  <div className="flex justify-between mb-2">
+                    <div className="w-[50%]">
+                      單據備註：{sheetTotals.document_note}
+                    </div>
+                    <div className="w-[25%] flex items-center">
+                      車輛是否清潔：
+                      <div className="w-5 h-5 border border-black ml-2 inline-block"></div>
+                    </div>
+                    <div className="w-[25%] flex items-center">
+                      車輛是否上鎖：
+                      <div className="w-5 h-5 border border-black ml-2 inline-block"></div>
+                    </div>
+                  </div>
+                  <div className="flex justify-between">
+                    <div className="w-[65%]">
+                      車輛溫度：
+                      <span className="inline-block w-16 border-b border-black mx-1"></span>
+                      °C 冷藏：0-7°C , 冷凍：-18°C 以下。
+                    </div>
+                    <div className="w-[35%]">
+                      運輸方式：
+                      {sheetData.logistics.provider || "___________________"}
+                    </div>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <div className="flex justify-between mt-3 px-6 text-sm">
+            <div>主 管：</div>
+            <div>經 辦：</div>
+            <div>出 貨：</div>
+            <div>簽 收：</div>
+            <div>表號：C-32</div>
+          </div>
+        </div>
+      );
+    };
 
     return (
-      <div className="bg-white font-sans text-black relative p-6 print:p-0">
-        <div className="mb-2 w-full">
-          <div className="flex justify-between items-end">
-            <div className="flex-1">
-              <div className="text-lg">基香食品有限公司</div>
-              <div className="text-sm">桃園市觀音區崙坪里1鄰1-10號</div>
-            </div>
-            <div className="flex-1 text-center">
-              <h1 className="text-3xl font-bold tracking-[0.5em] m-0 ml-[0.5em] whitespace-nowrap">
-                客 戶 訂 貨 單
-              </h1>
-            </div>
-            <div className="flex-1"></div>
-          </div>
-          <div className="flex justify-between text-sm mt-2">
-            <div className="flex-1">電 話: 03-4988228</div>
-            <div className="flex-1 text-center pr-[4.5rem]">
-              傳 真: 03-4988159
-            </div>
-            <div className="flex-1 text-right">版次:03 第 1 頁,共 1 頁</div>
-          </div>
-        </div>
-        <table className="w-full border-collapse border border-black mb-2 text-sm">
-          <tbody>
-            <tr>
-              <td className="border border-black px-3 py-1 align-top w-[40%]">
-                客戶名稱：{customer.name || ""}
-              </td>
-              <td className="border border-black px-3 py-1 align-top w-[30%]">
-                客戶編號：{customer.code || ""}
-              </td>
-              <td className="border border-black px-3 py-1 align-top w-[30%]">
-                單據日期：{orderDate}
-              </td>
-            </tr>
-            <tr>
-              <td className="border border-black px-3 py-1 align-top">
-                客戶統編：{customer.tax_id || ""}
-              </td>
-              <td className="border border-black px-3 py-1 align-top">
-                聯 絡 人：{customer.contact || ""}
-              </td>
-              <td className="border border-black px-3 py-1 align-top">
-                單據編號：{orderNo}
-              </td>
-            </tr>
-            <tr>
-              <td className="border border-black px-3 py-1 align-top">
-                客戶電話：{customer.phone || ""}
-              </td>
-              <td className="border border-black px-3 py-1 align-top">
-                客戶傳真：{customer.fax || ""}
-              </td>
-              <td className="border border-black px-3 py-1 align-top">
-                交貨日期：{deliveryDate}
-              </td>
-            </tr>
-            <tr>
-              <td
-                className="border border-black px-3 py-1 align-top"
-                colSpan="3"
-              >
-                送貨地址：{customer.address || ""}{" "}
-                {logistics.notes && ` (備註: ${logistics.notes})`}
-              </td>
-            </tr>
-          </tbody>
-        </table>
-        <table className="w-full border-collapse border border-black text-center text-sm">
-          <thead>
-            <tr className="font-normal">
-              <th className="border border-black px-2 py-1 w-[4%] font-normal">
-                序
-              </th>
-              <th className="border border-black px-2 py-1 w-[14%] font-normal">
-                貨品編號
-              </th>
-              <th className="border border-black px-2 py-1 w-[22%] font-normal">
-                品名
-              </th>
-              <th className="border border-black px-2 py-1 w-[16%] font-normal">
-                規格
-              </th>
-              <th className="border border-black px-2 py-1 w-[9%] font-normal">
-                數量
-              </th>
-              <th className="border border-black px-2 py-1 w-[5%] font-normal">
-                單位
-              </th>
-              <th className="border border-black px-2 py-1 w-[8%] font-normal">
-                單價
-              </th>
-              <th className="border border-black px-2 py-1 w-[10%] font-normal">
-                小計
-              </th>
-              <th className="border border-black px-2 py-1 w-[12%] font-normal">
-                備註
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {paddedItems.map((item, idx) => (
-              <tr key={idx}>
-                <td className="border border-black px-2 py-1">
-                  {item ? idx + 1 : "."}
-                </td>
-                <td
-                  className={`border border-black px-2 py-1 ${item ? "text-left" : "text-transparent"}`}
-                >
-                  {item ? item.product_code : "."}
-                </td>
-                <td
-                  className={`border border-black px-2 py-1 ${item ? "text-left" : "text-transparent"}`}
-                >
-                  {item ? item.product_name : "."}
-                </td>
-                <td
-                  className={`border border-black px-2 py-1 ${item ? "text-left" : "text-transparent"}`}
-                >
-                  {item ? item.spec : "."}
-                </td>
-                <td className="border border-black px-2 py-1 text-right">
-                  {item && item.quantity
-                    ? Number(item.quantity).toLocaleString(undefined, {
-                        minimumFractionDigits: 2,
-                      })
-                    : ""}
-                </td>
-                <td className="border border-black px-2 py-1">
-                  {item ? item.unit : ""}
-                </td>
-                <td className="border border-black px-2 py-1 text-right">
-                  {item
-                    ? Number(item.unit_price).toLocaleString(undefined, {
-                        minimumFractionDigits: 2,
-                      })
-                    : ""}
-                </td>
-                <td className="border border-black px-2 py-1 text-right">
-                  {item
-                    ? Number(item.subtotal).toLocaleString(undefined, {
-                        minimumFractionDigits: 2,
-                      })
-                    : ""}
-                </td>
-                <td
-                  className={`border border-black px-2 py-1 ${item ? "text-left" : ""}`}
-                ></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <table className="w-full border-collapse border border-black border-t-0 text-sm">
-          <tbody>
-            <tr>
-              <td className="border-r border-b border-black px-3 py-1 align-top w-[35%]">
-                合計金額：{totals.total_amount}
-              </td>
-              <td className="border-r border-b border-black px-3 py-1 align-top w-[30%] text-center">
-                營業稅：{totals.tax_amount}
-              </td>
-              <td className="border-b border-black px-3 py-1 align-top w-[35%]">
-                總計金額：{totals.grand_total}
-              </td>
-            </tr>
-            <tr>
-              <td className="px-3 py-2 align-top" colSpan="3">
-                <div className="flex justify-between mb-2">
-                  <div className="w-[50%]">
-                    單據備註：{totals.document_note}
-                  </div>
-                  <div className="w-[25%] flex items-center">
-                    車輛是否清潔：
-                    <div className="w-5 h-5 border border-black ml-2 inline-block"></div>
-                  </div>
-                  <div className="w-[25%] flex items-center">
-                    車輛是否上鎖：
-                    <div className="w-5 h-5 border border-black ml-2 inline-block"></div>
-                  </div>
-                </div>
-                <div className="flex justify-between">
-                  <div className="w-[65%]">
-                    車輛溫度：
-                    <span className="inline-block w-16 border-b border-black mx-1"></span>
-                    °C 冷藏：0-7°C , 冷凍：-18°C 以下。
-                  </div>
-                  <div className="w-[35%]">
-                    運輸方式：{logistics.provider || "___________________"}
-                  </div>
-                </div>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-        <div className="flex justify-between mt-3 px-6 text-sm">
-          <div>主 管：</div>
-          <div>經 辦：</div>
-          <div>出 貨：</div>
-          <div>簽 收：</div>
-          <div>表號：C-32</div>
-        </div>
+      <div className="flex flex-col">
+        {sheets.map((sheet) =>
+          renderSheet(
+            sheet.isPackaging ? "包 裝 單" : "客 戶 訂 貨 單",
+            sheet.items,
+            sheet.order_number,
+            sheet.isPackaging,
+            sheet,
+          ),
+        )}
       </div>
     );
   };
@@ -2400,7 +2689,37 @@ const RequirementOrderPage = () => {
     if (!data) return null;
     return (
       <div className="hidden print:block w-full bg-white text-black font-sans mx-auto print:pt-4">
-        <style>{`@media print { @page { size: A4 landscape; margin: 15mm; } body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }`}</style>
+        <style>{`
+          @media print { 
+          @page { 
+            size: A4 landscape; 
+            margin: 8mm 10mm; 
+          } 
+          html, body { 
+            width: 100% !important;
+            height: auto !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            background: #fff !important;
+            -webkit-print-color-adjust: exact !important; 
+            print-color-adjust: exact !important; 
+          }
+          table {
+            page-break-inside: auto;
+          }
+          tr {
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+          }
+          thead {
+            display: table-header-group;
+          }
+          .print-avoid-break {
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+          }
+        }
+        `}</style>
         <CustomerOrderTemplate order={data} />
       </div>
     );
@@ -2478,11 +2797,12 @@ const RequirementOrderPage = () => {
                     </label>
                     <input
                       type="text"
+                      disabled={!vendorData.id}
                       value={vendorData.tax_id}
                       onChange={(e) =>
                         setVendorData({ ...vendorData, tax_id: e.target.value })
                       }
-                      className="w-full h-11 px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 focus:bg-white text-slate-800 text-sm font-medium transition-all shadow-sm"
+                      className="w-full h-11 px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 focus:bg-white text-slate-800 text-sm font-medium transition-all shadow-sm disabled:opacity-60"
                     />
                   </div>
                   <div className="lg:col-span-1">
@@ -2491,6 +2811,7 @@ const RequirementOrderPage = () => {
                     </label>
                     <input
                       type="date"
+                      disabled={!vendorData.id}
                       value={vendorData.shippingDate}
                       onChange={(e) =>
                         setVendorData({
@@ -2498,7 +2819,7 @@ const RequirementOrderPage = () => {
                           shippingDate: e.target.value,
                         })
                       }
-                      className="w-full h-11 px-4 py-2 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 text-slate-800 text-sm font-medium transition-all shadow-sm"
+                      className="w-full h-11 px-4 py-2 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 text-slate-800 text-sm font-medium transition-all shadow-sm disabled:opacity-60 disabled:bg-slate-50"
                     />
                   </div>
                   <div className="lg:col-span-2">
@@ -2507,6 +2828,7 @@ const RequirementOrderPage = () => {
                     </label>
                     <input
                       type="text"
+                      disabled={!vendorData.id}
                       value={vendorData.address}
                       onChange={(e) =>
                         setVendorData({
@@ -2514,7 +2836,7 @@ const RequirementOrderPage = () => {
                           address: e.target.value,
                         })
                       }
-                      className="w-full h-11 px-4 py-2 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 text-slate-800 text-sm font-medium transition-all shadow-sm"
+                      className="w-full h-11 px-4 py-2 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 text-slate-800 text-sm font-medium transition-all shadow-sm disabled:opacity-60 disabled:bg-slate-50"
                     />
                   </div>
                   <div className="lg:col-span-1">
@@ -2523,6 +2845,7 @@ const RequirementOrderPage = () => {
                     </label>
                     <div className="relative">
                       <select
+                        disabled={!vendorData.id}
                         value={vendorData.logisticsProvider}
                         onChange={(e) =>
                           setVendorData({
@@ -2530,7 +2853,7 @@ const RequirementOrderPage = () => {
                             logisticsProvider: e.target.value,
                           })
                         }
-                        className="appearance-none w-full h-11 bg-white border border-slate-200 rounded-xl pl-4 pr-10 py-2 text-sm font-medium focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all shadow-sm cursor-pointer text-slate-800"
+                        className="appearance-none w-full h-11 bg-white border border-slate-200 rounded-xl pl-4 pr-10 py-2 text-sm font-medium focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all shadow-sm cursor-pointer text-slate-800 disabled:opacity-60 disabled:bg-slate-50 disabled:cursor-not-allowed"
                       >
                         <option value="">選擇物流商</option>
                         {logisticsOptions.map((option) => (
@@ -2557,7 +2880,8 @@ const RequirementOrderPage = () => {
                   <button
                     type="button"
                     onClick={handleAddRow}
-                    className="text-sm bg-slate-100 text-slate-700 px-5 py-2.5 rounded-xl hover:bg-slate-200 font-medium transition-all shadow-sm flex items-center gap-2 border border-slate-200"
+                    disabled={!vendorData.id}
+                    className="text-sm bg-slate-100 text-slate-700 px-5 py-2.5 rounded-xl hover:bg-slate-200 font-medium transition-all shadow-sm flex items-center gap-2 border border-slate-200 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <Plus size={18} strokeWidth={2.5} /> 新增明細
                   </button>
@@ -2568,12 +2892,11 @@ const RequirementOrderPage = () => {
                       (Number(item.quantity) || 0) *
                         (Number(item.unit_price) || 0),
                     );
-                    const selectedProductObj = readyProducts.find(
-                      (p) => String(p.id) === String(item.product_id),
-                    );
-                    const productProfiles =
-                      selectedProductObj?.product_profiles || [];
                     const isFieldsLocked = item.profile_id !== "custom";
+
+                    const availablePackageOrders = packageOrders.filter(
+                      (po) => po.product_code === item.product_code,
+                    );
 
                     return (
                       <div
@@ -2601,6 +2924,7 @@ const RequirementOrderPage = () => {
                                   選擇成品
                                 </label>
                                 <FilterableDropdown
+                                  disabled={!vendorData.id}
                                   value={item.product_id}
                                   onChange={(valId) => {
                                     const prod = readyProducts.find(
@@ -2610,7 +2934,11 @@ const RequirementOrderPage = () => {
                                       handleSelectProduct(item.id, prod);
                                   }}
                                   options={readyProducts}
-                                  placeholder="選擇成品"
+                                  placeholder={
+                                    vendorData.id
+                                      ? "選擇已報價成品"
+                                      : "請先選擇客戶"
+                                  }
                                   renderItem={(m) => (
                                     <div className="flex justify-between items-center w-full">
                                       <span className="text-sm text-slate-400 shrink-0 font-mono">
@@ -2628,223 +2956,42 @@ const RequirementOrderPage = () => {
                                   規格範本
                                 </label>
                                 <FilterableDropdown
+                                  disabled={!item.product_id}
                                   value={item.profile_id || ""}
                                   onChange={(valId) =>
                                     handleSelectProfile(item.id, valId)
                                   }
                                   options={[
                                     { id: "", name: "選擇規格" },
-                                    ...productProfiles.map((p) => ({
-                                      id: p.id,
-                                      name: `${p.spec} ${p.sales_price ? `$${p.sales_price}` : ""}`,
-                                    })),
-                                    { id: "custom", name: "+ 自製規格" },
+                                    ...customerQuotes
+                                      .filter(
+                                        (q) =>
+                                          String(q.product_detail?.id) ===
+                                          String(item.product_id),
+                                      )
+                                      .map((q) => ({
+                                        id: String(q.id),
+                                        name: q.spec || `規格 ${q.id}`,
+                                      })),
                                   ]}
-                                  placeholder="選擇規格"
-                                  disabled={!item.product_id}
+                                  placeholder={
+                                    item.product_id
+                                      ? "選擇報價規格"
+                                      : "請先選擇成品"
+                                  }
                                 />
                               </div>
                               <div>
                                 <label className="block text-sm font-medium text-slate-500 mb-2">
-                                  自訂規格文字
+                                  規格文字
                                 </label>
                                 <input
                                   type="text"
-                                  value={
-                                    item.profile_id === "custom"
-                                      ? getGeneratedSpec(item)
-                                      : item.spec || ""
-                                  }
+                                  value={item.spec || ""}
                                   readOnly
-                                  disabled={isFieldsLocked}
-                                  className={`w-full h-11 px-4 border border-slate-200 rounded-xl text-sm font-medium outline-none shadow-sm transition-all ${isFieldsLocked ? "bg-slate-50/80 text-slate-500 cursor-not-allowed" : "bg-slate-50 text-blue-700 cursor-default focus:ring-2 focus:ring-blue-500/20"}`}
+                                  disabled={true}
+                                  className={`w-full h-11 px-4 border border-slate-200 rounded-xl text-sm font-medium outline-none shadow-sm transition-all bg-slate-50/80 text-slate-500 cursor-not-allowed`}
                                 />
-                              </div>
-                            </div>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-5 pt-3 border-t border-slate-200/60">
-                              <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-4">
-                                <span className="text-sm font-semibold text-slate-600 tracking-wide block">
-                                  銷售大單位 (外層)
-                                </span>
-                                <div>
-                                  <label className="block text-sm font-medium text-slate-400 mb-2">
-                                    對應實體外包裝
-                                  </label>
-                                  <FilterableDropdown
-                                    value={item.outer_pack_id || ""}
-                                    onChange={(valId) =>
-                                      handleOuterPackChange(
-                                        item.id,
-                                        valId ? Number(valId) : null,
-                                      )
-                                    }
-                                    options={packMaterials}
-                                    placeholder="選擇外包裝"
-                                    disabled={isFieldsLocked}
-                                    renderItem={(p) =>
-                                      p.code ? `[${p.code}] ${p.name}` : p.name
-                                    }
-                                    className="w-full h-11 px-4 rounded-xl text-sm"
-                                  />
-                                </div>
-                                <div className="grid grid-cols-2 gap-4">
-                                  <div>
-                                    <label className="block text-sm text-slate-400 mb-2 font-medium">
-                                      大單位名稱 (如: 箱、桶)
-                                    </label>
-                                    <input
-                                      type="text"
-                                      value={item.unit}
-                                      onChange={(e) =>
-                                        handleItemChange(
-                                          item.id,
-                                          "unit",
-                                          e.target.value,
-                                        )
-                                      }
-                                      disabled={isFieldsLocked}
-                                      className="w-full px-3 py-2 h-11 border border-slate-200 rounded-xl text-center font-medium text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 disabled:bg-slate-50 disabled:text-slate-400 transition-all"
-                                    />
-                                  </div>
-                                  <div>
-                                    <label className="block text-sm text-slate-400 mb-2 font-medium">
-                                      容積 (KG)
-                                    </label>
-                                    <input
-                                      type="number"
-                                      step="any"
-                                      value={item.outer_capacity}
-                                      onChange={(e) =>
-                                        handleItemChange(
-                                          item.id,
-                                          "outer_capacity",
-                                          e.target.value,
-                                        )
-                                      }
-                                      onBlur={(e) => {
-                                        const val = parseFloat(e.target.value);
-                                        if (!isNaN(val))
-                                          handleItemChange(
-                                            item.id,
-                                            "outer_capacity",
-                                            val.toString(),
-                                          );
-                                      }}
-                                      disabled={
-                                        isFieldsLocked || !!item.inner_pack_id
-                                      }
-                                      className="w-full px-3 py-2 h-11 border border-slate-200 rounded-xl text-center font-mono font-medium text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 disabled:bg-slate-50 disabled:text-slate-400 transition-all"
-                                    />
-                                  </div>
-                                </div>
-                              </div>
-                              <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-4">
-                                <span className="text-sm font-semibold text-slate-600 tracking-wide block">
-                                  內部小單位 (內層, 若無可略過)
-                                </span>
-                                <div>
-                                  <label className="block text-sm font-medium text-slate-400 mb-2">
-                                    對應實體內包裝
-                                  </label>
-                                  <FilterableDropdown
-                                    value={item.inner_pack_id || ""}
-                                    onChange={(valId) =>
-                                      handleInnerPackChange(
-                                        item.id,
-                                        valId ? Number(valId) : null,
-                                      )
-                                    }
-                                    options={packMaterials}
-                                    placeholder="無"
-                                    disabled={isFieldsLocked}
-                                    renderItem={(p) =>
-                                      p.code ? `[${p.code}] ${p.name}` : p.name
-                                    }
-                                    className="w-full h-11 px-4 rounded-xl text-sm"
-                                  />
-                                </div>
-                                <div className="grid grid-cols-3 gap-4">
-                                  <div>
-                                    <label className="block text-sm text-slate-400 mb-2 font-medium">
-                                      每大單位內含
-                                    </label>
-                                    <input
-                                      type="number"
-                                      step="any"
-                                      value={item.sales_pack_quantity}
-                                      onChange={(e) =>
-                                        handleItemChange(
-                                          item.id,
-                                          "sales_pack_quantity",
-                                          e.target.value,
-                                        )
-                                      }
-                                      onBlur={(e) => {
-                                        const val = parseFloat(e.target.value);
-                                        if (!isNaN(val))
-                                          handleItemChange(
-                                            item.id,
-                                            "sales_pack_quantity",
-                                            val.toString(),
-                                          );
-                                      }}
-                                      disabled={
-                                        isFieldsLocked || !item.inner_pack_id
-                                      }
-                                      className="w-full px-3 py-2 h-11 border border-slate-200 rounded-xl text-center font-mono font-medium text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 disabled:bg-slate-50 disabled:text-slate-400 transition-all"
-                                    />
-                                  </div>
-                                  <div>
-                                    <label className="block text-sm text-slate-400 mb-2 font-medium">
-                                      小單位名稱
-                                    </label>
-                                    <input
-                                      type="text"
-                                      value={item.sales_pack_unit}
-                                      onChange={(e) =>
-                                        handleItemChange(
-                                          item.id,
-                                          "sales_pack_unit",
-                                          e.target.value,
-                                        )
-                                      }
-                                      disabled={
-                                        isFieldsLocked || !item.inner_pack_id
-                                      }
-                                      className="w-full px-3 py-2 h-11 border border-slate-200 rounded-xl text-center font-medium text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 disabled:bg-slate-50 disabled:text-slate-400 transition-all"
-                                    />
-                                  </div>
-                                  <div>
-                                    <label className="block text-sm text-slate-400 mb-2 font-medium">
-                                      容積 (KG)
-                                    </label>
-                                    <input
-                                      type="number"
-                                      step="any"
-                                      value={item.inner_capacity}
-                                      onChange={(e) =>
-                                        handleItemChange(
-                                          item.id,
-                                          "inner_capacity",
-                                          e.target.value,
-                                        )
-                                      }
-                                      onBlur={(e) => {
-                                        const val = parseFloat(e.target.value);
-                                        if (!isNaN(val))
-                                          handleItemChange(
-                                            item.id,
-                                            "inner_capacity",
-                                            val.toString(),
-                                          );
-                                      }}
-                                      disabled={
-                                        isFieldsLocked || !item.inner_pack_id
-                                      }
-                                      className="w-full px-3 py-2 h-11 border border-slate-200 rounded-xl text-center font-mono font-medium text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 disabled:bg-slate-50 disabled:text-slate-400 transition-all"
-                                    />
-                                  </div>
-                                </div>
                               </div>
                             </div>
                           </div>
@@ -2864,6 +3011,7 @@ const RequirementOrderPage = () => {
                                     inputMode="decimal"
                                     pattern="[0-9]*"
                                     required
+                                    disabled={!item.profile_id}
                                     value={item.quantity}
                                     onChange={(e) =>
                                       handleItemChange(
@@ -2872,10 +3020,10 @@ const RequirementOrderPage = () => {
                                         e.target.value,
                                       )
                                     }
-                                    className="w-32 h-12 text-right bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl px-4 py-2 focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none text-xl font-mono font-semibold transition-all shadow-sm"
+                                    className="w-32 h-12 text-right bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl px-4 py-2 focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none text-xl font-mono font-semibold transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
                                   />
-                                  <span className="text-base font-medium text-slate-500 w-8">
-                                    {item.unit || "箱"}
+                                  <span className="text-base font-medium text-slate-500 min-w-[2rem]">
+                                    {item.unit}
                                   </span>
                                 </div>
                               </div>
@@ -2897,7 +3045,8 @@ const RequirementOrderPage = () => {
                                       e.target.value,
                                     )
                                   }
-                                  disabled={isFieldsLocked}
+                                  disabled={!item.profile_id}
+                                  placeholder={item.profile_id ? "0" : ""}
                                   className="w-32 h-11 text-right bg-white border border-blue-200 rounded-xl px-3 py-2 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none text-lg font-mono font-medium shadow-sm transition-all disabled:bg-slate-50/50 disabled:text-blue-800 disabled:cursor-not-allowed"
                                 />
                               </div>
@@ -2923,8 +3072,9 @@ const RequirementOrderPage = () => {
                     </label>
                     <textarea
                       value={documentNote}
+                      disabled={!vendorData.id}
                       onChange={(e) => setDocumentNote(e.target.value)}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-2xl p-4 focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none resize-none text-sm font-medium transition-all flex-1 shadow-inner text-slate-800"
+                      className="w-full bg-slate-50 border border-slate-200 rounded-2xl p-4 focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none resize-none text-sm font-medium transition-all flex-1 shadow-inner text-slate-800 disabled:opacity-60"
                     ></textarea>
                   </div>
                   <div className="flex flex-col justify-end bg-white rounded-3xl border border-slate-200 shadow-sm p-8">

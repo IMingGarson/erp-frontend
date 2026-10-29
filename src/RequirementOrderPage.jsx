@@ -16,6 +16,8 @@ import {
   Check,
   Database,
   Package,
+  History,
+  Loader2,
 } from "lucide-react";
 import { useAuthStore } from "./store/authStore";
 
@@ -202,8 +204,8 @@ const TypeTag = ({ type }) => {
       css: "bg-orange-50 text-orange-700 border-orange-200",
     },
     OTHER: {
-      label: "標籤",
-      css: "bg-orange-50 text-orange-700 border-orange-200",
+      label: "其他",
+      css: "bg-slate-50 text-slate-700 border-slate-200",
     },
   };
   const typeData = config[type] || {
@@ -472,7 +474,7 @@ const BatchRow = ({
       }
       if (parsedVal > batch.available)
         val =
-          matType === "PACK"
+          matType === "PACK" || matType === "OTHER" || matType === "STICKER"
             ? Math.floor(batch.available).toString()
             : batch.available.toString();
     }
@@ -625,15 +627,26 @@ const MaterialAllocationList = ({
       const seqA = bomA?.sequence_num ? String(bomA.sequence_num).trim() : "";
       const seqB = bomB?.sequence_num ? String(bomB.sequence_num).trim() : "";
 
-      if (seqA && seqB)
-        return seqA.localeCompare(seqB, undefined, {
+      if (seqA && seqB) {
+        const cmp = seqA.localeCompare(seqB, undefined, {
           numeric: true,
           sensitivity: "base",
         });
-      if (seqA && !seqB) return -1;
-      if (!seqA && seqB) return 1;
+        if (cmp !== 0) return cmp;
+      } else if (seqA && !seqB) {
+        return -1;
+      } else if (!seqA && seqB) {
+        return 1;
+      }
 
-      const typePriority = { SEMI: 1, RAW: 2, PACK: 3, PRODUCT: 4 };
+      const typePriority = {
+        SEMI: 1,
+        RAW: 2,
+        PACK: 3,
+        PRODUCT: 4,
+        STICKER: 5,
+        OTHER: 6,
+      };
       const pA = typePriority[matA.type?.toUpperCase()] || 99;
       const pB = typePriority[matB.type?.toUpperCase()] || 99;
       if (pA !== pB) return pA - pB;
@@ -973,6 +986,14 @@ const RequirementOrderPage = () => {
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // 🌟 Tab UI 狀態管理
+  const [activeFormTabs, setActiveFormTabs] = useState({});
+  const [showDeliveryOnly, setShowDeliveryOnly] = useState(false);
+  const [vendorHistory, setVendorHistory] = useState({
+    records: [],
+    loading: false,
+  });
+
   const showAlert = (title, message, status = "info") =>
     setDialog({
       isOpen: true,
@@ -999,6 +1020,34 @@ const RequirementOrderPage = () => {
   useEffect(() => {
     fetchData();
   }, []);
+
+  // 🌟 自動根據客戶變更抓取歷史紀錄
+  useEffect(() => {
+    const fetchHistory = async () => {
+      if (!vendorData.id) {
+        setVendorHistory({ records: [], loading: false });
+        return;
+      }
+      setVendorHistory((prev) => ({ ...prev, loading: true }));
+      try {
+        const res = await fetchWithAuth(
+          `/api/vendors/${vendorData.id}/historical_records`,
+        );
+        if (res.ok) {
+          const json = await res.json();
+          // 確保以 json.data 的方式取得資料
+          const data = json.data || [];
+          setVendorHistory({ records: data, loading: false });
+        } else {
+          throw new Error("無法取得歷史紀錄");
+        }
+      } catch (err) {
+        setVendorHistory((prev) => ({ ...prev, loading: false }));
+        showAlert("錯誤", err.message, "error");
+      }
+    };
+    fetchHistory();
+  }, [vendorData.id]);
 
   const getGeneratedSpec = (item) => {
     const cleanNumStr = (val) => {
@@ -1210,6 +1259,7 @@ const RequirementOrderPage = () => {
 
     setCustomerQuotes([]);
     setFormItems([createEmptyRow(dailySequence)]);
+    setActiveFormTabs({});
 
     try {
       const res = await fetchWithAuth(
@@ -1236,8 +1286,14 @@ const RequirementOrderPage = () => {
     setDailySequence(nextSeq);
     setFormItems((prev) => [...prev, createEmptyRow(nextSeq)]);
   };
-  const handleRemoveRow = (id) =>
+  const handleRemoveRow = (id) => {
     setFormItems((prev) => prev.filter((item) => item.id !== id));
+    setActiveFormTabs((prev) => {
+      const newTabs = { ...prev };
+      delete newTabs[id];
+      return newTabs;
+    });
+  };
 
   const handleItemChange = (id, field, value) =>
     setFormItems((prev) =>
@@ -1434,7 +1490,6 @@ const RequirementOrderPage = () => {
 
       buildDrafts(fItem.product_id, totalWeightFrac, motherId, null);
 
-      // 🌟 將所有的包裝資料(包含 OUTER, INNER, OTHER) 整合成單一筆「包裝子需求單」
       const po = packageOrders.find(
         (p) => String(p.product_code) === String(fItem.product_code),
       );
@@ -1567,7 +1622,6 @@ const RequirementOrderPage = () => {
 
       const itemReqs = {};
 
-      // 🌟 將所有包材全數展開並計算需求量
       if (isNewOrder && item.isPackagingNode) {
         item.packaging_info.forEach((pkg) => {
           let targetMatId = pkg.material_id;
@@ -1579,7 +1633,6 @@ const RequirementOrderPage = () => {
             targetMatId = item.inner_pack_id;
           }
 
-          // 基本訂單數量 * 該包材每單位用量
           const reqQty = (Number(item.qty) || 0) * (Number(pkg.qty) || 1);
 
           itemReqs[targetMatId] = {
@@ -1850,7 +1903,6 @@ const RequirementOrderPage = () => {
       const packItems = [];
       let pSeq = 1;
 
-      // 🌟 定位該母單專屬的包裝子節點，並抓出它的流水號索引
       const packNode = orderItems.find(
         (i) => i.parentDraftId === item.id && i.type === "PACKAGING",
       );
@@ -1987,15 +2039,11 @@ const RequirementOrderPage = () => {
 
       const itemMap = {};
       orderItems.forEach((item) => {
+        if (item.type === "PACKAGING") return;
+
         const cleanBatchInfo = { ...(allocations[item.id] || {}) };
         delete cleanBatchInfo._base_qty;
         delete cleanBatchInfo._productId;
-
-        if (item.type === "PACKAGING") {
-          Object.keys(cleanBatchInfo).forEach((matIdStr) => {
-            cleanBatchInfo[matIdStr].is_pack = 1;
-          });
-        }
 
         const cleanItem = { ...item };
         delete cleanItem._qtyFrac;
@@ -2009,8 +2057,59 @@ const RequirementOrderPage = () => {
 
       const rootItems = [];
       orderItems.forEach((item) => {
+        if (item.type === "PACKAGING") return;
+
         if (!item.parentDraftId) {
-          rootItems.push(itemMap[item.id]);
+          const rootItem = itemMap[item.id];
+          rootItems.push(rootItem);
+
+          const fItem = formItems.find((f) => f.id === item.id);
+          if (fItem) {
+            const packAllocNode = allocations[`${fItem.id}-PACK`] || {};
+            const combinedBatchInfo = {};
+
+            const po = packageOrders.find(
+              (p) => String(p.product_code) === String(fItem.product_code),
+            );
+
+            if (po && po.packaging_info) {
+              po.packaging_info.forEach((pkg) => {
+                let targetMatId = pkg.material_id;
+                if (pkg.layer === "outer" && fItem.outer_pack_id) {
+                  targetMatId = fItem.outer_pack_id;
+                }
+                if (pkg.layer === "inner" && fItem.inner_pack_id) {
+                  targetMatId = fItem.inner_pack_id;
+                }
+
+                if (packAllocNode[targetMatId]) {
+                  combinedBatchInfo[targetMatId] = {
+                    ...packAllocNode[targetMatId],
+                    is_pack: 1,
+                  };
+                }
+              });
+            }
+
+            if (Object.keys(combinedBatchInfo).length > 0) {
+              let maxSuffix = 0;
+              orderItems.forEach((i) => {
+                if (i.id.startsWith(`${fItem.id}-`) && i.type !== "PACKAGING") {
+                  const parts = i.id.split("-");
+                  const suffix = parseInt(parts[parts.length - 1], 10);
+                  if (!isNaN(suffix) && suffix > maxSuffix) maxSuffix = suffix;
+                }
+              });
+
+              rootItem.children_mrp.push({
+                id: `${fItem.id}-${maxSuffix + 1}`,
+                productId: fItem.product_id,
+                qty: Number(fItem.quantity) || 0,
+                batch_inventory_info: combinedBatchInfo,
+                children_mrp: [],
+              });
+            }
+          }
         } else {
           const parentId = item.parentDraftId;
           if (itemMap[parentId])
@@ -2428,7 +2527,6 @@ const RequirementOrderPage = () => {
               }
             }
 
-            // 🌟 透過 is_pack === 1 尋找對應的已儲存包材批號分配，寫入備註
             let remarkStr = "";
             const parentMrp = mrpPlans.find((p) => p.id === co.mrp);
             if (parentMrp) {
@@ -2990,174 +3088,348 @@ const RequirementOrderPage = () => {
                       (Number(item.quantity) || 0) *
                         (Number(item.unit_price) || 0),
                     );
-                    const isFieldsLocked = item.profile_id !== "custom";
-
-                    const availablePackageOrders = packageOrders.filter(
-                      (po) => po.product_code === item.product_code,
-                    );
+                    const activeTab = activeFormTabs[item.id] || "DETAIL";
 
                     return (
                       <div
                         key={item.id}
-                        className="bg-white border border-slate-200 rounded-3xl shadow-sm relative group transition-all hover:border-blue-300 hover:shadow-md p-6 md:p-8"
+                        className="bg-white border border-slate-200 rounded-3xl shadow-sm relative group transition-all hover:border-blue-300 hover:shadow-md overflow-hidden"
                       >
                         {formItems.length > 1 && (
                           <button
                             type="button"
                             onClick={() => handleRemoveRow(item.id)}
-                            className="absolute -top-4 -right-4 w-9 h-9 flex items-center justify-center bg-white text-slate-400 hover:text-white hover:bg-red-500 rounded-full border border-slate-200 transition-all shadow-md z-10"
+                            className="absolute top-3 right-4 w-8 h-8 flex items-center justify-center bg-white text-slate-400 hover:text-white hover:bg-red-500 rounded-full border border-slate-200 transition-all shadow-md z-10"
                           >
-                            <Trash2 size={18} strokeWidth={2.5} />
+                            <Trash2 size={16} strokeWidth={2.5} />
                           </button>
                         )}
-                        <div className="space-y-6">
-                          <div className="bg-slate-50/70 p-5 rounded-2xl border border-slate-100 space-y-5">
-                            <label className="block text-sm font-semibold text-slate-600 tracking-wide">
-                              產品與規格資訊{" "}
-                              <span className="text-red-500">*</span>
-                            </label>
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-                              <div>
-                                <label className="block text-sm font-medium text-slate-500 mb-2">
-                                  選擇成品
+
+                        <div className="flex overflow-x-auto border-b border-slate-200 custom-scrollbar bg-slate-50/50 px-6 pt-4 rounded-t-3xl">
+                          <div
+                            className={`flex items-center gap-2 px-5 py-3 border-b-[3px] cursor-pointer transition-all whitespace-nowrap rounded-t-2xl ${activeTab === "DETAIL" ? "border-blue-500 text-blue-700 bg-white font-bold" : "border-transparent text-slate-500 hover:text-slate-800 hover:bg-white/60 font-semibold"}`}
+                            onClick={() =>
+                              setActiveFormTabs((prev) => ({
+                                ...prev,
+                                [item.id]: "DETAIL",
+                              }))
+                            }
+                          >
+                            <ReceiptText size={16} /> 訂購規格與數量
+                          </div>
+                          <div
+                            className={`flex items-center gap-2 px-5 py-3 border-b-[3px] cursor-pointer transition-all whitespace-nowrap rounded-t-2xl ${activeTab === "HISTORY" ? "border-blue-500 text-blue-700 bg-white font-bold" : "border-transparent text-slate-500 hover:text-slate-800 hover:bg-white/60 font-semibold"}`}
+                            onClick={() => {
+                              if (!vendorData.id) {
+                                showAlert("提示", "請先選擇客戶", "warning");
+                                return;
+                              }
+                              setActiveFormTabs((prev) => ({
+                                ...prev,
+                                [item.id]: "HISTORY",
+                              }));
+                            }}
+                          >
+                            <History size={16} /> 歷史購買紀錄
+                          </div>
+                        </div>
+
+                        <div className="p-6 md:p-8">
+                          {activeTab === "DETAIL" ? (
+                            <div className="space-y-6 animate-in fade-in zoom-in-95 duration-200">
+                              <div className="bg-slate-50/70 p-5 rounded-2xl border border-slate-100 space-y-5 w-full">
+                                <label className="block text-sm font-semibold text-slate-600 tracking-wide">
+                                  產品與規格資訊{" "}
+                                  <span className="text-red-500">*</span>
                                 </label>
-                                <FilterableDropdown
-                                  disabled={!vendorData.id}
-                                  value={item.product_id}
-                                  onChange={(valId) => {
-                                    const prod = readyProducts.find(
-                                      (m) => String(m.id) === String(valId),
-                                    );
-                                    if (prod)
-                                      handleSelectProduct(item.id, prod);
-                                  }}
-                                  options={readyProducts}
-                                  placeholder={
-                                    vendorData.id
-                                      ? "選擇已報價成品"
-                                      : "請先選擇客戶"
-                                  }
-                                  renderItem={(m) => (
-                                    <div className="flex justify-between items-center w-full">
-                                      <span className="text-sm text-slate-400 shrink-0 font-mono">
-                                        [{m.code}]
-                                      </span>
-                                      <span className="text-sm text-slate-800 ml-3 font-medium">
-                                        {m.name}
+                                <div className="flex flex-col gap-5 w-full">
+                                  <div className="w-full">
+                                    <label className="block text-sm font-medium text-slate-500 mb-2">
+                                      選擇成品
+                                    </label>
+                                    <FilterableDropdown
+                                      disabled={!vendorData.id}
+                                      value={item.product_id}
+                                      onChange={(valId) => {
+                                        const prod = readyProducts.find(
+                                          (m) => String(m.id) === String(valId),
+                                        );
+                                        if (prod)
+                                          handleSelectProduct(item.id, prod);
+                                      }}
+                                      options={readyProducts}
+                                      placeholder={
+                                        vendorData.id
+                                          ? "選擇已報價成品"
+                                          : "請先選擇客戶"
+                                      }
+                                      renderItem={(m) => (
+                                        <div className="flex justify-between items-center w-full">
+                                          <span className="text-sm text-slate-400 shrink-0 font-mono">
+                                            [{m.code}]
+                                          </span>
+                                          <span className="text-sm text-slate-800 ml-3 font-medium">
+                                            {m.name}
+                                          </span>
+                                        </div>
+                                      )}
+                                    />
+                                  </div>
+
+                                  <div className="w-full">
+                                    <label className="block text-sm font-medium text-slate-500 mb-2">
+                                      規格範本
+                                    </label>
+                                    <FilterableDropdown
+                                      disabled={!item.product_id}
+                                      value={item.profile_id || ""}
+                                      onChange={(valId) =>
+                                        handleSelectProfile(item.id, valId)
+                                      }
+                                      options={[
+                                        { id: "", name: "選擇規格" },
+                                        ...customerQuotes
+                                          .filter(
+                                            (q) =>
+                                              String(q.product_detail?.id) ===
+                                              String(item.product_id),
+                                          )
+                                          .map((q) => {
+                                            const po = packageOrders.find(
+                                              (p) =>
+                                                String(p.product_code) ===
+                                                String(item.product_code),
+                                            );
+                                            const prefix =
+                                              po && po.order_number
+                                                ? `[${po.order_number}] `
+                                                : "";
+
+                                            return {
+                                              id: String(q.id),
+                                              name: `${prefix}${q.spec || `規格 ${q.id}`}`,
+                                            };
+                                          }),
+                                      ]}
+                                      placeholder={
+                                        item.product_id
+                                          ? "選擇報價規格"
+                                          : "請先選擇成品"
+                                      }
+                                    />
+                                  </div>
+
+                                  <div className="w-full">
+                                    <label className="block text-sm font-medium text-slate-500 mb-2">
+                                      規格文字
+                                    </label>
+                                    <input
+                                      type="text"
+                                      value={item.spec || ""}
+                                      readOnly
+                                      disabled={true}
+                                      className="w-full h-11 px-4 border border-slate-200 rounded-xl text-sm font-medium outline-none shadow-sm transition-all bg-slate-50/80 text-slate-500 cursor-not-allowed"
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-center">
+                                  <span className="text-sm font-semibold text-slate-500 tracking-wide mb-4 block">
+                                    數量配置
+                                  </span>
+                                  <div className="flex justify-between items-center">
+                                    <span className="text-lg font-semibold text-slate-800">
+                                      訂購數量{" "}
+                                      <span className="text-red-500">*</span>
+                                    </span>
+                                    <div className="flex items-center gap-3">
+                                      <input
+                                        type="text"
+                                        inputMode="decimal"
+                                        pattern="[0-9]*"
+                                        required
+                                        disabled={!item.profile_id}
+                                        value={item.quantity}
+                                        onChange={(e) =>
+                                          handleItemChange(
+                                            item.id,
+                                            "quantity",
+                                            e.target.value,
+                                          )
+                                        }
+                                        className="w-32 h-12 text-right bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl px-4 py-2 focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none text-xl font-mono font-semibold transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                                      />
+                                      <span className="text-base font-medium text-slate-500 min-w-[2rem]">
+                                        {item.unit}
                                       </span>
                                     </div>
-                                  )}
-                                />
-                              </div>
-                              <div>
-                                <label className="block text-sm font-medium text-slate-500 mb-2">
-                                  規格範本
-                                </label>
-                                <FilterableDropdown
-                                  disabled={!item.product_id}
-                                  value={item.profile_id || ""}
-                                  onChange={(valId) =>
-                                    handleSelectProfile(item.id, valId)
-                                  }
-                                  options={[
-                                    { id: "", name: "選擇規格" },
-                                    ...customerQuotes
-                                      .filter(
-                                        (q) =>
-                                          String(q.product_detail?.id) ===
-                                          String(item.product_id),
-                                      )
-                                      .map((q) => ({
-                                        id: String(q.id),
-                                        name: q.spec || `規格 ${q.id}`,
-                                      })),
-                                  ]}
-                                  placeholder={
-                                    item.product_id
-                                      ? "選擇報價規格"
-                                      : "請先選擇成品"
-                                  }
-                                />
-                              </div>
-                              <div>
-                                <label className="block text-sm font-medium text-slate-500 mb-2">
-                                  規格文字
-                                </label>
-                                <input
-                                  type="text"
-                                  value={item.spec || ""}
-                                  readOnly
-                                  disabled={true}
-                                  className={`w-full h-11 px-4 border border-slate-200 rounded-xl text-sm font-medium outline-none shadow-sm transition-all bg-slate-50/80 text-slate-500 cursor-not-allowed`}
-                                />
-                              </div>
-                            </div>
-                          </div>
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-center">
-                              <span className="text-sm font-semibold text-slate-500 tracking-wide mb-4 block">
-                                數量配置
-                              </span>
-                              <div className="flex justify-between items-center">
-                                <span className="text-lg font-semibold text-slate-800">
-                                  訂購數量{" "}
-                                  <span className="text-red-500">*</span>
-                                </span>
-                                <div className="flex items-center gap-3">
-                                  <input
-                                    type="text"
-                                    inputMode="decimal"
-                                    pattern="[0-9]*"
-                                    required
-                                    disabled={!item.profile_id}
-                                    value={item.quantity}
-                                    onChange={(e) =>
-                                      handleItemChange(
-                                        item.id,
-                                        "quantity",
-                                        e.target.value,
-                                      )
-                                    }
-                                    className="w-32 h-12 text-right bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl px-4 py-2 focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none text-xl font-mono font-semibold transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                                  />
-                                  <span className="text-base font-medium text-slate-500 min-w-[2rem]">
-                                    {item.unit}
-                                  </span>
+                                  </div>
+                                </div>
+                                <div className="bg-gradient-to-br from-blue-50/50 to-blue-100/30 p-6 rounded-2xl border border-blue-200 shadow-sm flex flex-col justify-center">
+                                  <div className="flex justify-between items-center mb-3">
+                                    <span className="text-sm font-semibold text-blue-700 tracking-wide">
+                                      單價
+                                    </span>
+                                    <input
+                                      type="text"
+                                      inputMode="decimal"
+                                      pattern="[0-9]*"
+                                      value={item.unit_price}
+                                      onChange={(e) =>
+                                        handleItemChange(
+                                          item.id,
+                                          "unit_price",
+                                          e.target.value,
+                                        )
+                                      }
+                                      disabled={!item.profile_id}
+                                      placeholder={item.profile_id ? "0" : ""}
+                                      className="w-32 h-11 text-right bg-white border border-blue-200 rounded-xl px-3 py-2 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none text-lg font-mono font-medium shadow-sm transition-all disabled:bg-slate-50/50 disabled:text-blue-800 disabled:cursor-not-allowed"
+                                    />
+                                  </div>
+                                  <div className="flex justify-between items-end pt-4 border-t border-blue-200/60">
+                                    <span className="text-sm font-semibold text-blue-700 tracking-wide">
+                                      小計
+                                    </span>
+                                    <span className="text-2xl font-bold font-mono text-blue-700 tracking-tight">
+                                      ${subtotal.toLocaleString()}
+                                    </span>
+                                  </div>
                                 </div>
                               </div>
                             </div>
-                            <div className="bg-gradient-to-br from-blue-50/50 to-blue-100/30 p-6 rounded-2xl border border-blue-200 shadow-sm flex flex-col justify-center">
-                              <div className="flex justify-between items-center mb-3">
-                                <span className="text-sm font-semibold text-blue-700 tracking-wide">
-                                  單價
-                                </span>
-                                <input
-                                  type="text"
-                                  inputMode="decimal"
-                                  pattern="[0-9]*"
-                                  value={item.unit_price}
-                                  onChange={(e) =>
-                                    handleItemChange(
-                                      item.id,
-                                      "unit_price",
-                                      e.target.value,
-                                    )
-                                  }
-                                  disabled={!item.profile_id}
-                                  placeholder={item.profile_id ? "0" : ""}
-                                  className="w-32 h-11 text-right bg-white border border-blue-200 rounded-xl px-3 py-2 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none text-lg font-mono font-medium shadow-sm transition-all disabled:bg-slate-50/50 disabled:text-blue-800 disabled:cursor-not-allowed"
-                                />
+                          ) : (
+                            <div className="space-y-6 animate-in fade-in zoom-in-95 duration-200">
+                              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-4">
+                                <h4 className="text-[15px] font-bold text-slate-700 flex items-center gap-2">
+                                  <History
+                                    size={18}
+                                    className="text-blue-500"
+                                  />{" "}
+                                  客戶{" "}
+                                  <span className="text-blue-700">
+                                    {vendorData.name}
+                                  </span>{" "}
+                                  的歷史購買紀錄
+                                </h4>
+                                <label className="flex items-center gap-2 text-sm font-bold text-slate-600 cursor-pointer select-none bg-white border border-slate-200 px-3 py-1.5 rounded-lg shadow-sm hover:bg-slate-50 transition-colors">
+                                  <input
+                                    type="checkbox"
+                                    checked={showDeliveryOnly}
+                                    onChange={(e) =>
+                                      setShowDeliveryOnly(e.target.checked)
+                                    }
+                                    className="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500 cursor-pointer"
+                                  />
+                                  僅顯示已出貨紀錄 (Delivery Notes)
+                                </label>
                               </div>
-                              <div className="flex justify-between items-end pt-4 border-t border-blue-200/60">
-                                <span className="text-sm font-semibold text-blue-700 tracking-wide">
-                                  小計
-                                </span>
-                                <span className="text-2xl font-bold font-mono text-blue-700 tracking-tight">
-                                  ${subtotal.toLocaleString()}
-                                </span>
+
+                              <div className="overflow-y-auto max-h-[400px] border border-slate-200 rounded-2xl custom-scrollbar bg-slate-50">
+                                {vendorHistory.loading ? (
+                                  <div className="flex flex-col items-center justify-center p-20 text-slate-400 gap-4">
+                                    <Loader2
+                                      size={32}
+                                      className="animate-spin"
+                                    />
+                                    <span className="font-bold tracking-widest">
+                                      正在載入歷史紀錄...
+                                    </span>
+                                  </div>
+                                ) : vendorHistory.records.length === 0 ? (
+                                  <div className="flex flex-col items-center justify-center p-20 text-slate-400 gap-4">
+                                    <Database
+                                      size={48}
+                                      className="opacity-20"
+                                    />
+                                    <span className="font-bold tracking-widest">
+                                      該客戶尚無購買紀錄
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <table className="w-full text-left border-collapse whitespace-nowrap bg-white">
+                                    <thead className="bg-slate-100 border-b border-slate-200 text-sm text-slate-500 font-medium tracking-wide sticky top-0 shadow-sm z-10">
+                                      <tr>
+                                        <th className="py-3 px-4 w-24">類型</th>
+                                        <th className="py-3 px-4 w-28">日期</th>
+                                        <th className="py-3 px-4">產品名稱</th>
+                                        <th className="py-3 px-4 w-36">
+                                          單據編號
+                                        </th>
+
+                                        <th className="py-3 px-4 w-32 text-center">
+                                          包裝單號
+                                        </th>
+                                        <th className="py-3 px-4 w-40 text-center">
+                                          規格
+                                        </th>
+                                        <th className="py-3 px-4 text-right w-24">
+                                          數量
+                                        </th>
+                                        <th className="py-3 px-4 text-right w-24">
+                                          單價
+                                        </th>
+                                      </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100 text-sm">
+                                      {vendorHistory.records
+                                        .filter((r) =>
+                                          showDeliveryOnly
+                                            ? r.type === "DELIVERY"
+                                            : true,
+                                        )
+                                        .map((r, idx) => (
+                                          <tr
+                                            key={idx}
+                                            className="hover:bg-blue-50/40 transition-colors"
+                                          >
+                                            <td className="py-3 px-4">
+                                              <span
+                                                className={`px-2.5 py-1 rounded-md text-[11px] font-bold ${
+                                                  r.type === "ORDER"
+                                                    ? "bg-blue-100 text-blue-700 border border-blue-200"
+                                                    : "bg-emerald-100 text-emerald-700 border border-emerald-200"
+                                                }`}
+                                              >
+                                                {r.type === "ORDER"
+                                                  ? "未出貨單"
+                                                  : "已出貨單"}
+                                              </span>
+                                            </td>
+                                            <td className="py-3 px-4 text-slate-600 font-medium">
+                                              {r.date}
+                                            </td>
+                                            <td className="py-3 px-4 font-bold text-slate-800 truncate max-w-[180px]">
+                                              {r.product_name}
+                                            </td>
+                                            <td className="py-3 px-4 font-mono font-medium text-slate-500 text-xs">
+                                              {r.number}
+                                            </td>
+
+                                            <td className="py-3 px-4 text-center font-mono font-bold text-slate-600 text-xs bg-slate-50/50">
+                                              {r.package_order_number || "-"}
+                                            </td>
+                                            <td className="py-3 px-4 text-center text-slate-600 font-bold bg-slate-50/50">
+                                              {r.spec || "-"}
+                                            </td>
+                                            <td className="py-3 px-4 text-right font-mono font-bold text-slate-700">
+                                              {formatNum(r.quantity, "PRODUCT")}{" "}
+                                              <span className="text-xs text-slate-400 font-sans">
+                                                {r.unit}
+                                              </span>
+                                            </td>
+                                            <td className="py-3 px-4 text-right font-mono font-bold text-slate-700">
+                                              ${formatNum(r.price, "PRODUCT")}
+                                            </td>
+                                          </tr>
+                                        ))}
+                                    </tbody>
+                                  </table>
+                                )}
                               </div>
                             </div>
-                          </div>
+                          )}
                         </div>
                       </div>
                     );

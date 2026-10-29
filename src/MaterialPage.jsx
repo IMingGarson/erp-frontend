@@ -1609,7 +1609,7 @@ export default function MaterialPage() {
                           刪除
                         </button>
                         {isRD &&
-                        mat.phase === "IN_DEV" &&
+                        // mat.phase === "IN_DEV" &&
                         ["PRODUCT", "SEMI"].includes(mat.type) ? (
                           <button
                             onClick={() => navigate(`/bom-create/${mat.code}`)}

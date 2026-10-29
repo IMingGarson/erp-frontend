@@ -25,7 +25,7 @@ const getOrderTotalWeight = (materials_info) => {
   if (!Array.isArray(materials_info)) return 0;
   return materials_info.reduce((sum, mat) => {
     const unit = (mat.unit || "").toUpperCase();
-    if (unit === "KG" && mat.type !== "PACK") {
+    if (unit === "KG" && mat.type !== "PACK" && mat.type !== "PACKAGING") {
       return sum + (parseFloat(mat.requiredQty) || 0);
     }
     return sum;
@@ -37,7 +37,8 @@ const getFlattenedMaterials = (materials_info) => {
   if (!Array.isArray(materials_info)) return result;
 
   materials_info.forEach((mat) => {
-    if (mat.type === "CHILD_PRODUCT") return;
+    // 🌟 略過子產品與包裝作業節點，讓生產流程單只出現原物料與半成品
+    if (mat.type === "CHILD_PRODUCT" || mat.type === "PACKAGING") return;
 
     const materialCode = mat.code || "-";
     const batches = mat.batches || [];
@@ -82,6 +83,259 @@ const getFlattenedMaterials = (materials_info) => {
   });
 
   return result;
+};
+
+// ==============================================
+// 🌟 列印樣板：廠內包裝單
+// ==============================================
+const PackagingFormTemplate = ({ order }) => {
+  if (!order) return null;
+
+  const orderDateStr = new Date(order.created_at).toLocaleDateString("zh-TW", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+
+  // 只抽取 is_pack === 1 的包材資料
+  const packMaterials = [];
+  if (Array.isArray(order.materials_info)) {
+    order.materials_info.forEach((mat) => {
+      if (
+        mat.is_pack === 1 ||
+        mat.is_pack === true ||
+        mat.type === "PACKAGING"
+      ) {
+        const materialCode = mat.code || "-";
+        const batches = mat.batches || [];
+        const usedBatches = batches.filter((b) => {
+          const usedVal = parseFloat(b.used);
+          return !isNaN(usedVal) && usedVal > 0;
+        });
+
+        if (usedBatches.length > 0) {
+          usedBatches.forEach((b) => {
+            packMaterials.push({
+              code: materialCode,
+              materialName: mat.materialName,
+              allocatedQty: parseFloat(b.used),
+              batch_number: b.batch_number,
+              unit: mat.unit || "pcs",
+              remark: mat.remark || "",
+            });
+          });
+        } else {
+          packMaterials.push({
+            code: materialCode,
+            materialName: mat.materialName,
+            allocatedQty: parseFloat(mat.requiredQty) || 0,
+            batch_number: materialCode,
+            unit: mat.unit || "pcs",
+            remark: mat.remark || "",
+          });
+        }
+      }
+    });
+  }
+
+  let vInfo = {};
+  try {
+    vInfo =
+      typeof order.vendor_info === "string"
+        ? JSON.parse(order.vendor_info)
+        : order.vendor_info || {};
+  } catch (e) {
+    vInfo = {};
+  }
+
+  const rawShippingDate = vInfo.shipping_date
+    ? vInfo.shipping_date.replace(/-/g, "/")
+    : "";
+  const displayShippingDate = `${rawShippingDate} ${vInfo.notes || ""}`.trim();
+  const customerName = vInfo.name || "廠內備庫";
+  const displayQty = formatValue(order.target_qty);
+
+  return (
+    <div className={`bg-white font-sans text-black relative p-4 print:p-0`}>
+      <div className="flex justify-between items-start mb-2 text-[14px] pt-1">
+        <div className="w-1/3 text-[12px] leading-tight">
+          <div>
+            第 1 頁,共 1 頁 製表日期 :{" "}
+            <span className="font-mono">{orderDateStr}</span>
+          </div>
+          <div className="mt-1">
+            單據日期 : <span className="font-mono">{orderDateStr}</span>
+          </div>
+          <div className="mt-1">
+            產品編號 :{" "}
+            <span className="font-mono">
+              {order.product_profile?.code || "-"}
+            </span>
+          </div>
+          <div className="mt-1 text-[14px] font-bold whitespace-nowrap">
+            產品名稱 : {order.product_profile?.name || order.product_name}
+          </div>
+          <div className="mt-1">
+            產品規格 : {vInfo.spec || order.product_profile?.spec || "-"}
+          </div>
+        </div>
+
+        <div className="w-1/3 text-center">
+          <h1 className="text-2xl font-black tracking-widest">
+            基香食品有限公司
+          </h1>
+          <h2 className="text-xl font-bold tracking-widest mt-1 border-b-2 border-black inline-block pb-1 px-4">
+            包 裝 單
+          </h2>
+          <div className="mt-2 text-[14px] text-left pl-8">
+            單據編號 :{" "}
+            <span className="font-mono font-bold text-base">
+              {order.order_number}
+            </span>
+          </div>
+          <div className="mt-1 text-[14px] text-left pl-8 flex items-baseline gap-2">
+            <span>製令數量 : </span>
+            <span className="font-mono font-bold text-xl">{displayQty}</span>
+            <span className="font-bold">
+              {vInfo.sales_unit || order.product_profile?.unit || "箱"}
+            </span>
+          </div>
+        </div>
+
+        <div className="w-1/3 flex flex-col items-end text-[12px] leading-relaxed">
+          <div className="text-right w-full">版次: 01 (內)</div>
+          <div className="mt-2 w-full flex flex-col gap-2 text-left">
+            <div className="flex items-baseline gap-2">
+              <span className="whitespace-nowrap">交貨日期:</span>
+              <span className="flex-1 border-b border-black text-left font-mono font-bold text-blue-700">
+                {displayShippingDate}
+              </span>
+            </div>
+            <div className="flex items-baseline gap-2 text-[14px] font-bold">
+              <span className="whitespace-nowrap">訂單客戶:</span>
+              <span className="flex-1 border-b border-black text-left">
+                {customerName}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <table className="w-full text-[12px] border-collapse border-2 border-black mb-2">
+        <thead>
+          <tr className="border-b-2 border-black bg-orange-50/50">
+            <th className="border border-black py-0.5 px-1 w-8 text-center">
+              序
+            </th>
+            <th className="border border-black py-0.5 px-1 w-24 text-center">
+              包材編號
+            </th>
+            <th className="border border-black py-0.5 px-2 text-left">
+              包材名稱
+            </th>
+            <th className="border border-black py-0.5 px-1 w-24 text-center">
+              需求數量
+            </th>
+            <th className="border border-black py-0.5 px-1 w-16 text-center">
+              單位
+            </th>
+            <th className="border border-black py-0.5 px-2 w-36 text-center">
+              原物料批號
+            </th>
+            <th className="border border-black py-0.5 px-2 w-24 text-center">
+              備註
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {packMaterials.length > 0 ? (
+            packMaterials.map((mat, i) => (
+              <tr
+                key={i}
+                className="border-b border-black h-7 hover:bg-slate-50 transition-colors"
+              >
+                <td className="border border-black text-center">{i + 1}</td>
+                <td className="border border-black text-center text-[11px] text-gray-700 font-mono tracking-tighter">
+                  {mat.code}
+                </td>
+                <td className="border border-black text-left px-2 font-bold">
+                  {mat.materialName}
+                </td>
+                <td className="border border-black text-right px-2 font-mono font-bold text-[13px]">
+                  {formatValue(mat.allocatedQty)}
+                </td>
+                <td className="border border-black text-center px-2 text-[11px]">
+                  {mat.unit}
+                </td>
+                <td className="border border-black text-center font-mono text-[12px] tracking-wider text-blue-700">
+                  {mat.batch_number}
+                </td>
+                <td className="border border-black text-center text-[11px]">
+                  {mat.remark}
+                </td>
+              </tr>
+            ))
+          ) : (
+            <tr className="border-b border-black text-center h-7">
+              <td colSpan="7" className="text-gray-400">
+                無包裝耗材紀錄
+              </td>
+            </tr>
+          )}
+          {Array.from({
+            length: Math.max(0, 8 - packMaterials.length),
+          }).map((_, i) => (
+            <tr key={`empty-${i}`} className="border-b border-black h-7">
+              <td className="border border-black"></td>
+              <td className="border border-black"></td>
+              <td className="border border-black"></td>
+              <td className="border border-black"></td>
+              <td className="border border-black"></td>
+              <td className="border border-black"></td>
+              <td className="border border-black"></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      <div className="flex justify-between items-end mt-16 px-4 font-bold text-[14px]">
+        <div>
+          主 管：
+          <span className="w-24 inline-block border-b border-black">
+            &nbsp;
+          </span>
+        </div>
+        <div>
+          包 裝：
+          <span className="w-24 inline-block border-b border-black">
+            &nbsp;
+          </span>
+        </div>
+        <div className="flex flex-col items-center">
+          <div className="mb-3">
+            審 核：
+            <span className="w-24 inline-block border-b border-black">
+              &nbsp;
+            </span>
+          </div>
+          <div>
+            領 料：
+            <span className="w-24 inline-block border-b border-black">
+              &nbsp;
+            </span>
+          </div>
+        </div>
+        <div className="flex flex-col items-center">
+          <div className="mb-3 text-[12px] font-normal">
+            經 辦：
+            <span className="font-bold text-[14px] ml-2">
+              {order.creator_name || "系統產出"}
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 };
 
 const convertToGrams = (qty, unit) => {
@@ -551,22 +805,33 @@ const ProductionFormTemplate = ({
 
   const flattenedMaterials = getFlattenedMaterials(order.materials_info);
 
+  // 🌟 修正了序號排序 fall-through 邏輯
   flattenedMaterials.sort((a, b) => {
     if (sortBySequence) {
       const seqA = String(a.sequence_num || "").trim();
       const seqB = String(b.sequence_num || "").trim();
-      if (seqA && seqB)
-        return seqA.localeCompare(seqB, undefined, {
+
+      if (seqA && seqB) {
+        const cmp = seqA.localeCompare(seqB, undefined, {
           numeric: true,
           sensitivity: "base",
         });
-      if (seqA && !seqB) return -1;
-      if (!seqA && seqB) return 1;
-      return b.requiredQty - a.requiredQty;
+        if (cmp !== 0) return cmp;
+      } else if (seqA && !seqB) {
+        return -1;
+      } else if (!seqA && seqB) {
+        return 1;
+      }
+
+      return (
+        (parseFloat(b.requiredQty) || 0) - (parseFloat(a.requiredQty) || 0)
+      );
     } else {
       if (a.type === "SEMI" && b.type !== "SEMI") return -1;
       if (a.type !== "SEMI" && b.type === "SEMI") return 1;
-      return b.requiredQty - a.requiredQty;
+      return (
+        (parseFloat(b.requiredQty) || 0) - (parseFloat(a.requiredQty) || 0)
+      );
     }
   });
 
@@ -1579,22 +1844,38 @@ const ProductionOrderPrintTemplate = ({ data, type, sortBySequence }) => {
 
       {type === "Flow" && (
         <div className="print:pt-8 print:px-8">
-          {flowOrdersToPrint.map((orderToPrint, idx) => (
-            <div
-              key={orderToPrint.id}
-              className={
-                idx === flowOrdersToPrint.length - 1
-                  ? ""
-                  : "page-break print:pt-8"
-              }
-            >
-              <ProductionFormTemplate
-                order={orderToPrint}
-                isChildForm={idx !== 0}
-                sortBySequence={sortBySequence}
-              />
-            </div>
-          ))}
+          {flowOrdersToPrint.map((orderToPrint, idx) => {
+            let isPackNode = false;
+            if (Array.isArray(orderToPrint.materials_info)) {
+              isPackNode = orderToPrint.materials_info.some(
+                (info) =>
+                  info.is_pack === 1 ||
+                  info.is_pack === true ||
+                  info.type === "PACKAGING",
+              );
+            }
+
+            return (
+              <div
+                key={orderToPrint.id}
+                className={
+                  idx === flowOrdersToPrint.length - 1
+                    ? ""
+                    : "page-break print:pt-8"
+                }
+              >
+                {isPackNode ? (
+                  <PackagingFormTemplate order={orderToPrint} />
+                ) : (
+                  <ProductionFormTemplate
+                    order={orderToPrint}
+                    isChildForm={idx !== 0}
+                    sortBySequence={sortBySequence}
+                  />
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
@@ -1975,26 +2256,45 @@ export default function ProductionOrderPage() {
 
   const renderChildrenOrders = (childrenArr, depth = 1) => {
     if (!childrenArr || childrenArr.length === 0) return null;
-    return childrenArr.map((child, idx) => (
-      <div
-        key={child.id}
-        className="relative pt-6 border-t-[3px] border-dashed border-slate-300 mt-6"
-      >
-        {depth == 1 && (
-          <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-slate-200 text-slate-600 px-4 py-1 rounded-full text-xs font-bold tracking-widest shadow-sm">
-            ▼ 子生產單 ▼
+    return childrenArr.map((child, idx) => {
+      // 🌟 判斷這張子單是否為包裝單
+      let isPackNode = false;
+      if (Array.isArray(child.materials_info)) {
+        isPackNode = child.materials_info.some(
+          (info) =>
+            info.is_pack === 1 ||
+            info.is_pack === true ||
+            info.type === "PACKAGING",
+        );
+      }
+
+      return (
+        <div
+          key={child.id}
+          className="relative pt-6 border-t-[3px] border-dashed border-slate-300 mt-6"
+        >
+          {depth === 1 && (
+            <div
+              className={`absolute -top-3 left-1/2 -translate-x-1/2 px-4 py-1 rounded-full text-xs font-bold tracking-widest shadow-sm ${isPackNode ? "bg-orange-100 text-orange-700" : "bg-slate-200 text-slate-600"}`}
+            >
+              ▼ {isPackNode ? "子包裝單" : "子生產單"} ▼
+            </div>
+          )}
+          <div className="shadow-xl ring-1 ring-black/5">
+            {isPackNode ? (
+              <PackagingFormTemplate order={child} />
+            ) : (
+              <ProductionFormTemplate
+                order={child}
+                isChildForm={true}
+                sortBySequence={sortBySequence}
+              />
+            )}
           </div>
-        )}
-        <div className="shadow-xl ring-1 ring-black/5">
-          <ProductionFormTemplate
-            order={child}
-            isChildForm={true}
-            sortBySequence={sortBySequence}
-          />
+          {renderChildrenOrders(child.children, depth + 1)}
         </div>
-        {renderChildrenOrders(child.children, depth + 1)}
-      </div>
-    ));
+      );
+    });
   };
 
   const filteredOrders = useMemo(() => {

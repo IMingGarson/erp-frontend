@@ -197,6 +197,14 @@ const TypeTag = ({ type }) => {
       label: "包裝",
       css: "bg-orange-50 text-orange-700 border-orange-200",
     },
+    STICKER: {
+      label: "標籤",
+      css: "bg-orange-50 text-orange-700 border-orange-200",
+    },
+    OTHER: {
+      label: "標籤",
+      css: "bg-orange-50 text-orange-700 border-orange-200",
+    },
   };
   const typeData = config[type] || {
     label: type,
@@ -780,7 +788,7 @@ const MaterialAllocationList = ({
                 <div className="bg-slate-50/50 pt-5 pb-6 border-t border-slate-200/80 w-full min-w-0 shadow-inner">
                   <div className="px-6 mb-3 flex flex-col md:flex-row justify-between items-start md:items-center border-b border-slate-200/80 pb-4 gap-3">
                     <span className="text-sm font-bold text-slate-800 tracking-wide flex items-center gap-2">
-                      批號分配
+                      📦 批號分配清單
                     </span>
                     <div className="flex items-center gap-2">
                       <span className="text-[13px] font-bold bg-white px-4 py-2 rounded-[12px] border border-slate-200 text-slate-500 shadow-sm flex items-center gap-2">
@@ -882,7 +890,6 @@ const RequirementOrderPage = () => {
   const [mrpPlans, setMrpPlans] = useState([]);
   const [packageOrders, setPackageOrders] = useState([]);
 
-  // 🌟 新增：用來存放選擇客戶後抓回來的報價單明細
   const [customerQuotes, setCustomerQuotes] = useState([]);
 
   const [loading, setLoading] = useState(true);
@@ -914,13 +921,13 @@ const RequirementOrderPage = () => {
     profile_id: "",
     spec: "",
     quantity: "",
-    unit: "", // 🌟 預設為空白
+    unit: "",
     sales_unit_quantity: "1",
     sales_pack_unit: "包",
     sales_pack_quantity: "",
     outer_capacity: "",
     inner_capacity: "",
-    unit_price: "", // 🌟 預設為空白
+    unit_price: "",
     outer_pack_id: null,
     inner_pack_id: null,
   });
@@ -1427,27 +1434,27 @@ const RequirementOrderPage = () => {
 
       buildDrafts(fItem.product_id, totalWeightFrac, motherId, null);
 
-      // 🌟 建立專屬的「包裝作業」虛擬節點，以成為獨立的 Child MRP
-      const hasPack = fItem.outer_pack_id || fItem.inner_pack_id;
-      if (hasPack) {
+      // 🌟 將所有的包裝資料(包含 OUTER, INNER, OTHER) 整合成單一筆「包裝子需求單」
+      const po = packageOrders.find(
+        (p) => String(p.product_code) === String(fItem.product_code),
+      );
+
+      if (po && po.packaging_info && po.packaging_info.length > 0) {
         generatedItems.push({
-          id: `${motherId}-PACK`,
+          id: `${motherId}-${childDraftSeq++}`,
           parentDraftId: motherId,
-          productId: fItem.product_id, // 使用主產品ID維持系統一致性
-          name: `${fItem.product_name} (包裝作業)`,
-          type: "PACKAGING", // 🌟 專屬類型
+          productId: fItem.product_id,
+          name: "",
+          type: "PACKAGING",
           qty: Number(fItem.quantity) || 0,
           _qtyFrac: toFraction(fItem.quantity),
           unit: fItem.unit,
           productCode: fItem.product_code,
           remark: "包裝耗材",
           isPackagingNode: true,
+          packaging_info: po.packaging_info,
           outer_pack_id: fItem.outer_pack_id,
           inner_pack_id: fItem.inner_pack_id,
-          outer_qty: Number(fItem.quantity) || 0,
-          inner_qty:
-            (Number(fItem.quantity) || 0) *
-            (Number(fItem.sales_pack_quantity) || 1),
         });
       }
 
@@ -1475,7 +1482,7 @@ const RequirementOrderPage = () => {
       });
       return updated;
     });
-  }, [formItems, materials, boms]);
+  }, [formItems, materials, boms, packageOrders]);
 
   useEffect(() => {
     if (orderItems.length === 0 && mrpPlans.length === 0) return;
@@ -1560,22 +1567,32 @@ const RequirementOrderPage = () => {
 
       const itemReqs = {};
 
-      // 🌟 當為包裝節點時，手動配發外箱與內袋需求，跳過 BOM 展開
+      // 🌟 將所有包材全數展開並計算需求量
       if (isNewOrder && item.isPackagingNode) {
-        if (item.outer_pack_id) {
-          itemReqs[item.outer_pack_id] = {
-            qtyFrac: toFraction(item.outer_qty),
-            remark: "外箱",
+        item.packaging_info.forEach((pkg) => {
+          let targetMatId = pkg.material_id;
+
+          if (pkg.layer === "outer" && item.outer_pack_id) {
+            targetMatId = item.outer_pack_id;
+          }
+          if (pkg.layer === "inner" && item.inner_pack_id) {
+            targetMatId = item.inner_pack_id;
+          }
+
+          // 基本訂單數量 * 該包材每單位用量
+          const reqQty = (Number(item.qty) || 0) * (Number(pkg.qty) || 1);
+
+          itemReqs[targetMatId] = {
+            qtyFrac: toFraction(reqQty),
+            remark:
+              pkg.layer === "outer"
+                ? "外箱"
+                : pkg.layer === "inner"
+                  ? "內裝"
+                  : "其他包材",
             sequence_num: "",
           };
-        }
-        if (item.inner_pack_id) {
-          itemReqs[item.inner_pack_id] = {
-            qtyFrac: toFraction(item.inner_qty),
-            remark: "內裝",
-            sequence_num: "",
-          };
-        }
+        });
       } else {
         const directChildren = boms.filter(
           (b) => String(b.parent?.id) === String(productId),
@@ -1621,7 +1638,10 @@ const RequirementOrderPage = () => {
         const matInfo = materials.find(
           (m) => String(m.id) === String(matIdStr),
         );
-        const isPack = matInfo?.type === "PACK";
+        const isPack =
+          matInfo?.type === "PACK" ||
+          matInfo?.type === "OTHER" ||
+          matInfo?.type === "STICKER";
 
         const exactRequiredQty = fracToNumber(itemReqs[matIdStr].qtyFrac);
         let requiredQty = roundToDisplay(exactRequiredQty, matInfo?.type);
@@ -1829,7 +1849,14 @@ const RequirementOrderPage = () => {
 
       const packItems = [];
       let pSeq = 1;
-      const packAllocNode = allocations[`${item.id}-PACK`] || {};
+
+      // 🌟 定位該母單專屬的包裝子節點，並抓出它的流水號索引
+      const packNode = orderItems.find(
+        (i) => i.parentDraftId === item.id && i.type === "PACKAGING",
+      );
+      const packAllocNode =
+        packNode && allocations[packNode.id] ? allocations[packNode.id] : {};
+      const packIdx = packNode ? packNode.id.split("-").pop() : "1";
 
       const quoteItem = customerQuotes.find(
         (q) => String(q.id) === String(item.profile_id),
@@ -1849,6 +1876,12 @@ const RequirementOrderPage = () => {
 
             const mat = materials.find((m) => String(m.id) === String(matId));
             if (mat && ["PACK", "STICKER", "OTHER"].includes(mat.type)) {
+              let unitToUse = mat.unit;
+              if (pkg.layer === "outer" && po.sales_unit)
+                unitToUse = po.sales_unit;
+              if (pkg.layer === "inner" && po.sales_pack_unit)
+                unitToUse = po.sales_pack_unit;
+
               let remarkStr = "";
               const matAlloc = packAllocNode[mat.id];
               if (matAlloc && matAlloc.batches) {
@@ -1861,7 +1894,7 @@ const RequirementOrderPage = () => {
                 product_name: mat.name,
                 spec: "",
                 quantity: Number(item.quantity || 0) * (Number(pkg.qty) || 1),
-                unit: mat.unit,
+                unit: unitToUse,
                 unit_price: null,
                 subtotal: null,
                 remark: remarkStr,
@@ -1892,7 +1925,7 @@ const RequirementOrderPage = () => {
       sheets.push({
         ...baseSheetInfo,
         isPackaging: false,
-        order_number: `${orderNo}`,
+        order_number: `${orderNo} (預覽)`,
         items: [mainItem],
         totals: {
           total_amount: mainItem.subtotal,
@@ -1906,7 +1939,7 @@ const RequirementOrderPage = () => {
         sheets.push({
           ...baseSheetInfo,
           isPackaging: true,
-          order_number: `${orderNo}-1`,
+          order_number: `${orderNo}-${packIdx} (預覽)`,
           items: packItems,
           totals: {
             total_amount: 0,
@@ -1958,6 +1991,12 @@ const RequirementOrderPage = () => {
         delete cleanBatchInfo._base_qty;
         delete cleanBatchInfo._productId;
 
+        if (item.type === "PACKAGING") {
+          Object.keys(cleanBatchInfo).forEach((matIdStr) => {
+            cleanBatchInfo[matIdStr].is_pack = 1;
+          });
+        }
+
         const cleanItem = { ...item };
         delete cleanItem._qtyFrac;
 
@@ -1971,50 +2010,7 @@ const RequirementOrderPage = () => {
       const rootItems = [];
       orderItems.forEach((item) => {
         if (!item.parentDraftId) {
-          const rootItem = itemMap[item.id];
-          rootItems.push(rootItem);
-
-          // 🌟 從前端狀態獲取這張主訂單剛配好的包裝批號，連同結構一起寫入資料庫
-          const fItem = formItems.find((f) => f.id === item.id);
-          if (fItem) {
-            let childIdx = 1;
-            const packAllocNode = allocations[`${fItem.id}-PACK`] || {};
-
-            if (fItem.outer_pack_id) {
-              const outerQty = Number(fItem.quantity) || 0;
-              const outerAlloc = packAllocNode[fItem.outer_pack_id] || {
-                requiredQty: outerQty,
-                batches: [],
-              };
-              rootItem.children_mrp.push({
-                id: `${fItem.id}-${childIdx++}`,
-                productId: fItem.outer_pack_id,
-                qty: outerQty,
-                batch_inventory_info: {
-                  [fItem.outer_pack_id]: outerAlloc,
-                },
-                children_mrp: [],
-              });
-            }
-            if (fItem.inner_pack_id) {
-              const innerQty =
-                (Number(fItem.quantity) || 0) *
-                (Number(fItem.sales_pack_quantity) || 1);
-              const innerAlloc = packAllocNode[fItem.inner_pack_id] || {
-                requiredQty: innerQty,
-                batches: [],
-              };
-              rootItem.children_mrp.push({
-                id: `${fItem.id}-${childIdx++}`,
-                productId: fItem.inner_pack_id,
-                qty: innerQty,
-                batch_inventory_info: {
-                  [fItem.inner_pack_id]: innerAlloc,
-                },
-                children_mrp: [],
-              });
-            }
-          }
+          rootItems.push(itemMap[item.id]);
         } else {
           const parentId = item.parentDraftId;
           if (itemMap[parentId])
@@ -2193,6 +2189,30 @@ const RequirementOrderPage = () => {
   const handleConvertToProduction = (id, e) => {
     if (e) e.stopPropagation();
 
+    const plan = mrpPlans.find((p) => p.id === id);
+    let outer_pack_id = null;
+    let inner_pack_id = null;
+    let spec = "";
+    let sales_unit = "";
+    let sales_pack_unit = "";
+    let quotation_id = null;
+
+    if (plan && plan.customer_orders && plan.customer_orders.length > 0) {
+      const primaryCmo = plan.customer_orders[0];
+      outer_pack_id = primaryCmo.logistics_info?.outer_pack_id || null;
+      inner_pack_id = primaryCmo.logistics_info?.inner_pack_id || null;
+      quotation_id = primaryCmo.logistics_info?.quotation_id || null;
+      spec = primaryCmo.spec || "";
+      sales_unit = primaryCmo.unit || "";
+
+      const po = packageOrders.find(
+        (p) => p.product_code === primaryCmo.product_code,
+      );
+      if (po && po.sales_pack_unit) {
+        sales_pack_unit = po.sales_pack_unit;
+      }
+    }
+
     showConfirm(
       "製作生產單",
       "確認要將此單據轉為生產單嗎？\n這將會實際扣除批號庫存。",
@@ -2203,7 +2223,15 @@ const RequirementOrderPage = () => {
           const res = await fetchWithAuth("/api/mrp/convert_to_production", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ mrp_id: id }),
+            body: JSON.stringify({
+              mrp_id: id,
+              outer_pack_id,
+              inner_pack_id,
+              spec,
+              sales_unit,
+              sales_pack_unit,
+              quotation_id,
+            }),
           });
           const json = await res.json();
           if (res.ok) {
@@ -2231,12 +2259,45 @@ const RequirementOrderPage = () => {
           const promises = group.plans
             .filter((d) => d.status.toUpperCase() === "PENDING")
             .map(async (d) => {
+              let outer_pack_id = null;
+              let inner_pack_id = null;
+              let spec = "";
+              let sales_unit = "";
+              let sales_pack_unit = "";
+              let quotation_id = null;
+
+              if (d.customer_orders && d.customer_orders.length > 0) {
+                const primaryCmo = d.customer_orders[0];
+                outer_pack_id =
+                  primaryCmo.logistics_info?.outer_pack_id || null;
+                inner_pack_id =
+                  primaryCmo.logistics_info?.inner_pack_id || null;
+                quotation_id = primaryCmo.logistics_info?.quotation_id || null;
+                spec = primaryCmo.spec || "";
+                sales_unit = primaryCmo.unit || "";
+
+                const po = packageOrders.find(
+                  (p) => p.product_code === primaryCmo.product_code,
+                );
+                if (po && po.sales_pack_unit) {
+                  sales_pack_unit = po.sales_pack_unit;
+                }
+              }
+
               const res = await fetchWithAuth(
                 "/api/mrp/convert_to_production",
                 {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ mrp_id: d.id }),
+                  body: JSON.stringify({
+                    mrp_id: d.id,
+                    outer_pack_id,
+                    inner_pack_id,
+                    spec,
+                    sales_unit,
+                    sales_pack_unit,
+                    quotation_id,
+                  }),
                 },
               );
               const json = await res.json();
@@ -2300,7 +2361,6 @@ const RequirementOrderPage = () => {
     const isPreview = order.isPreview;
     let sheets = [];
 
-    // 🌟 展開與展平顯示資料，保證流水號連續，並區分出主單與包裝單
     if (isPreview) {
       sheets = order.sheets;
     } else {
@@ -2368,21 +2428,22 @@ const RequirementOrderPage = () => {
               }
             }
 
-            // 🌟 從歷史單據尋找對應的已儲存批號分配，寫入備註
+            // 🌟 透過 is_pack === 1 尋找對應的已儲存包材批號分配，寫入備註
             let remarkStr = "";
             const parentMrp = mrpPlans.find((p) => p.id === co.mrp);
             if (parentMrp) {
               const childMrp = mrpPlans.find(
                 (p) =>
                   p.parent_id === parentMrp.mrp_id &&
-                  String(p.product_code) === String(pkg.product_code),
+                  Array.isArray(p.batch_inventory_info) &&
+                  p.batch_inventory_info.some((info) => info.is_pack === 1),
               );
               if (childMrp && childMrp.batch_inventory_info) {
                 const alloc = childMrp.batch_inventory_info.find(
                   (a) => String(a.code) === String(pkg.product_code),
                 );
                 if (alloc && alloc.batches) {
-                  remarkStr = generateBatchRemark(alloc.batches, unitToUse);
+                  remarkStr = generateBatchRemark(alloc.batches, pkg.unit);
                 }
               }
             }
@@ -2403,10 +2464,7 @@ const RequirementOrderPage = () => {
       });
 
       const primaryCmo = cmoArray[0] || {};
-      const orderNoStr =
-        orderNos.length > 1
-          ? `${orderNos[0]} 等${orderNos.length}筆`
-          : orderNos[0] || order.order_number || "";
+      const orderNoStr = orderNos.join(", ") || order.order_number || "";
 
       const totalAmt =
         cmoArray.reduce(
@@ -2436,12 +2494,25 @@ const RequirementOrderPage = () => {
       });
 
       if (packItems.length > 0) {
-        let packOrderNo = orderNoStr;
-        if (orderNoStr.includes(" 等")) {
-          packOrderNo = orderNoStr.replace(" 等", "-1 等");
-        } else {
-          packOrderNo = orderNoStr + "-1";
+        let packIdx = 1;
+        const parentMrp = mrpPlans.find((p) => p.id === primaryCmo.mrp);
+        if (parentMrp) {
+          const childMrp = mrpPlans.find(
+            (p) =>
+              p.parent_id === parentMrp.mrp_id &&
+              Array.isArray(p.batch_inventory_info) &&
+              p.batch_inventory_info.some((info) => info.is_pack === 1),
+          );
+          if (childMrp) {
+            const parts = childMrp.mrp_id.split("-");
+            packIdx = parts[parts.length - 1];
+          }
         }
+
+        const packOrderNo =
+          orderNos.length > 0
+            ? orderNos.map((no) => `${no}-${packIdx}`).join(", ")
+            : `${order.order_number || ""}-${packIdx}`;
 
         sheets.push({
           ...baseSheetInfo,
@@ -3195,11 +3266,6 @@ const RequirementOrderPage = () => {
                                 }))
                               }
                             >
-                              {isChild && (
-                                <span className="text-slate-300 font-semibold text-lg">
-                                  ↳
-                                </span>
-                              )}
                               <TypeTag type={item.type} />
                               <span
                                 className={`text-base font-semibold ${hasShortage ? "text-red-500" : ""}`}
@@ -3415,7 +3481,7 @@ const RequirementOrderPage = () => {
                                           </span>
                                         )}
                                         {hasAdditiveError && (
-                                          <span className="text-red-600 text-sm tracking-wide font-semibold bg-red-100 px-2.5 py-1 rounded-md border border-red-300 shadow-sm">
+                                          <span className="text-red-600 text-sm tracking-wide font-bold bg-red-100 px-2.5 py-1 rounded-md border border-red-300 shadow-sm">
                                             ⚠️ 法規超標
                                           </span>
                                         )}
@@ -3544,6 +3610,14 @@ const RequirementOrderPage = () => {
                                                 key={packPlan.id}
                                                 className="p-6 border-t border-slate-200 bg-amber-50/20 w-full max-w-full overflow-hidden"
                                               >
+                                                <h4 className="text-sm font-semibold text-amber-700 tracking-wide mb-5 flex items-center gap-2">
+                                                  <Package
+                                                    size={18}
+                                                    strokeWidth={2.5}
+                                                  />{" "}
+                                                  包裝耗材與批號分配 (
+                                                  {packPlan.mrp_id})
+                                                </h4>
                                                 <MaterialAllocationList
                                                   itemId={
                                                     packPlan.frontend_temp_id ||

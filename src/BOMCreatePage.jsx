@@ -18,6 +18,7 @@ import {
   MousePointerClick,
   AlertCircle,
   GripVertical,
+  Camera,
 } from "lucide-react";
 import CustomDialog from "./components/customDialog";
 import { fetchWithAuth } from "./utils/fetchWithAuth";
@@ -58,7 +59,188 @@ const TYPE_MAP = {
   },
 };
 
-// 🌟 通用的 Searchable Dropdown 元件
+const ALLERGEN_OPTIONS = [
+  { value: "CRUSTACEAN", label: "甲殼類" },
+  { value: "MANGO", label: "芒果" },
+  { value: "PEANUT", label: "花生" },
+  { value: "MILK", label: "牛奶、羊奶" },
+  { value: "EGG", label: "蛋" },
+  { value: "NUT", label: "堅果類" },
+  { value: "SESAME", label: "芝麻" },
+  { value: "GLUTEN", label: "含麩質之穀物" },
+  { value: "SOY", label: "大豆" },
+  { value: "FISH", label: "魚類" },
+  { value: "SULFITE", label: "亞硫酸鹽類" },
+];
+
+const emptyNutrition = {
+  energy_kcal: "0",
+  protein: "0",
+  fat: "0",
+  saturated_fat: "0",
+  trans_fat: "0",
+  carbs: "0",
+  sugar: "0",
+  sodium: "0",
+};
+
+const convertToGrams = (qty, unit) => {
+  const u = (unit || "kg").toLowerCase();
+  const q = parseFloat(qty) || 0;
+  if (u === "kg" || u === "l") return q * 1000;
+  if (u === "g" || u === "ml") return q;
+  return q;
+};
+
+const isNutritionEmpty = (nutData) => {
+  if (!nutData || Object.keys(nutData).length === 0) return true;
+  return Object.values(nutData).every((v) => {
+    const num = parseFloat(v);
+    return isNaN(num) || num === 0;
+  });
+};
+
+const calculateNutritionFromBOMs = (boms, parentUnit) => {
+  const totalNut = {
+    energy_kcal: 0,
+    protein: 0,
+    fat: 0,
+    saturated_fat: 0,
+    trans_fat: 0,
+    carbs: 0,
+    sugar: 0,
+    sodium: 0,
+  };
+  let baseQtyInGrams = 0;
+  let hasValidData = false;
+
+  if (boms && boms.length > 0) {
+    boms.forEach((bom) => {
+      if (bom.is_active === false) return;
+      if (!baseQtyInGrams) {
+        baseQtyInGrams = convertToGrams(bom.base_quantity, parentUnit);
+      }
+
+      let childNut = bom.child_nutrition_fact;
+      if (typeof childNut === "string") {
+        try {
+          childNut = JSON.parse(childNut);
+        } catch (e) {
+          childNut = {};
+        }
+      }
+
+      if (childNut && Object.keys(childNut).length > 0) {
+        hasValidData = true;
+        const reqQtyInGrams = convertToGrams(
+          bom.quantity_required,
+          bom.child_unit,
+        );
+
+        Object.keys(totalNut).forEach((k) => {
+          const per100gVal = parseFloat(childNut[k]) || 0;
+          const totalContributed = (reqQtyInGrams / 100) * per100gVal;
+          totalNut[k] += totalContributed;
+        });
+      }
+    });
+  }
+
+  if (!hasValidData) return emptyNutrition;
+
+  const formattedNut = {};
+  Object.keys(totalNut).forEach((k) => {
+    if (baseQtyInGrams > 0) {
+      const per100gFinal = totalNut[k] / (baseQtyInGrams / 100);
+      formattedNut[k] = parseFloat(per100gFinal.toFixed(2)).toString();
+    } else {
+      formattedNut[k] = "0";
+    }
+  });
+
+  return formattedNut;
+};
+
+const NutritionLabel = ({ nutritionData }) => {
+  const data = nutritionData || {};
+  const formatVal = (val) => {
+    const num = parseFloat(val);
+    return isNaN(num) ? "0" : parseFloat(num.toFixed(1)).toString();
+  };
+  const formatInt = (val) => {
+    const num = parseFloat(val);
+    return isNaN(num) ? "0" : Math.round(num).toString();
+  };
+
+  return (
+    <div className="w-[240px] border-[3px] border-black p-2 font-sans text-black bg-white mx-auto shadow-sm">
+      <h2 className="text-2xl font-black text-center mb-1 tracking-widest">
+        營養標示
+      </h2>
+      <table className="w-full text-sm font-bold text-right border-collapse mt-2">
+        <thead>
+          <tr className="border-b-[3px] border-black border-t-[3px]">
+            <th className="font-bold text-left py-1 w-[50%]"></th>
+            <th className="font-bold py-1 w-[50%] text-center">每100克/毫升</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-black/30">
+          <tr>
+            <td className="text-left py-1.5">熱量</td>
+            <td className="py-1.5 text-center">
+              {formatVal(data.energy_kcal)} 大卡
+            </td>
+          </tr>
+          <tr>
+            <td className="text-left py-1.5">蛋白質</td>
+            <td className="py-1.5 text-center">
+              {formatVal(data.protein)} 公克
+            </td>
+          </tr>
+          <tr>
+            <td className="text-left py-1.5">脂肪</td>
+            <td className="py-1.5 text-center">{formatVal(data.fat)} 公克</td>
+          </tr>
+          <tr>
+            <td className="text-left py-1.5 pl-4 text-[13px] text-slate-700 font-medium">
+              飽和脂肪
+            </td>
+            <td className="py-1.5 text-center text-[13px]">
+              {formatVal(data.saturated_fat)} 公克
+            </td>
+          </tr>
+          <tr>
+            <td className="text-left py-1.5 pl-4 text-[13px] text-slate-700 font-medium">
+              反式脂肪
+            </td>
+            <td className="py-1.5 text-center text-[13px]">
+              {formatVal(data.trans_fat)} 公克
+            </td>
+          </tr>
+          <tr>
+            <td className="text-left py-1.5">碳水化合物</td>
+            <td className="py-1.5 text-center">{formatVal(data.carbs)} 公克</td>
+          </tr>
+          <tr>
+            <td className="text-left py-1.5 pl-4 text-[13px] text-slate-700 font-medium">
+              糖
+            </td>
+            <td className="py-1.5 text-center text-[13px]">
+              {formatVal(data.sugar)} 公克
+            </td>
+          </tr>
+          <tr>
+            <td className="text-left py-1.5">鈉</td>
+            <td className="py-1.5 text-center">
+              {formatInt(data.sodium)} 毫克
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  );
+};
+
 const SearchableSelect = ({
   value,
   onChange,
@@ -97,7 +279,7 @@ const SearchableSelect = ({
   }, []);
 
   return (
-    <div className="relative w-full min-w-[200px]">
+    <div className="relative w-full">
       <div
         ref={selectRef}
         onClick={() => setIsOpen(!isOpen)}
@@ -127,7 +309,7 @@ const SearchableSelect = ({
       {isOpen && (
         <div
           ref={dropdownRef}
-          className="absolute top-full left-0 w-full mt-2 z-[99] bg-white border border-slate-200 rounded-2xl shadow-xl flex flex-col max-h-[320px] overflow-hidden animate-in fade-in zoom-in-95 duration-200"
+          className="absolute top-[calc(100%+4px)] left-0 w-full min-w-[320px] z-[100] bg-white border border-slate-200 rounded-2xl shadow-2xl flex flex-col max-h-[320px] overflow-hidden animate-in fade-in zoom-in-95 duration-200"
         >
           <div className="p-3 border-b border-slate-100 bg-slate-50/80 shrink-0">
             <input
@@ -138,7 +320,7 @@ const SearchableSelect = ({
               onChange={(e) => setSearchTerm(e.target.value)}
             />
           </div>
-          <div className="overflow-y-auto flex-1 p-2 custom-scrollbar">
+          <div className="overflow-y-auto flex-1 p-2 custom-scrollbar bg-white">
             {filteredOptions.length > 0 ? (
               filteredOptions.map((opt, idx) => (
                 <div
@@ -249,8 +431,8 @@ export default function BOMCreatePage() {
     const traverse = async (code, currentRatio) => {
       try {
         const res = await fetchWithAuth(`/api/boms?parent__code=${code}`);
-        const data = await res.json();
-        const boms = data.data || data || [];
+        const json = await res.json();
+        const boms = json.data || json || [];
         if (boms.length === 0) return;
 
         const baseQty = parseFloat(boms[0].base_quantity) || 1;
@@ -303,8 +485,8 @@ export default function BOMCreatePage() {
     try {
       const matRes = await fetchWithAuth("/api/materials?lite=true");
       if (!matRes.ok) throw new Error("無法取得物料資料");
-      const json = await matRes.json();
-      const allMaterials = json.data || json || [];
+      const matJson = await matRes.json();
+      const allMaterials = matJson.data || matJson || [];
 
       setMaterials(
         allMaterials.filter((m) =>
@@ -376,6 +558,33 @@ export default function BOMCreatePage() {
                 return ing?.is_additive === true;
               }) || false;
 
+            let itemNutrition = fullMat ? fullMat.nutrition_fact : {};
+            if (
+              fullMat &&
+              ["SEMI", "PRODUCT"].includes(fullMat.type) &&
+              isNutritionEmpty(itemNutrition)
+            ) {
+              itemNutrition = calculateNutritionFromBOMs(
+                fullMat.boms,
+                fullMat.unit,
+              );
+            }
+
+            let itemAllergens = fullMat ? fullMat.allergen_info || "" : "";
+            if (!itemAllergens && fullMat && fullMat.boms) {
+              const tempAllergens = new Set();
+              fullMat.boms.forEach((b) => {
+                if (b.child_allergen_info) {
+                  b.child_allergen_info
+                    .split(",")
+                    .forEach((a) => tempAllergens.add(a.trim()));
+                }
+              });
+              itemAllergens = Array.from(tempAllergens)
+                .filter(Boolean)
+                .join(",");
+            }
+
             return {
               id: bom.id,
               material_id: childId,
@@ -401,14 +610,14 @@ export default function BOMCreatePage() {
                     : 0,
               is_additive: hasAdditive,
               ingredients: fullMat?.ingredients || [],
+              allergen_info: itemAllergens,
               contained_additives: containedAdditives,
-              nutrition_fact: fullMat ? fullMat.nutrition_fact : {},
-              sequence_num: bom.sequence_num || String(index + 1), // 🌟 載入序號，無則帶入順序
+              nutrition_fact: itemNutrition,
+              sequence_num: bom.sequence_num || String(index + 1),
             };
           }),
         );
 
-        // 🌟 預設排序邏輯：沒有修改順序的話，預設用「使用量」由高到低排序
         const hasCustomSequence = loadedItems.some(
           (item) =>
             item.sequence_num && String(item.sequence_num).trim() !== "",
@@ -531,12 +740,13 @@ export default function BOMCreatePage() {
           provider_quotes: [],
           is_additive: false,
           ingredients: [],
+          allergen_info: "",
           contained_additives: [],
           nutrition_fact: {},
           set_cost: "",
           selected_price_id: null,
           selected_quote_info: null,
-          sequence_num: String(prev.items.length + 1), // 🌟 預設給予自動遞增順序
+          sequence_num: String(prev.items.length + 1),
         },
       ],
     }));
@@ -593,7 +803,6 @@ export default function BOMCreatePage() {
         return 0;
       });
 
-      // 🌟 用量排序/小計排序後，一併重新編排序號 1, 2, 3...
       const resequencedItems = sortedItems.map((item, idx) => ({
         ...item,
         sequence_num: String(idx + 1),
@@ -994,7 +1203,6 @@ export default function BOMCreatePage() {
         <React.Fragment key={currentPath}>
           <div className="flex flex-col border-b border-slate-100/50 bg-slate-50/30 hover:bg-slate-50 transition-colors group">
             <div className="flex items-start md:items-center gap-2 px-4 py-2 w-full">
-              {/* Spacer 加上與上層完美對齊的留白計算 */}
               <div
                 className="w-[88px] shrink-0 flex items-center justify-end pr-3"
                 style={{ paddingRight: `${level * 0.5 + 0.75}rem` }}
@@ -1020,7 +1228,6 @@ export default function BOMCreatePage() {
                 )}
               </div>
 
-              {/* Type Tag: w-16 */}
               <div className="w-16 flex justify-center shrink-0">
                 {item.childMat.type && (
                   <span
@@ -1031,8 +1238,7 @@ export default function BOMCreatePage() {
                 )}
               </div>
 
-              {/* Material: w-64 */}
-              <div className="w-64 shrink-0 flex flex-col gap-0.5 px-2">
+              <div className="flex-1 min-w-[280px] shrink-0 flex flex-col gap-0.5 px-2">
                 <span className="text-sm font-bold text-slate-700 truncate">
                   {item.child_name}
                 </span>
@@ -1041,8 +1247,7 @@ export default function BOMCreatePage() {
                 </span>
               </div>
 
-              {/* Remark: flex-1 */}
-              <div className="flex-1 min-w-[120px]">
+              <div className="w-24 shrink-0">
                 {item.remark ? (
                   <span className="text-xs text-slate-500 font-medium truncate block bg-white px-2 py-1 rounded border border-slate-100">
                     {item.remark}
@@ -1052,7 +1257,6 @@ export default function BOMCreatePage() {
                 )}
               </div>
 
-              {/* Qty: w-32 */}
               <div className="w-32 shrink-0 flex justify-end items-baseline gap-1 pt-1 pr-2">
                 <span className="text-[15px] font-mono font-black text-slate-700">
                   {formatNum(item.actualQty)}
@@ -1062,15 +1266,13 @@ export default function BOMCreatePage() {
                 </span>
               </div>
 
-              {/* Sys Cost: w-24 */}
-              <div className="w-24 shrink-0 text-right">
+              <div className="w-16 shrink-0 text-right">
                 <span className="text-[13px] font-mono font-bold text-slate-500">
                   ${formatNum(item.childCost, 2)}
                 </span>
               </div>
 
-              {/* Set Cost: w-28 */}
-              <div className="w-28 shrink-0 flex justify-center">
+              <div className="w-16 shrink-0 flex justify-center">
                 {item.hasSetCost ? (
                   <span className="font-mono text-[13px] font-bold text-indigo-600 bg-indigo-50 px-2.5 py-0.5 rounded-md border border-indigo-100">
                     ${formatNum(item.set_cost, 2)}
@@ -1080,8 +1282,7 @@ export default function BOMCreatePage() {
                 )}
               </div>
 
-              {/* Subtotal: w-24 */}
-              <div className="w-24 shrink-0 text-right pr-2">
+              <div className="w-20 shrink-0 text-right pr-2">
                 <span className="font-mono text-sm font-black text-slate-600">
                   ${formatNum(item.subtotal, 2)}
                 </span>
@@ -1300,6 +1501,79 @@ export default function BOMCreatePage() {
     };
   }, [formData.items, formData.base_quantity]);
 
+  const calculatedNutrition = useMemo(() => {
+    const totalNut = {
+      energy_kcal: 0,
+      protein: 0,
+      fat: 0,
+      saturated_fat: 0,
+      trans_fat: 0,
+      carbs: 0,
+      sugar: 0,
+      sodium: 0,
+    };
+    const baseQtyInGrams = convertToGrams(formData.base_quantity, "KG") || 1000;
+    let hasValidData = false;
+
+    formData.items.forEach((item) => {
+      const qtyGrams = convertToGrams(item.quantity, item.unit);
+      let nut = item.nutrition_fact;
+      if (typeof nut === "string") {
+        try {
+          nut = JSON.parse(nut);
+        } catch (e) {
+          nut = {};
+        }
+      }
+      if (nut && Object.keys(nut).length > 0) {
+        hasValidData = true;
+        Object.keys(totalNut).forEach((k) => {
+          const per100g = parseFloat(nut[k]) || 0;
+          totalNut[k] += (qtyGrams / 100) * per100g;
+        });
+      }
+    });
+
+    if (!hasValidData) return emptyNutrition;
+
+    const formattedNut = {};
+    Object.keys(totalNut).forEach((k) => {
+      if (baseQtyInGrams > 0) {
+        const per100gFinal = totalNut[k] / (baseQtyInGrams / 100);
+        formattedNut[k] = parseFloat(per100gFinal.toFixed(2)).toString();
+      } else {
+        formattedNut[k] = "0";
+      }
+    });
+    return formattedNut;
+  }, [formData.items, formData.base_quantity]);
+
+  const aggregatedAllergens = useMemo(() => {
+    const allergens = new Set();
+    formData.items.forEach((item) => {
+      if (item.allergen_info) {
+        const parts =
+          typeof item.allergen_info === "string"
+            ? item.allergen_info.split(",")
+            : item.allergen_info;
+        parts.forEach((a) => {
+          const t = a.trim();
+          if (t) allergens.add(t);
+        });
+      }
+    });
+    return Array.from(allergens).join(",");
+  }, [formData.items]);
+
+  const ingredientsText = useMemo(() => {
+    const sorted = [...formData.items]
+      .filter((i) => !["PACK", "STICKER", "OTHER"].includes(i.type))
+      .sort(
+        (a, b) => (parseFloat(b.quantity) || 0) - (parseFloat(a.quantity) || 0),
+      );
+    return sorted.map((i) => i.material_name).join("、");
+  }, [formData.items]);
+
   const executeSubmit = async () => {
     setIsSubmitting(true);
     closeDialog();
@@ -1332,8 +1606,9 @@ export default function BOMCreatePage() {
           body: JSON.stringify(materialPayload),
         });
         if (!matRes.ok) throw new Error("建立配方主檔失敗，請確認代碼是否重複");
-        const createdMaterial = await matRes.json();
-        currentParentId = createdMaterial.id || createdMaterial.data?.id;
+        const json = await matRes.json();
+        const createdMaterial = json.data || json;
+        currentParentId = createdMaterial.id;
       }
 
       if (isEditMode) {
@@ -1358,7 +1633,6 @@ export default function BOMCreatePage() {
           remark: item.remark || "",
           set_cost: item.set_cost !== "" ? parseFloat(item.set_cost) : null,
           selected_price_id: item.selected_price_id || null,
-          // 🌟 無論如何皆寫入序號，確保自訂排序的持久化
           sequence_num: item.sequence_num || String(index + 1),
         };
         const url =
@@ -1370,13 +1644,36 @@ export default function BOMCreatePage() {
           body: JSON.stringify(bomPayload),
         });
         if (!res.ok) throw new Error("儲存明細失敗");
-        return res.json();
+        const json = await res.json();
+        return json.data || json;
       });
 
       await Promise.all(bomPromises);
+
+      const snapshotPayload = {
+        material: currentParentId,
+        nutrition_fact: calculatedNutrition,
+        allergen_info: aggregatedAllergens,
+        ingredients_text: ingredientsText,
+        status: "PENDING",
+        is_active: true,
+      };
+
+      const snapRes = await fetchWithAuth("/api/nutrition_snapshots", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(snapshotPayload),
+      });
+
+      if (!snapRes.ok) {
+        throw new Error(
+          "配方已儲存，但建立營養標籤快照失敗，請聯絡系統管理員。",
+        );
+      }
+
       showAlert(
         "儲存成功",
-        `配方已成功${isEditMode ? "更新" : "建立"}！`,
+        `配方與營養標籤快照已成功${isEditMode ? "更新" : "建立"}！`,
         "success",
         () => window.location.reload(),
       );
@@ -1415,8 +1712,8 @@ export default function BOMCreatePage() {
     showConfirm(
       isEditMode ? "更新確認" : "建立確認",
       isEditMode
-        ? `確定更新配方「${formData.name}」？`
-        : `確定建立配方「${formData.name}」？`,
+        ? `確定更新配方「${formData.name}」並建立一份新的標籤快照？`
+        : `確定建立配方「${formData.name}」與標籤快照？`,
       executeSubmit,
     );
   };
@@ -1442,7 +1739,6 @@ export default function BOMCreatePage() {
         onSubmit={handleSubmit}
         className="flex flex-col gap-8 mb-10 w-full"
       >
-        {/* 基本資訊 */}
         <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm w-full transition-shadow hover:shadow-md">
           <h3 className="text-xs font-black text-[#007AFF] uppercase tracking-widest mb-6 border-b border-slate-100 pb-3">
             1. 基本資訊
@@ -1506,8 +1802,7 @@ export default function BOMCreatePage() {
           </div>
         </div>
 
-        {/* 🌟 2. 核心配方明細 (使用標準 Tailwind 等寬級距建構 Data Grid) */}
-        <div className="bg-white rounded-3xl border border-slate-200 shadow-sm flex flex-col w-full overflow-hidden">
+        <div className="bg-white rounded-3xl border border-slate-200 shadow-sm flex flex-col w-full">
           <div className="px-6 py-4 md:px-6 md:py-5 border-b border-slate-100 flex flex-col md:flex-row justify-between items-start md:items-center bg-slate-50/50 gap-4">
             <div className="flex items-center gap-3">
               <h3 className="text-base font-black text-slate-800">
@@ -1571,22 +1866,21 @@ export default function BOMCreatePage() {
               </div>
             ) : (
               <div className="min-w-[1000px] flex flex-col w-full">
-                {/* 🌟 嚴格對齊的表頭 (合併序號區塊) */}
                 <div className="flex items-center gap-2 px-4 py-2 bg-slate-100/50 border-b border-slate-200 text-[10px] font-black text-slate-500 uppercase tracking-widest sticky top-0 z-10">
                   <div className="w-[88px] text-center shrink-0">序號</div>
                   <div className="w-16 text-center shrink-0">類型</div>
-                  <div className="w-64 shrink-0">物料</div>
-                  <div className="flex-1 min-w-[120px]">備註</div>
+                  <div className="flex-1 min-w-[280px] shrink-0">物料</div>
+                  <div className="w-24 shrink-0">備註</div>
                   <div className="w-32 shrink-0 pl-1 text-right">
                     用量(KG) <span className="text-red-500">*</span>
                   </div>
-                  <div className="w-24 shrink-0 text-right">系統均價</div>
-                  <div className="w-28 shrink-0 text-center">設定成本</div>
-                  <div className="w-24 shrink-0 text-right pr-2">小計</div>
+                  <div className="w-16 shrink-0 text-right">系統均價</div>
+                  <div className="w-16 shrink-0 text-center">設定成本</div>
+                  <div className="w-20 shrink-0 text-right pr-2">小計</div>
                   <div className="w-10 shrink-0"></div>
                 </div>
 
-                <div className="flex flex-col">
+                <div className="flex flex-col relative z-0">
                   {formData.items.map((item, index) => {
                     const itemQty = parseFloat(item.quantity) || 0;
                     const isExpired =
@@ -1628,7 +1922,7 @@ export default function BOMCreatePage() {
                           onDragOver={(e) => handleDragOver(e, index)}
                           onDragLeave={handleDragLeave}
                           onDrop={(e) => handleDrop(e, index)}
-                          className={`flex flex-col border-b border-slate-100 transition-colors group relative ${
+                          className={`flex flex-col border-b border-slate-100 transition-colors group relative hover:z-[40] focus-within:z-[50] ${
                             isErrorRow
                               ? "bg-red-50 hover:bg-red-100/50"
                               : "bg-white hover:bg-slate-50/50"
@@ -1636,9 +1930,7 @@ export default function BOMCreatePage() {
                             draggedIndex === index ? "opacity-50" : ""
                           }`}
                         >
-                          {/* 🌟 1. 主資料列 */}
                           <div className="flex items-start md:items-center gap-2 px-4 py-2 w-full">
-                            {/* 🌟 合併的 Drag & Seq Input 區塊: w-[88px] */}
                             <div className="w-[88px] shrink-0 flex items-center justify-center gap-1.5 pl-2 pt-1">
                               <div className="cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500 shrink-0">
                                 <GripVertical size={16} />
@@ -1658,7 +1950,6 @@ export default function BOMCreatePage() {
                               />
                             </div>
 
-                            {/* Type Tag: w-16 */}
                             <div className="w-16 shrink-0 flex flex-col items-center justify-center">
                               {item.type && (
                                 <span
@@ -1682,8 +1973,7 @@ export default function BOMCreatePage() {
                               )}
                             </div>
 
-                            {/* Material Select: w-64 */}
-                            <div className="w-64 shrink-0">
+                            <div className="flex-1 min-w-[280px] shrink-0">
                               <SearchableSelect
                                 placeholder="請搜尋原料..."
                                 value={
@@ -1706,6 +1996,38 @@ export default function BOMCreatePage() {
                                         matIng;
                                       return ing?.is_additive === true;
                                     }) || false;
+
+                                  let itemNutrition =
+                                    selectedMat.nutrition_fact || {};
+                                  if (
+                                    ["SEMI", "PRODUCT"].includes(
+                                      selectedMat.type,
+                                    ) &&
+                                    isNutritionEmpty(itemNutrition)
+                                  ) {
+                                    itemNutrition = calculateNutritionFromBOMs(
+                                      selectedMat.boms,
+                                      selectedMat.unit,
+                                    );
+                                  }
+
+                                  let itemAllergens =
+                                    selectedMat.allergen_info || "";
+                                  if (!itemAllergens && selectedMat.boms) {
+                                    const tempAllergens = new Set();
+                                    selectedMat.boms.forEach((b) => {
+                                      if (b.child_allergen_info) {
+                                        b.child_allergen_info
+                                          .split(",")
+                                          .forEach((a) =>
+                                            tempAllergens.add(a.trim()),
+                                          );
+                                      }
+                                    });
+                                    itemAllergens = Array.from(tempAllergens)
+                                      .filter(Boolean)
+                                      .join(",");
+                                  }
 
                                   handleItemChange(
                                     index,
@@ -1759,8 +2081,13 @@ export default function BOMCreatePage() {
                                   );
                                   handleItemChange(
                                     index,
+                                    "allergen_info",
+                                    itemAllergens,
+                                  );
+                                  handleItemChange(
+                                    index,
                                     "nutrition_fact",
-                                    selectedMat.nutrition_fact || {},
+                                    itemNutrition,
                                   );
                                   handleItemChange(index, "set_cost", "");
                                   handleItemChange(
@@ -1832,8 +2159,7 @@ export default function BOMCreatePage() {
                               />
                             </div>
 
-                            {/* Remark: flex-1 */}
-                            <div className="flex-1 min-w-[120px] relative">
+                            <div className="w-24 shrink-0 relative">
                               <input
                                 type="text"
                                 value={item.remark || ""}
@@ -1849,7 +2175,6 @@ export default function BOMCreatePage() {
                               />
                             </div>
 
-                            {/* Qty: w-32 */}
                             <div className="w-32 shrink-0 relative">
                               <input
                                 type="number"
@@ -1880,8 +2205,7 @@ export default function BOMCreatePage() {
                               </span>
                             </div>
 
-                            {/* Ref Cost: w-24 */}
-                            <div className="w-24 shrink-0 text-right pt-0.5 relative group/price">
+                            <div className="w-16 shrink-0 text-right pt-0.5 relative group/price">
                               <span
                                 className={`font-mono text-[13px] font-bold transition-colors ${item.selected_price_id && !isExpired ? "text-emerald-600" : "text-slate-500"}`}
                               >
@@ -1901,10 +2225,9 @@ export default function BOMCreatePage() {
                               )}
                             </div>
 
-                            {/* Set Cost: w-28 */}
-                            <div className="w-28 shrink-0 flex justify-center">
-                              <div className="flex items-center h-[36px] px-2 bg-slate-50 border border-transparent rounded-lg hover:bg-white hover:border-slate-200 focus-within:bg-white focus-within:border-[#007AFF] focus-within:ring-2 focus-within:ring-[#007AFF]/20 transition-all">
-                                <span className="text-xs font-bold text-slate-400 mr-1">
+                            <div className="w-16 shrink-0 flex justify-center">
+                              <div className="flex items-center h-[36px] px-1 bg-slate-50 border border-transparent rounded-lg hover:bg-white hover:border-slate-200 focus-within:bg-white focus-within:border-[#007AFF] focus-within:ring-2 focus-within:ring-[#007AFF]/20 transition-all">
+                                <span className="text-xs font-bold text-slate-400">
                                   $
                                 </span>
                                 <input
@@ -1931,20 +2254,18 @@ export default function BOMCreatePage() {
                                     else
                                       handleItemChange(index, "set_cost", "");
                                   }}
-                                  className="w-full text-right bg-transparent outline-none font-mono font-bold text-sm text-indigo-600 placeholder:font-sans placeholder:text-slate-300 placeholder:font-normal"
+                                  className="w-full text-right bg-transparent outline-none font-mono font-bold text-[13px] text-indigo-600 placeholder:font-sans placeholder:text-slate-300 placeholder:font-normal"
                                   placeholder="自訂"
                                 />
                               </div>
                             </div>
 
-                            {/* Subtotal: w-24 */}
-                            <div className="w-24 shrink-0 text-right pr-2 pt-0.5">
+                            <div className="w-20 shrink-0 text-right pr-2 pt-0.5">
                               <span className="font-mono text-[15px] font-black text-slate-700">
                                 ${subtotal}
                               </span>
                             </div>
 
-                            {/* Delete: w-10 */}
                             <div className="w-10 shrink-0 flex justify-center pt-0.5">
                               <button
                                 type="button"
@@ -1956,7 +2277,6 @@ export default function BOMCreatePage() {
                             </div>
                           </div>
 
-                          {/* 🌟 2. 獨立的廠商報價情報列 */}
                           {renderProviderQuotesSubRow(
                             item.base_estimated_cost || 0,
                             item.provider_quotes,
@@ -1964,7 +2284,6 @@ export default function BOMCreatePage() {
                           )}
                         </div>
 
-                        {/* 🌟 3. 半成品展開區塊 */}
                         {isExpanded && isSemi && item.material_id && (
                           <div className="bg-slate-50/40 border-b border-slate-200 pb-2">
                             {renderNestedRows(
@@ -1984,7 +2303,6 @@ export default function BOMCreatePage() {
           </div>
         </div>
 
-        {/* 法規面板 */}
         <div className="border border-slate-200/60 bg-slate-50/50 p-6 md:p-8 rounded-2xl shadow-sm min-h-[220px] flex flex-col gap-6">
           <h3 className="text-sm font-black text-slate-800 flex items-center gap-2">
             <FlaskConical
@@ -2083,7 +2401,60 @@ export default function BOMCreatePage() {
           )}
         </div>
 
-        {/* 底部總計 */}
+        <div className="border border-slate-200/60 bg-slate-50/50 p-6 md:p-8 rounded-2xl shadow-sm min-h-[220px] flex flex-col gap-6">
+          <h3 className="text-sm font-black text-slate-800 flex items-center gap-2">
+            <Camera size={16} className="text-purple-500" strokeWidth={2.5} />
+            營養價值預覽
+          </h3>
+          <div className="grid grid-cols-1 lg:grid-cols-[1fr_auto] gap-10 items-start">
+            <div className="flex flex-col gap-6">
+              <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                <span className="text-[10px] uppercase font-bold text-slate-400 mb-2 block">
+                  預計展開成分清單
+                </span>
+                <span className="text-sm font-bold text-slate-800 leading-relaxed">
+                  {ingredientsText || "無"}
+                </span>
+              </div>
+              <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                <span className="text-[10px] uppercase font-bold text-slate-400 mb-2 block">
+                  自動聯集過敏原宣告
+                </span>
+                <div className="flex flex-wrap gap-2">
+                  {aggregatedAllergens ? (
+                    aggregatedAllergens.split(",").map((a, i) => {
+                      const match = ALLERGEN_OPTIONS.find(
+                        (opt) => opt.value === a,
+                      );
+                      return (
+                        <span
+                          key={i}
+                          className="bg-red-50 text-red-600 border border-red-200 px-3 py-1 rounded-lg text-xs font-bold shadow-sm"
+                        >
+                          {match ? match.label : a}
+                        </span>
+                      );
+                    })
+                  ) : (
+                    <span className="text-sm font-bold text-slate-400">無</span>
+                  )}
+                </div>
+              </div>
+              <div className="text-[11px] text-slate-500 font-bold bg-purple-50/50 border border-purple-100 p-4 rounded-xl leading-relaxed">
+                💡
+                儲存配方時，系統將自動為當前版本建立一份「營養價值副本」，並進入研發審核流程。
+                審核通過後，生產單即可於出貨標籤時選擇此版本製作出貨標籤。
+              </div>
+            </div>
+            <div className="flex flex-col items-center justify-center bg-slate-100 p-8 rounded-3xl border border-slate-200/60 shadow-inner w-full lg:w-[320px]">
+              <div className="text-sm uppercase font-black text-slate-900 tracking-widest mb-4">
+                標籤預覽
+              </div>
+              <NutritionLabel nutritionData={calculatedNutrition} />
+            </div>
+          </div>
+        </div>
+
         <div className="bg-white px-6 py-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row justify-between items-center gap-6">
           <div className="flex flex-wrap items-center gap-6 md:gap-8">
             <div>

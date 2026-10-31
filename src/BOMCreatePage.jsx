@@ -14,16 +14,21 @@ import {
   FlaskConical,
   CheckCircle2,
   Download,
-  MessageSquareText,
   MousePointerClick,
   AlertCircle,
   GripVertical,
   Camera,
+  Package,
+  XCircle,
+  Copy,
 } from "lucide-react";
 import CustomDialog from "./components/customDialog";
 import { fetchWithAuth } from "./utils/fetchWithAuth";
 import { TFDA_INGREDIENT_RULES } from "./utils/tfdaLegalRules";
 
+// ==========================================
+// 🌟 輔助函數
+// ==========================================
 const formatNum = (num, maxDecimals = 4) => {
   if (num === null || num === undefined || isNaN(num) || num === "") return "0";
   return parseFloat(Number(num).toFixed(maxDecimals)).toString();
@@ -41,6 +46,15 @@ const formatCurrency = (num) => {
     minimumFractionDigits: 0,
     maximumFractionDigits: 4,
   });
+};
+
+const handleNumericTextInput = (val, allowDecimal = true) => {
+  if (val === "") return "";
+  let clean = val.replace(/[^0-9.]/g, "");
+  if (!allowDecimal) clean = clean.replace(/\./g, "");
+  const parts = clean.split(".");
+  if (parts.length > 2) clean = parts[0] + "." + parts.slice(1).join("");
+  return clean;
 };
 
 const TYPE_MAP = {
@@ -161,6 +175,9 @@ const calculateNutritionFromBOMs = (boms, parentUnit) => {
   return formattedNut;
 };
 
+// ==========================================
+// 🌟 共用 Components
+// ==========================================
 const NutritionLabel = ({ nutritionData }) => {
   const data = nutritionData || {};
   const formatVal = (val) => {
@@ -241,6 +258,180 @@ const NutritionLabel = ({ nutritionData }) => {
   );
 };
 
+const FilterableDropdown = ({
+  value,
+  onChange,
+  options,
+  placeholder,
+  disabled,
+  disabledIds = [],
+  renderItem,
+}) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [dropdownStyle, setDropdownStyle] = useState({});
+  const selectRef = useRef(null);
+  const dropdownMenuRef = useRef(null);
+
+  const filteredOptions = options.filter(
+    (opt) =>
+      (opt.name || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (opt.code || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (opt.order_number || "").toLowerCase().includes(searchTerm.toLowerCase()),
+  );
+
+  const selectedOpt = options.find((o) => String(o.id) === String(value));
+
+  const handleToggle = () => {
+    if (disabled) return;
+    if (!isOpen && selectRef.current) {
+      const rect = selectRef.current.getBoundingClientRect();
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const dropdownHeight = 260;
+
+      if (spaceBelow < dropdownHeight && rect.top > dropdownHeight) {
+        setDropdownStyle({
+          bottom: `${window.innerHeight - rect.top + 6}px`,
+          top: "auto",
+          left: `${rect.left}px`,
+          width: `${rect.width}px`,
+        });
+      } else {
+        setDropdownStyle({
+          top: `${rect.bottom + 6}px`,
+          bottom: "auto",
+          left: `${rect.left}px`,
+          width: `${rect.width}px`,
+        });
+      }
+    }
+    setIsOpen(!isOpen);
+  };
+
+  useEffect(() => {
+    const handleScroll = (e) => {
+      if (dropdownMenuRef.current && dropdownMenuRef.current.contains(e.target))
+        return;
+      if (isOpen) setIsOpen(false);
+    };
+    if (isOpen) {
+      window.addEventListener("scroll", handleScroll, true);
+      window.addEventListener("resize", () => setIsOpen(false), true);
+    }
+    return () => {
+      window.removeEventListener("scroll", handleScroll, true);
+      window.removeEventListener("resize", () => setIsOpen(false), true);
+    };
+  }, [isOpen]);
+
+  return (
+    <>
+      <div
+        ref={selectRef}
+        onClick={handleToggle}
+        className={`w-full h-11 px-3.5 py-2 border rounded-xl text-[14px] flex justify-between items-center transition-all shadow-sm cursor-pointer ${
+          disabled
+            ? "bg-slate-50 text-slate-400 cursor-not-allowed border-slate-200"
+            : isOpen
+              ? "border-blue-400 ring-2 ring-blue-500/10 bg-white"
+              : "bg-white border-slate-200 hover:border-slate-300 text-slate-700 font-medium"
+        }`}
+      >
+        <span className="truncate pr-2 w-full flex items-center">
+          {selectedOpt ? (
+            renderItem ? (
+              renderItem(selectedOpt)
+            ) : (
+              selectedOpt.name
+            )
+          ) : (
+            <span className="text-slate-400 flex items-center gap-2">
+              {placeholder}
+            </span>
+          )}
+        </span>
+        <ChevronDown
+          size={16}
+          className={`flex-shrink-0 transition-transform ${isOpen ? "rotate-180 text-blue-500" : "text-slate-400"}`}
+        />
+      </div>
+
+      {isOpen && !disabled && (
+        <>
+          <div
+            className="fixed inset-0 z-[9998]"
+            onClick={() => setIsOpen(false)}
+          ></div>
+          <div
+            ref={dropdownMenuRef}
+            style={dropdownStyle}
+            className="fixed z-[9999] bg-white/95 backdrop-blur-xl border border-slate-200 rounded-2xl shadow-xl flex flex-col max-h-64 overflow-hidden animate-in fade-in zoom-in-95 duration-150"
+          >
+            <div className="p-2 border-b border-slate-100 bg-slate-50/80 shrink-0">
+              <div className="relative">
+                <Search
+                  size={14}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                />
+                <input
+                  autoFocus
+                  className="w-full border border-slate-200 bg-white rounded-xl pl-8 pr-3 py-2 text-[13px] font-medium text-slate-700 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10 transition-all shadow-sm"
+                  placeholder="輸入關鍵字搜尋..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                />
+              </div>
+            </div>
+            <div className="overflow-y-auto flex-1 p-1.5 custom-scrollbar">
+              {filteredOptions.length > 0 ? (
+                filteredOptions.map((opt) => {
+                  const isSelected = String(value) === String(opt.id);
+                  const isItemDisabled =
+                    opt.id &&
+                    disabledIds.includes(String(opt.id)) &&
+                    !isSelected;
+
+                  return (
+                    <div
+                      key={opt.id || `empty-${Math.random()}`}
+                      onClick={() => {
+                        if (isItemDisabled) return;
+                        onChange(opt.id);
+                        setIsOpen(false);
+                        setSearchTerm("");
+                      }}
+                      className={`px-3 py-2.5 text-[13px] rounded-xl transition-colors font-medium flex justify-between items-center ${
+                        isSelected
+                          ? "bg-blue-50 text-blue-700 font-bold"
+                          : isItemDisabled
+                            ? "text-slate-400 bg-slate-50/50 cursor-not-allowed"
+                            : "text-slate-700 hover:bg-slate-50 cursor-pointer"
+                      }`}
+                    >
+                      <span className="w-full">
+                        {renderItem ? renderItem(opt) : opt.name}
+                      </span>
+                      {isItemDisabled && (
+                        <span className="text-[10px] text-slate-400 font-bold border border-slate-200 bg-white px-1.5 py-0.5 rounded">
+                          已選
+                        </span>
+                      )}
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="px-3 py-6 text-center text-slate-400 text-[13px] font-medium">
+                  查無資料
+                </div>
+              )}
+            </div>
+          </div>
+        </>
+      )}
+    </>
+  );
+};
+
 const SearchableSelect = ({
   value,
   onChange,
@@ -279,11 +470,11 @@ const SearchableSelect = ({
   }, []);
 
   return (
-    <div className="relative w-full">
+    <div className="relative w-full h-full flex items-center">
       <div
         ref={selectRef}
         onClick={() => setIsOpen(!isOpen)}
-        className={`w-full h-[40px] px-3 py-2 border rounded-xl text-sm cursor-pointer bg-white flex justify-between items-center transition-all shadow-sm ${
+        className={`w-full h-9 px-3 border rounded-lg text-sm cursor-pointer bg-white flex justify-between items-center transition-all shadow-sm ${
           isOpen
             ? "border-[#007AFF] ring-2 ring-[#007AFF]/20"
             : "border-slate-200 hover:border-slate-300"
@@ -291,7 +482,7 @@ const SearchableSelect = ({
       >
         <div className="flex items-center gap-2 overflow-hidden w-full">
           <Icon
-            size={16}
+            size={14}
             className={value ? "text-[#007AFF]" : "text-slate-400"}
           />
           <span
@@ -309,7 +500,7 @@ const SearchableSelect = ({
       {isOpen && (
         <div
           ref={dropdownRef}
-          className="absolute top-[calc(100%+4px)] left-0 w-full min-w-[320px] z-[100] bg-white border border-slate-200 rounded-2xl shadow-2xl flex flex-col max-h-[320px] overflow-hidden animate-in fade-in zoom-in-95 duration-200"
+          className="absolute top-[calc(100%+4px)] left-0 w-full min-w-[320px] z-[999] bg-white border border-slate-200 rounded-2xl shadow-2xl flex flex-col max-h-[320px] overflow-hidden animate-in fade-in zoom-in-95 duration-200"
         >
           <div className="p-3 border-b border-slate-100 bg-slate-50/80 shrink-0">
             <input
@@ -360,6 +551,9 @@ const SearchableSelect = ({
   );
 };
 
+// ==========================================
+// 🌟 頁面主體 BOMCreatePage
+// ==========================================
 export default function BOMCreatePage() {
   const { materialCode } = useParams();
   const navigate = useNavigate();
@@ -368,6 +562,11 @@ export default function BOMCreatePage() {
   const [originalMaterialId, setOriginalMaterialId] = useState(null);
   const [originalBomIds, setOriginalBomIds] = useState([]);
   const [materials, setMaterials] = useState([]);
+
+  // 🌟 包材選擇用資料
+  const [packMaterials, setPackMaterials] = useState([]);
+  const [packageOrdersList, setPackageOrdersList] = useState([]);
+
   const [loading, setLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -386,6 +585,22 @@ export default function BOMCreatePage() {
     type: "PRODUCT",
     base_quantity: 10,
     items: [],
+  });
+
+  // 🌟 包裝單資料結構
+  const [packFormData, setPackFormData] = useState({
+    id: null,
+    packageSuffix: "",
+    order_number: "",
+    outer_pack: "",
+    inner_pack: "",
+    additional_packs: [],
+    sales_unit: "箱",
+    sales_unit_quantity: "1",
+    sales_pack_unit: "包",
+    sales_pack_quantity: "0",
+    spec: "",
+    selectedTemplateId: "",
   });
 
   const [dialog, setDialog] = useState({
@@ -483,7 +698,12 @@ export default function BOMCreatePage() {
   const fetchInitialData = async () => {
     setLoading(true);
     try {
-      const matRes = await fetchWithAuth("/api/materials?lite=true");
+      const [matRes, packMatRes, poListRes] = await Promise.all([
+        fetchWithAuth("/api/materials?lite=true"),
+        fetchWithAuth("/api/materials?type__in=PACK,STICKER,OTHER"),
+        fetchWithAuth("/api/package_orders"),
+      ]);
+
       if (!matRes.ok) throw new Error("無法取得物料資料");
       const matJson = await matRes.json();
       const allMaterials = matJson.data || matJson || [];
@@ -493,6 +713,27 @@ export default function BOMCreatePage() {
           ["RAW", "SEMI", "PACK"].includes(m.type?.toUpperCase()),
         ),
       );
+
+      if (packMatRes.ok) {
+        const packMatJson = await packMatRes.json();
+        const allPackMaterials = packMatJson.data || packMatJson || [];
+        setPackMaterials([
+          { id: "", name: "-- 無需對應包材 --", code: "", pack_capacity: null },
+          ...allPackMaterials,
+        ]);
+      } else {
+        setPackMaterials([
+          { id: "", name: "-- 無需對應包材 --", code: "", pack_capacity: null },
+          ...allMaterials.filter((m) =>
+            ["PACK", "STICKER", "OTHER"].includes(m.type),
+          ),
+        ]);
+      }
+
+      if (poListRes.ok) {
+        const poListJson = await poListRes.json();
+        setPackageOrdersList(poListJson.data || poListJson || []);
+      }
 
       if (isEditMode) {
         const specificMatRes = await fetchWithAuth(
@@ -512,6 +753,59 @@ export default function BOMCreatePage() {
         );
         const bomJson = await bomRes.json();
         const bomList = bomJson.data || bomJson || [];
+
+        if (targetMaterial.type === "PRODUCT") {
+          try {
+            const poRes = await fetchWithAuth(
+              `/api/package_orders?search=${targetMaterial.code}`,
+            );
+            if (poRes.ok) {
+              const poJson = await poRes.json();
+              const poList = poJson.data || poJson || [];
+              const matchedPO = poList.find(
+                (p) => String(p.product_code) === String(targetMaterial.code),
+              );
+
+              if (matchedPO) {
+                const additional_packs = [];
+                (matchedPO.packaging_info || []).forEach((item, idx) => {
+                  if (item.layer !== "outer" && item.layer !== "inner") {
+                    additional_packs.push({
+                      id: `exist_${idx}`,
+                      material_id: String(item.material_id),
+                      qty: String(item.qty || 1),
+                    });
+                  }
+                });
+
+                setPackFormData({
+                  id: matchedPO.id,
+                  packageSuffix: "",
+                  order_number: matchedPO.order_number,
+                  outer_pack: matchedPO.outer_pack
+                    ? String(matchedPO.outer_pack)
+                    : "",
+                  inner_pack: matchedPO.inner_pack
+                    ? String(matchedPO.inner_pack)
+                    : "",
+                  additional_packs,
+                  sales_unit: matchedPO.sales_unit || "箱",
+                  sales_unit_quantity: matchedPO.sales_unit_quantity
+                    ? String(matchedPO.sales_unit_quantity)
+                    : "1",
+                  sales_pack_unit: matchedPO.sales_pack_unit || "包",
+                  sales_pack_quantity: matchedPO.sales_pack_quantity
+                    ? String(matchedPO.sales_pack_quantity)
+                    : "0",
+                  spec: matchedPO.spec || "",
+                  selectedTemplateId: "",
+                });
+              }
+            }
+          } catch (poErr) {
+            console.error("Fetch Package Order failed", poErr);
+          }
+        }
 
         const today = new Date().toISOString().split("T")[0];
 
@@ -719,6 +1013,211 @@ export default function BOMCreatePage() {
   const handleMasterChange = (e) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
+  };
+
+  // 🌟 包裝單連動函式，完全對齊 PackageOrderPage 預覽字串產生規則
+  const updatePackField = (field, value) => {
+    setPackFormData((prev) => {
+      let updated = { ...prev, [field]: value };
+
+      if (
+        [
+          "outer_pack",
+          "inner_pack",
+          "sales_unit",
+          "sales_pack_unit",
+          "sales_pack_quantity",
+          "sales_unit_quantity",
+        ].includes(field)
+      ) {
+        let nextOuterPack = field === "outer_pack" ? value : updated.outer_pack;
+        let nextInnerPack = field === "inner_pack" ? value : updated.inner_pack;
+        let nextSalesUnit = field === "sales_unit" ? value : updated.sales_unit;
+        let nextPackUnit =
+          field === "sales_pack_unit" ? value : updated.sales_pack_unit;
+        let nextSalesQtyStr =
+          field === "sales_unit_quantity" ? value : updated.sales_unit_quantity;
+        let nextPackQtyStr =
+          field === "sales_pack_quantity" ? value : updated.sales_pack_quantity;
+
+        const outerMat = packMaterials.find(
+          (m) => String(m.id) === String(nextOuterPack),
+        );
+        const innerMat = packMaterials.find(
+          (m) => String(m.id) === String(nextInnerPack),
+        );
+
+        if (field === "outer_pack") {
+          if (!value) {
+            nextSalesQtyStr = "0";
+            nextSalesUnit = "";
+            nextInnerPack = "";
+            nextPackQtyStr = "0";
+            nextPackUnit = "";
+            updated.inner_pack = "";
+            updated.sales_pack_quantity = "0";
+            updated.sales_pack_unit = "";
+          } else if (outerMat) {
+            const match = outerMat.name.match(/([箱桶袋包罐瓶])/);
+            if (match) nextSalesUnit = match[1];
+          }
+          updated.sales_unit_quantity = nextSalesQtyStr;
+          updated.sales_unit = nextSalesUnit;
+        }
+
+        if (field === "inner_pack") {
+          if (!value) {
+            nextPackQtyStr = "0";
+            nextPackUnit = "";
+          } else if (innerMat) {
+            const match = innerMat.name.match(/([箱桶袋包罐瓶])/);
+            if (match) nextPackUnit = match[1];
+          }
+          updated.sales_pack_quantity = nextPackQtyStr;
+          updated.sales_pack_unit = nextPackUnit;
+        }
+
+        const parsedSalesQty = Number(nextSalesQtyStr) || 0;
+        const parsedPackQty = Number(nextPackQtyStr) || 0;
+
+        const outerCap = outerMat?.pack_capacity
+          ? parseFloat(outerMat.pack_capacity)
+          : 0;
+        const innerCap = innerMat?.pack_capacity
+          ? parseFloat(innerMat.pack_capacity)
+          : 0;
+
+        if (!nextOuterPack || parsedSalesQty <= 0) {
+          updated.spec = "";
+        } else if (nextInnerPack && parsedPackQty > 0) {
+          const weight = innerCap ? `${innerCap}KG` : "1KG";
+          updated.spec = `${weight}*${parsedPackQty}${nextPackUnit || "包"}/${nextSalesUnit || "箱"}`;
+        } else {
+          const weight = outerCap ? `${outerCap}KG` : "10KG";
+          updated.spec = `${weight}/${nextSalesUnit || "桶"}`;
+        }
+      }
+
+      return updated;
+    });
+  };
+
+  const handleApplyPackageTemplate = (templateId) => {
+    const template = packageOrdersList.find(
+      (p) => String(p.id) === String(templateId),
+    );
+    if (!template) {
+      setPackFormData((prev) => ({
+        ...prev,
+        selectedTemplateId: "",
+        order_number: "",
+        outer_pack: "",
+        inner_pack: "",
+        additional_packs: [],
+        sales_unit: "箱",
+        sales_unit_quantity: "1",
+        sales_pack_unit: "包",
+        sales_pack_quantity: "0",
+        spec: "",
+      }));
+      return;
+    }
+
+    const additional_packs = [];
+    (template.packaging_info || []).forEach((item, idx) => {
+      if (item.layer !== "outer" && item.layer !== "inner") {
+        additional_packs.push({
+          id: `temp_${Date.now()}_${idx}`,
+          material_id: String(item.material_id),
+          qty: String(item.qty || 1),
+        });
+      }
+    });
+
+    setPackFormData((prev) => ({
+      ...prev,
+      selectedTemplateId: templateId,
+      order_number: template.order_number,
+      outer_pack: template.outer_pack ? String(template.outer_pack) : "",
+      inner_pack: template.inner_pack ? String(template.inner_pack) : "",
+      additional_packs,
+      sales_unit: template.sales_unit || "箱",
+      sales_unit_quantity: template.sales_unit_quantity
+        ? String(template.sales_unit_quantity)
+        : "1",
+      sales_pack_unit: template.sales_pack_unit || "包",
+      sales_pack_quantity: template.sales_pack_quantity
+        ? String(template.sales_pack_quantity)
+        : "0",
+      spec: template.spec || "",
+    }));
+  };
+
+  const addAdditionalPack = () => {
+    setPackFormData((prev) => ({
+      ...prev,
+      additional_packs: [
+        ...prev.additional_packs,
+        { id: `temp_${Date.now()}`, material_id: "", qty: "1" },
+      ],
+    }));
+  };
+
+  const updateAdditionalPack = (index, field, value) => {
+    setPackFormData((prev) => {
+      const newPacks = [...prev.additional_packs];
+      newPacks[index] = { ...newPacks[index], [field]: value };
+      return { ...prev, additional_packs: newPacks };
+    });
+  };
+
+  const removeAdditionalPack = (index) => {
+    setPackFormData((prev) => ({
+      ...prev,
+      additional_packs: prev.additional_packs.filter((_, i) => i !== index),
+    }));
+  };
+
+  const disabledMaterialIds = useMemo(() => {
+    const ids = [];
+    if (packFormData.outer_pack) ids.push(String(packFormData.outer_pack));
+    if (packFormData.inner_pack) ids.push(String(packFormData.inner_pack));
+    packFormData.additional_packs.forEach((p) => {
+      if (p.material_id) ids.push(String(p.material_id));
+    });
+    return ids;
+  }, [
+    packFormData.outer_pack,
+    packFormData.inner_pack,
+    packFormData.additional_packs,
+  ]);
+
+  const calculatePackCostPreview = () => {
+    let cost = 0;
+    const outerMat = packMaterials.find(
+      (m) => String(m.id) === String(packFormData.outer_pack),
+    );
+    const innerMat = packMaterials.find(
+      (m) => String(m.id) === String(packFormData.inner_pack),
+    );
+    if (outerMat)
+      cost +=
+        (parseFloat(outerMat.estimated_cost) || 0) *
+        (Number(packFormData.sales_unit_quantity) || 1);
+    if (innerMat)
+      cost +=
+        (parseFloat(innerMat.estimated_cost) || 0) *
+        (Number(packFormData.sales_pack_quantity) || 1);
+    packFormData.additional_packs.forEach((pack) => {
+      const addMat = packMaterials.find(
+        (m) => String(m.id) === String(pack.material_id),
+      );
+      if (addMat) {
+        cost +=
+          (parseFloat(addMat.estimated_cost) || 0) * (Number(pack.qty) || 1);
+      }
+    });
+    return Math.round(cost);
   };
 
   const handleAddItem = () => {
@@ -1579,8 +2078,10 @@ export default function BOMCreatePage() {
     closeDialog();
     try {
       let currentParentId = originalMaterialId;
+      const finalCode = formData.code;
+
       const materialPayload = {
-        code: formData.code,
+        code: finalCode,
         name: formData.name,
         type: formData.type,
         phase: "IN_DEV",
@@ -1589,28 +2090,182 @@ export default function BOMCreatePage() {
         is_active: true,
       };
 
-      if (isEditMode) {
-        const matRes = await fetchWithAuth(
-          `/api/materials/${currentParentId}`,
-          {
+      if (formData.type === "PRODUCT") {
+        const packaging_info = [];
+        if (packFormData.outer_pack)
+          packaging_info.push({
+            layer: "outer",
+            material_id: packFormData.outer_pack,
+            qty: Number(packFormData.sales_unit_quantity) || 1,
+          });
+        if (packFormData.inner_pack)
+          packaging_info.push({
+            layer: "inner",
+            material_id: packFormData.inner_pack,
+            qty: Number(packFormData.sales_pack_quantity) || 1,
+          });
+        packFormData.additional_packs.forEach((p) => {
+          if (p.material_id)
+            packaging_info.push({
+              layer: "other",
+              material_id: p.material_id,
+              qty: Number(p.qty) || 1,
+            });
+        });
+
+        // 🌟 防呆：找出第一個加入明細的 SEMI 作為關聯半成品
+        const semiItem = formData.items.find((item) => item.type === "SEMI");
+        const semiMaterialId = semiItem
+          ? semiItem.material_id
+          : formData.items.length > 0
+            ? formData.items[0].material_id
+            : null;
+
+        const poPayload = {
+          order_number: packFormData.order_number || finalCode,
+          outer_pack_id: packFormData.outer_pack || null,
+          inner_pack_id: packFormData.inner_pack || null,
+          spec: packFormData.spec,
+          sales_unit: packFormData.sales_unit,
+          sales_unit_quantity: packFormData.sales_unit_quantity,
+          sales_pack_unit: packFormData.sales_pack_unit,
+          sales_pack_quantity: packFormData.sales_pack_quantity,
+          packaging_info,
+        };
+
+        if (!isEditMode) {
+          // 1. 獨立建立成品 Material
+          const matRes = await fetchWithAuth("/api/materials", {
+            method: "POST",
+            body: JSON.stringify(materialPayload),
+          });
+          if (!matRes.ok) throw new Error("建立成品主檔失敗");
+          const createdMaterial = (await matRes.json()).data;
+          currentParentId = createdMaterial.id;
+
+          let targetPackageOrderId = null;
+
+          // 🌟 2. 決定 Package Order：有範本就直接取用 ID，否則建立新的
+          if (packFormData.selectedTemplateId) {
+            targetPackageOrderId = packFormData.selectedTemplateId;
+          } else {
+            const poRes = await fetchWithAuth("/api/package_orders", {
+              method: "POST",
+              body: JSON.stringify(poPayload),
+            });
+            if (!poRes.ok) {
+              const e = await poRes.json();
+              throw new Error(e.detail || e.message || "建立包裝單失敗");
+            }
+            const createdPO = (await poRes.json()).data;
+            targetPackageOrderId = createdPO.id;
+          }
+
+          // 3. 獨立建立 Product Package Order Relation
+          const relationPayload = {
+            package_order: targetPackageOrderId,
+            product: currentParentId,
+            semi_material: semiMaterialId,
+            is_active: true,
+          };
+          const relRes = await fetchWithAuth("/api/product_package_relations", {
+            method: "POST",
+            body: JSON.stringify(relationPayload),
+          });
+          if (!relRes.ok) throw new Error("建立包裝關聯失敗");
+        } else {
+          // =======================
+          // 編輯模式
+          // =======================
+          await fetchWithAuth(`/api/materials/${currentParentId}`, {
             method: "PUT",
+            body: JSON.stringify(materialPayload),
+          });
+
+          if (packFormData.selectedTemplateId) {
+            // 🌟 情況 A：編輯模式下套用「現有範本」
+            // 為了簡化邏輯，若原先沒有綁定，或是原先綁定的 ID 不等於新選定的範本 ID，直接新建一筆 Relation 關聯
+            if (
+              !packFormData.id ||
+              String(packFormData.id) !==
+                String(packFormData.selectedTemplateId)
+            ) {
+              const relationPayload = {
+                package_order: packFormData.selectedTemplateId,
+                product: currentParentId,
+                semi_material: semiMaterialId,
+                is_active: true,
+              };
+              const relRes = await fetchWithAuth(
+                "/api/product_package_relations",
+                {
+                  method: "POST",
+                  body: JSON.stringify(relationPayload),
+                },
+              );
+              if (!relRes.ok) throw new Error("建立包裝關聯失敗");
+            }
+          } else if (packFormData.id) {
+            // 🌟 情況 B：編輯模式下更新「原有的自訂包裝單」
+            await fetchWithAuth(`/api/package_orders/${packFormData.id}`, {
+              method: "PUT",
+              body: JSON.stringify(poPayload),
+            });
+          } else {
+            // 🌟 情況 C：編輯模式下原本沒有包裝單，現在「新增自訂包裝單」
+            const poRes = await fetchWithAuth("/api/package_orders", {
+              method: "POST",
+              body: JSON.stringify(poPayload),
+            });
+            if (!poRes.ok) {
+              const e = await poRes.json();
+              throw new Error(e.detail || e.message || "建立包裝單失敗");
+            }
+            const createdPO = (await poRes.json()).data;
+
+            const relationPayload = {
+              package_order: createdPO.id,
+              product: currentParentId,
+              semi_material: semiMaterialId,
+              is_active: true,
+            };
+            const relRes = await fetchWithAuth(
+              "/api/product_package_relations",
+              {
+                method: "POST",
+                body: JSON.stringify(relationPayload),
+              },
+            );
+            if (!relRes.ok) throw new Error("建立包裝關聯失敗");
+          }
+        }
+      } else {
+        // SEMI or RAW flow
+        if (isEditMode) {
+          const matRes = await fetchWithAuth(
+            `/api/materials/${currentParentId}`,
+            {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(materialPayload),
+            },
+          );
+          if (!matRes.ok) throw new Error("更新配方主檔失敗");
+        } else {
+          const matRes = await fetchWithAuth("/api/materials", {
+            method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(materialPayload),
-          },
-        );
-        if (!matRes.ok) throw new Error("更新配方主檔失敗");
-      } else {
-        const matRes = await fetchWithAuth("/api/materials", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(materialPayload),
-        });
-        if (!matRes.ok) throw new Error("建立配方主檔失敗，請確認代碼是否重複");
-        const json = await matRes.json();
-        const createdMaterial = json.data || json;
-        currentParentId = createdMaterial.id;
+          });
+          if (!matRes.ok)
+            throw new Error("建立配方主檔失敗，請確認代碼是否重複");
+          const json = await matRes.json();
+          const createdMaterial = json.data || json;
+          currentParentId = createdMaterial.id;
+        }
       }
 
+      // 清除舊的 BOM (若有)
       if (isEditMode) {
         const currentItemIds = formData.items
           .filter((item) => item.id)
@@ -1624,6 +2279,7 @@ export default function BOMCreatePage() {
         await Promise.all(deletePromises);
       }
 
+      // 建立新的 BOM
       const bomPromises = formData.items.map(async (item, index) => {
         const bomPayload = {
           parent_id: currentParentId,
@@ -1690,11 +2346,24 @@ export default function BOMCreatePage() {
       return showAlert("資料不完整", "請輸入代碼與名稱", "warning");
     if (!formData.base_quantity || formData.base_quantity <= 0)
       return showAlert("資料錯誤", "基準產量必須大於 0", "warning");
+
+    if (formData.type === "PRODUCT") {
+      // 🌟 修正：防呆檢測獨立的 order_number
+      if (!packFormData.order_number)
+        return showAlert("資料不完整", "建立成品時，請輸入包裝單號", "warning");
+      if (formData.items.length === 0)
+        return showAlert(
+          "資料不完整",
+          "建立成品時，必須在明細中加入關聯的半成品",
+          "warning",
+        );
+    }
+
     if (
       formData.items.length === 0 ||
       formData.items.some((item) => !item.material_id)
     )
-      return showAlert("資料不完整", "請完整選擇物料", "warning");
+      return showAlert("資料不完整", "請完整選擇物料明細", "warning");
 
     if (additiveCalculations.hasLimitError)
       return showAlert(
@@ -1717,6 +2386,10 @@ export default function BOMCreatePage() {
       executeSubmit,
     );
   };
+
+  const materialCost = calculations.totalCost;
+  const packCost = formData.type === "PRODUCT" ? calculatePackCostPreview() : 0;
+  const grandTotal = materialCost + packCost;
 
   if (loading)
     return (
@@ -1746,17 +2419,50 @@ export default function BOMCreatePage() {
           <div className="grid grid-cols-1 md:grid-cols-5 gap-6">
             <div className="md:col-span-1">
               <label className="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">
-                配方代碼 <span className="text-red-500">*</span>
+                {formData.type === "PRODUCT" && !isEditMode
+                  ? "配方代碼 + 包裝單代碼"
+                  : "配方代碼"}{" "}
+                <span className="text-red-500">*</span>
               </label>
-              <input
-                type="text"
-                name="code"
-                value={formData.code}
-                onChange={handleMasterChange}
-                disabled={isEditMode}
-                placeholder="P9202020"
-                className="w-full h-[48px] px-4 py-2 border border-slate-200 rounded-xl focus:border-[#007AFF] focus:ring-2 focus:ring-[#007AFF]/20 outline-none font-mono font-bold transition-all shadow-sm disabled:bg-slate-50 disabled:text-slate-400"
-              />
+              {formData.type === "PRODUCT" && !isEditMode ? (
+                <div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      name="code"
+                      value={formData.code}
+                      onChange={handleMasterChange}
+                      placeholder="P920"
+                      className="w-full h-[48px] px-4 py-2 border border-slate-200 rounded-xl focus:border-[#007AFF] focus:ring-2 focus:ring-[#007AFF]/20 outline-none font-mono font-bold transition-all shadow-sm"
+                    />
+                    <input
+                      type="text"
+                      value={packFormData.packageSuffix}
+                      onChange={(e) =>
+                        updatePackField("packageSuffix", e.target.value)
+                      }
+                      placeholder="-1"
+                      className="w-24 shrink-0 h-[48px] px-3 py-2 border border-blue-200 bg-blue-50 text-blue-700 rounded-xl focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20 outline-none font-mono font-bold transition-all shadow-sm placeholder:text-blue-300"
+                    />
+                  </div>
+                  {formData.code && packFormData.packageSuffix && (
+                    <div className="text-[11px] text-[#007AFF] mt-1.5 font-bold tracking-wider">
+                      成品代碼預覽: {formData.code}
+                      {packFormData.packageSuffix}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <input
+                  type="text"
+                  name="code"
+                  value={formData.code}
+                  onChange={handleMasterChange}
+                  disabled={isEditMode}
+                  placeholder="P9202020"
+                  className="w-full h-[48px] px-4 py-2 border border-slate-200 rounded-xl focus:border-[#007AFF] focus:ring-2 focus:ring-[#007AFF]/20 outline-none font-mono font-bold transition-all shadow-sm disabled:bg-slate-50 disabled:text-slate-400"
+                />
+              )}
             </div>
             <div className="md:col-span-2">
               <label className="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">
@@ -1779,7 +2485,8 @@ export default function BOMCreatePage() {
                 name="type"
                 value={formData.type}
                 onChange={handleMasterChange}
-                className="w-full h-[48px] px-4 py-2 border border-slate-200 rounded-xl focus:border-[#007AFF] focus:ring-2 focus:ring-[#007AFF]/20 outline-none font-bold transition-all shadow-sm bg-white appearance-none cursor-pointer"
+                disabled={isEditMode}
+                className="w-full h-[48px] px-4 py-2 border border-slate-200 rounded-xl focus:border-[#007AFF] focus:ring-2 focus:ring-[#007AFF]/20 outline-none font-bold transition-all shadow-sm bg-white appearance-none cursor-pointer disabled:bg-slate-50 disabled:text-slate-400"
               >
                 <option value="PRODUCT">成品 (PRODUCT)</option>
                 <option value="SEMI">半成品 (SEMI)</option>
@@ -1800,13 +2507,311 @@ export default function BOMCreatePage() {
               />
             </div>
           </div>
+
+          {/* 🌟 包裝設定 (僅 PRODUCT) */}
+          {formData.type === "PRODUCT" &&
+            (() => {
+              const isTemplateSelected = Boolean(
+                packFormData.selectedTemplateId,
+              );
+
+              return (
+                <div className="mt-8 pt-8 border-t border-slate-100 animate-in fade-in slide-in-from-top-2">
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+                    <div className="flex items-center gap-3">
+                      <h4 className="text-[11px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                        <Package size={16} className="text-slate-400" />{" "}
+                        包裝設定與對應 (成品必填)
+                      </h4>
+                      {isTemplateSelected && (
+                        <span className="bg-amber-50 text-amber-600 border border-amber-200 px-2 py-0.5 rounded text-[10px] font-bold tracking-widest animate-in fade-in flex items-center gap-1">
+                          🔒 範本唯讀模式
+                        </span>
+                      )}
+                    </div>
+                    <div className="w-full md:w-80">
+                      <FilterableDropdown
+                        value={packFormData.selectedTemplateId}
+                        onChange={handleApplyPackageTemplate}
+                        options={packageOrdersList}
+                        placeholder="快速套用現有包裝單範本..."
+                        renderItem={(m) => (
+                          <div className="flex justify-between items-center w-full gap-2">
+                            <span className="text-[12px] text-slate-400 font-mono shrink-0">
+                              [{m.order_number}]
+                            </span>
+                            <span className="text-[13px] text-slate-700 font-medium truncate">
+                              {m.spec || "無規格描述"}
+                            </span>
+                          </div>
+                        )}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-6">
+                    {/* 獨立的包裝單號輸入框 */}
+                    <div className="bg-blue-50/50 p-4 rounded-2xl border border-blue-100 flex flex-col sm:flex-row sm:items-center gap-4">
+                      <label className="text-[13px] font-black text-blue-700 whitespace-nowrap">
+                        設定包裝單號 <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={packFormData.order_number}
+                        onChange={(e) =>
+                          updatePackField("order_number", e.target.value)
+                        }
+                        placeholder="例如: PKG-202610-001"
+                        disabled={isEditMode || isTemplateSelected} // 🌟 修正：使用 isEditMode
+                        className="flex-1 h-[42px] px-4 bg-white border border-slate-200 rounded-xl font-mono font-bold text-[14px] text-slate-800 focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10 outline-none shadow-sm transition-all disabled:bg-slate-50 disabled:text-slate-400 disabled:cursor-not-allowed"
+                      />
+                    </div>
+
+                    <div className="bg-slate-50/80 p-5 rounded-2xl border border-slate-100 flex flex-col gap-4 relative overflow-hidden">
+                      {/* 若套用範本，疊加一層透明遮罩來暗示唯讀 */}
+                      {isTemplateSelected && (
+                        <div className="absolute inset-0 bg-slate-50/40 z-[5] pointer-events-none"></div>
+                      )}
+
+                      <div className="flex items-center justify-between relative z-10">
+                        <h4 className="text-[12px] font-bold text-blue-500 uppercase tracking-widest">
+                          包材結構與換算設定
+                        </h4>
+                        <button
+                          type="button"
+                          onClick={addAdditionalPack}
+                          disabled={isTemplateSelected}
+                          className="text-[12px] font-bold text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          <Plus size={14} /> 新增包材
+                        </button>
+                      </div>
+
+                      <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm space-y-3 relative z-10">
+                        <span className="text-[12px] font-bold text-slate-500 tracking-wide block">
+                          包材單位
+                        </span>
+                        <div className="grid grid-cols-4 gap-3">
+                          <div className="col-span-4 sm:col-span-2">
+                            <FilterableDropdown
+                              value={packFormData.outer_pack}
+                              onChange={(val) =>
+                                updatePackField("outer_pack", val)
+                              }
+                              options={packMaterials.filter(
+                                (pm) => pm.type === "PACK" || !pm.id,
+                              )}
+                              disabledIds={disabledMaterialIds}
+                              disabled={isTemplateSelected}
+                              placeholder="-- 無需對應外包裝 --"
+                              renderItem={(m) =>
+                                m.id ? `[${m.code}] ${m.name}` : m.name
+                              }
+                            />
+                          </div>
+                          <div className="col-span-2 sm:col-span-1 relative flex items-center">
+                            <span className="absolute left-3 text-slate-400 font-bold text-[13px] z-10">
+                              x
+                            </span>
+                            <input
+                              type="text"
+                              inputMode="decimal"
+                              placeholder="數量"
+                              value={packFormData.sales_unit_quantity}
+                              disabled={isTemplateSelected}
+                              onChange={(e) =>
+                                updatePackField(
+                                  "sales_unit_quantity",
+                                  handleNumericTextInput(e.target.value),
+                                )
+                              }
+                              className="w-full h-11 pl-7 pr-3 bg-white border border-slate-200 rounded-xl text-center font-mono font-medium text-[13px] focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10 outline-none shadow-sm transition-all disabled:bg-slate-50 disabled:text-slate-400"
+                            />
+                          </div>
+                          <div className="col-span-2 sm:col-span-1">
+                            <input
+                              type="text"
+                              placeholder="單位 (箱)"
+                              value={packFormData.sales_unit}
+                              disabled={isTemplateSelected}
+                              onChange={(e) =>
+                                updatePackField("sales_unit", e.target.value)
+                              }
+                              className="w-full h-11 px-3 bg-white border border-slate-200 rounded-xl text-center font-medium text-[13px] focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10 outline-none shadow-sm transition-all disabled:bg-slate-50 disabled:text-slate-400"
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm space-y-3 relative z-10">
+                        <span className="text-[12px] font-bold text-slate-500 tracking-wide block">
+                          輔助單位 (選填)
+                        </span>
+                        <div className="grid grid-cols-4 gap-3">
+                          <div className="col-span-4 sm:col-span-2">
+                            <FilterableDropdown
+                              value={packFormData.inner_pack}
+                              onChange={(val) =>
+                                updatePackField("inner_pack", val)
+                              }
+                              options={packMaterials.filter(
+                                (pm) => pm.type === "PACK" || !pm.id,
+                              )}
+                              disabled={
+                                !packFormData.outer_pack || isTemplateSelected
+                              }
+                              disabledIds={disabledMaterialIds}
+                              placeholder={
+                                packFormData.outer_pack
+                                  ? "-- 無需對應內包裝 --"
+                                  : "請先選擇外包材"
+                              }
+                              renderItem={(m) =>
+                                m.id ? `[${m.code}] ${m.name}` : m.name
+                              }
+                            />
+                          </div>
+                          <div className="col-span-2 sm:col-span-1 relative flex items-center">
+                            <span className="absolute left-3 text-slate-400 font-bold text-[13px] z-10">
+                              x
+                            </span>
+                            <input
+                              type="text"
+                              inputMode="decimal"
+                              placeholder="數量"
+                              disabled={
+                                !packFormData.outer_pack || isTemplateSelected
+                              }
+                              value={packFormData.sales_pack_quantity}
+                              onChange={(e) =>
+                                updatePackField(
+                                  "sales_pack_quantity",
+                                  handleNumericTextInput(e.target.value),
+                                )
+                              }
+                              className="w-full h-11 pl-7 pr-3 bg-white border border-slate-200 rounded-xl text-center font-mono font-medium text-[13px] focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10 outline-none shadow-sm transition-all disabled:bg-slate-50 disabled:text-slate-400"
+                            />
+                          </div>
+                          <div className="col-span-2 sm:col-span-1">
+                            <input
+                              type="text"
+                              placeholder="單位 (包)"
+                              disabled={
+                                !packFormData.outer_pack || isTemplateSelected
+                              }
+                              value={packFormData.sales_pack_unit}
+                              onChange={(e) =>
+                                updatePackField(
+                                  "sales_pack_unit",
+                                  e.target.value,
+                                )
+                              }
+                              className="w-full h-11 px-3 bg-white border border-slate-200 rounded-xl text-center font-medium text-[13px] focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10 outline-none shadow-sm transition-all disabled:bg-slate-50 disabled:text-slate-400"
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      {packFormData.additional_packs.length > 0 && (
+                        <div className="space-y-3 relative z-10">
+                          {packFormData.additional_packs.map((pack, idx) => (
+                            <div
+                              key={pack.id}
+                              className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center gap-3 animate-in fade-in slide-in-from-top-2"
+                            >
+                              <div className="flex-1">
+                                <FilterableDropdown
+                                  value={pack.material_id}
+                                  onChange={(val) =>
+                                    updateAdditionalPack(
+                                      idx,
+                                      "material_id",
+                                      val,
+                                    )
+                                  }
+                                  options={packMaterials}
+                                  disabledIds={disabledMaterialIds}
+                                  disabled={isTemplateSelected}
+                                  placeholder="選擇額外包材 / 標籤"
+                                  renderItem={(m) =>
+                                    m.id ? `[${m.code}] ${m.name}` : m.name
+                                  }
+                                />
+                              </div>
+                              <div className="w-[110px] shrink-0 relative flex items-center">
+                                <span className="absolute left-3 text-slate-400 font-bold text-[13px] z-10">
+                                  x
+                                </span>
+                                <input
+                                  type="text"
+                                  inputMode="decimal"
+                                  placeholder="數量"
+                                  disabled={isTemplateSelected}
+                                  value={pack.qty}
+                                  onChange={(e) =>
+                                    updateAdditionalPack(
+                                      idx,
+                                      "qty",
+                                      handleNumericTextInput(e.target.value),
+                                    )
+                                  }
+                                  className="w-full h-11 pl-7 pr-3 bg-white border border-slate-200 rounded-xl text-center font-mono font-medium text-[13px] focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10 outline-none transition-all shadow-sm disabled:bg-slate-50 disabled:text-slate-400"
+                                />
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => removeAdditionalPack(idx)}
+                                disabled={isTemplateSelected}
+                                className="w-11 h-11 flex items-center justify-center shrink-0 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors disabled:opacity-50 disabled:hover:bg-transparent"
+                              >
+                                <XCircle size={20} />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2 relative z-10">
+                        <div className="flex flex-col gap-1.5">
+                          <label className="text-[12px] font-bold text-slate-500 uppercase">
+                            包裝規格預覽
+                          </label>
+                          <input
+                            type="text"
+                            value={packFormData.spec}
+                            disabled={isTemplateSelected}
+                            onChange={(e) =>
+                              updatePackField("spec", e.target.value)
+                            }
+                            placeholder="選填，如不滿意自動產生之預覽可手動更改"
+                            className="w-full h-11 px-3.5 bg-white border border-slate-200 rounded-xl font-medium text-[14px] text-slate-800 focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10 outline-none shadow-sm transition-all disabled:bg-slate-50 disabled:text-slate-500"
+                          />
+                        </div>
+                        <div className="flex flex-col gap-1.5">
+                          <label className="text-[12px] font-bold text-slate-500 uppercase">
+                            預估包材總成本
+                          </label>
+                          <div className="w-full h-11 px-4 bg-blue-50 border border-blue-100 rounded-xl flex items-center justify-between shadow-inner">
+                            <span className="text-blue-700 font-bold text-[14px] font-mono">
+                              ${formatCurrency(calculatePackCostPreview())}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
         </div>
 
-        <div className="bg-white rounded-3xl border border-slate-200 shadow-sm flex flex-col w-full">
+        <div className="bg-white rounded-3xl border border-slate-200 shadow-sm flex flex-col w-full overflow-visible">
           <div className="px-6 py-4 md:px-6 md:py-5 border-b border-slate-100 flex flex-col md:flex-row justify-between items-start md:items-center bg-slate-50/50 gap-4">
             <div className="flex items-center gap-3">
               <h3 className="text-base font-black text-slate-800">
-                2. 配方用料明細
+                {formData.type === "PRODUCT"
+                  ? "2. 配方用料明細 (含內容物與包裝清單)"
+                  : "2. 配方用料明細"}
               </h3>
               <span className="text-[#007AFF] bg-blue-50 font-black px-2.5 py-0.5 rounded-full border border-blue-100 shadow-sm text-sm">
                 {formData.items.length}
@@ -1859,13 +2864,13 @@ export default function BOMCreatePage() {
             </div>
           </div>
 
-          <div className="overflow-x-auto w-full pb-[300px] min-h-[400px]">
+          <div className="overflow-x-auto overflow-y-visible w-full pb-[300px] min-h-[400px]">
             {formData.items.length === 0 ? (
               <div className="p-16 text-center text-slate-400 text-sm font-bold bg-white">
                 尚未加入任何原料，請點擊上方「加入原料」開始設計。
               </div>
             ) : (
-              <div className="min-w-[1000px] flex flex-col w-full">
+              <div className="min-w-[1000px] flex flex-col w-full overflow-visible">
                 <div className="flex items-center gap-2 px-4 py-2 bg-slate-100/50 border-b border-slate-200 text-[10px] font-black text-slate-500 uppercase tracking-widest sticky top-0 z-10">
                   <div className="w-[88px] text-center shrink-0">序號</div>
                   <div className="w-16 text-center shrink-0">類型</div>
@@ -2462,16 +3467,31 @@ export default function BOMCreatePage() {
                 總材料成本
               </p>
               <div className="text-slate-800 font-mono font-black text-xl">
-                ${formatNum(calculations.totalCost, 2)}
+                ${formatNum(materialCost, 2)}
               </div>
             </div>
+
+            {formData.type === "PRODUCT" && (
+              <>
+                <div className="w-px h-8 bg-slate-200 hidden md:block"></div>
+                <div>
+                  <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mb-1">
+                    總包材成本
+                  </p>
+                  <div className="text-slate-800 font-mono font-black text-xl">
+                    ${formatNum(packCost, 2)}
+                  </div>
+                </div>
+              </>
+            )}
+
             <div className="w-px h-8 bg-slate-200 hidden md:block"></div>
             <div>
               <p className="text-[#007AFF] text-[10px] font-bold uppercase tracking-widest mb-1">
-                每 KG 成本
+                生產總成本
               </p>
               <div className="text-[#007AFF] font-mono font-black text-2xl">
-                ${formatNum(calculations.unitCost, 2)}
+                ${formatNum(grandTotal, 2)}
               </div>
             </div>
             <div className="w-px h-8 bg-slate-200 hidden md:block"></div>

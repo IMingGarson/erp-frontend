@@ -10,6 +10,7 @@ import {
   Edit2,
   XCircle,
   AlertCircle,
+  Layers,
 } from "lucide-react";
 import CustomDialog from "./components/customDialog";
 import { fetchWithAuth } from "./utils/fetchWithAuth";
@@ -120,7 +121,7 @@ const FilterableDropdown = ({
               : "bg-white border-slate-200 hover:border-slate-300 text-slate-700 font-medium"
         }`}
       >
-        <span className="truncate pr-2">
+        <span className="truncate pr-2 w-full flex items-center">
           {selectedOpt ? (
             renderItem ? (
               renderItem(selectedOpt)
@@ -128,7 +129,9 @@ const FilterableDropdown = ({
               selectedOpt.name
             )
           ) : (
-            <span className="text-slate-400">{placeholder}</span>
+            <span className="text-slate-400 flex items-center gap-2">
+              {placeholder}
+            </span>
           )}
         </span>
         <ChevronDown
@@ -174,7 +177,7 @@ const FilterableDropdown = ({
 
                   return (
                     <div
-                      key={opt.id}
+                      key={opt.id || `empty-${Math.random()}`}
                       onClick={() => {
                         if (isItemDisabled) return;
                         onChange(opt.id);
@@ -189,7 +192,9 @@ const FilterableDropdown = ({
                             : "text-slate-700 hover:bg-slate-50 cursor-pointer"
                       }`}
                     >
-                      <span>{renderItem ? renderItem(opt) : opt.name}</span>
+                      <span className="w-full">
+                        {renderItem ? renderItem(opt) : opt.name}
+                      </span>
                       {isItemDisabled && (
                         <span className="text-[10px] text-slate-400 font-bold border border-slate-200 bg-white px-1.5 py-0.5 rounded">
                           已選
@@ -216,7 +221,6 @@ const FilterableDropdown = ({
 // ==========================================
 export default function PackageOrderPage() {
   const [packageOrders, setPackageOrders] = useState([]);
-  const [semiMaterials, setSemiMaterials] = useState([]);
   const [packMaterials, setPackMaterials] = useState([]);
 
   const [loading, setLoading] = useState(true);
@@ -230,8 +234,6 @@ export default function PackageOrderPage() {
 
   const initialForm = {
     order_number: "",
-    new_product_code: "",
-    semi_material: "",
     outer_pack: "",
     inner_pack: "",
     additional_packs: [],
@@ -270,23 +272,76 @@ export default function PackageOrderPage() {
   const fetchInitialData = async () => {
     setLoading(true);
     try {
-      const [ordersRes, materialsRes] = await Promise.all([
+      const [relRes, poRes, packMatRes, allMatRes] = await Promise.all([
+        fetchWithAuth("/api/product_package_relations"),
         fetchWithAuth("/api/package_orders"),
-        fetchWithAuth("/api/materials"),
+        // 🌟 使用你建議的輕量 API，只抓取 PACK, STICKER, OTHER 類型的物料
+        fetchWithAuth("/api/materials?lite=true&type__in=PACK,STICKER,OTHER"),
+        fetchWithAuth("/api/materials?lite=true"), // 用於找出關聯的成品
       ]);
 
-      if (!ordersRes.ok || !materialsRes.ok) throw new Error("載入資料失敗");
+      if (!relRes.ok || !packMatRes.ok || !poRes.ok || !allMatRes.ok)
+        throw new Error("載入資料失敗");
 
-      const ordersData = await ordersRes.json();
-      const materialsData = await materialsRes.json();
+      const relData = await relRes.json();
+      const poData = await poRes.json();
+      const packMatData = await packMatRes.json();
+      const allMatData = await allMatRes.json();
 
-      setPackageOrders(ordersData.data || ordersData || []);
+      const fetchedRelations = relData.data || relData || [];
+      const fetchedPOs = poData.data || poData || [];
+      // 🌟 API 回傳的資料中已經包含 name 欄位
+      const fetchedPackMats = packMatData.data || packMatData || [];
+      const allMaterials = allMatData.data || allMatData || [];
 
-      const allMats = materialsData.data || materialsData || [];
-      setSemiMaterials(allMats.filter((m) => m.type === "SEMI"));
+      // 🌟 將資料依據 PackageOrder 進行分組
+      const groupedOrders = fetchedPOs.map((po) => {
+        const linkedRelations = fetchedRelations.filter(
+          (rel) => rel.package_order === po.id,
+        );
+
+        const mappedRelations = linkedRelations.map((rel) => {
+          const product = allMaterials.find((m) => m.id === rel.product) || {};
+          return {
+            relation_id: rel.id,
+            product_id: product.id,
+            product_code: product.code || "-",
+            product_name: product.name || "未知成品",
+          };
+        });
+
+        // 🌟 轉換 packaging_info，並帶入物料的 code 和 name
+        const enrichedPackaging = (po.packaging_info || []).map((pi) => {
+          const mat =
+            fetchedPackMats.find(
+              (m) => String(m.id) === String(pi.material_id),
+            ) || {};
+          return {
+            ...pi,
+            material_code: mat.code || "-",
+            material_name: mat.name || "未知包材", // 確保名稱有被帶出
+          };
+        });
+
+        return {
+          package_order_id: po.id,
+          order_number: po.order_number || "未知單號",
+          spec: po.spec || "-",
+          packaging_info: enrichedPackaging, // 使用整理後的包裝明細
+          sales_unit: po.sales_unit,
+          sales_unit_quantity: po.sales_unit_quantity,
+          sales_pack_unit: po.sales_pack_unit,
+          sales_pack_quantity: po.sales_pack_quantity,
+          relations: mappedRelations,
+        };
+      });
+
+      groupedOrders.sort((a, b) => b.package_order_id - a.package_order_id);
+
+      setPackageOrders(groupedOrders);
       setPackMaterials([
         { id: "", name: "-- 無需對應包材 --", code: "", pack_capacity: null },
-        ...allMats.filter((m) => ["PACK", "STICKER", "OTHER"].includes(m.type)),
+        ...fetchedPackMats,
       ]);
     } catch (err) {
       showAlert("錯誤", err.message, "error");
@@ -298,16 +353,6 @@ export default function PackageOrderPage() {
   const updateFormField = (field, value) => {
     setFormData((prev) => {
       let updated = { ...prev, [field]: value };
-
-      // 🌟 自動帶入預設的新成品代碼
-      if (field === "semi_material" && !editingId) {
-        const selectedSemi = semiMaterials.find(
-          (m) => String(m.id) === String(value),
-        );
-        if (selectedSemi && selectedSemi.code) {
-          updated.new_product_code = `${selectedSemi.code}-`;
-        }
-      }
 
       if (
         [
@@ -340,6 +385,12 @@ export default function PackageOrderPage() {
           if (!value) {
             nextSalesQtyStr = "0";
             nextSalesUnit = "";
+            nextInnerPack = "";
+            nextPackQtyStr = "0";
+            nextPackUnit = "";
+            updated.inner_pack = "";
+            updated.sales_pack_quantity = "0";
+            updated.sales_pack_unit = "";
           } else if (outerMat) {
             const match = outerMat.name.match(/([箱桶袋包罐瓶])/);
             if (match) nextSalesUnit = match[1];
@@ -364,20 +415,21 @@ export default function PackageOrderPage() {
         const parsedPackQty = Number(nextPackQtyStr) || 0;
 
         const outerCap = outerMat?.pack_capacity
-          ? parseInt(outerMat.pack_capacity)
+          ? parseFloat(outerMat.pack_capacity)
           : 0;
         const innerCap = innerMat?.pack_capacity
-          ? parseInt(innerMat.pack_capacity)
+          ? parseFloat(innerMat.pack_capacity)
           : 0;
 
-        if (nextInnerPack && parsedPackQty > 0) {
+        // 🌟 防呆：輸入 outer 之前不顯示規格，輸入完 outer 或是 outer+inner 才會顯示
+        if (!nextOuterPack || parsedSalesQty <= 0) {
+          updated.spec = "";
+        } else if (nextInnerPack && parsedPackQty > 0) {
           const weight = innerCap ? `${innerCap}KG` : "1KG";
           updated.spec = `${weight}*${parsedPackQty}${nextPackUnit || "包"}/${nextSalesUnit || "箱"}`;
-        } else if (nextOuterPack && parsedSalesQty > 0) {
+        } else {
           const weight = outerCap ? `${outerCap}KG` : "10KG";
           updated.spec = `${weight}/${nextSalesUnit || "桶"}`;
-        } else {
-          updated.spec = "";
         }
       }
 
@@ -413,14 +465,19 @@ export default function PackageOrderPage() {
   const handleOpenModal = (order = null) => {
     setFormError("");
     if (order) {
-      setEditingId(order.id);
+      setEditingId(order.package_order_id);
 
       const additional_packs = [];
       const packagingInfo = order.packaging_info || [];
 
+      let initialOuter = "";
+      let initialInner = "";
+
       packagingInfo.forEach((item, index) => {
-        if (item.layer === "outer" || item.layer === "inner") {
-          // handled by serializer directly
+        if (item.layer === "outer") {
+          initialOuter = String(item.material_id);
+        } else if (item.layer === "inner") {
+          initialInner = String(item.material_id);
         } else {
           additional_packs.push({
             id: `exist_${index}`,
@@ -432,10 +489,8 @@ export default function PackageOrderPage() {
 
       setFormData({
         order_number: order.order_number || "",
-        new_product_code: order.product_code || "",
-        semi_material: String(order.semi_material) || "",
-        outer_pack: order.outer_pack ? String(order.outer_pack) : "",
-        inner_pack: order.inner_pack ? String(order.inner_pack) : "",
+        outer_pack: initialOuter,
+        inner_pack: initialInner,
         additional_packs,
         sales_unit: order.sales_unit || "箱",
         sales_unit_quantity: order.sales_unit_quantity
@@ -458,16 +513,7 @@ export default function PackageOrderPage() {
     e.preventDefault();
     setFormError("");
 
-    if (!formData.semi_material) return setFormError("請選擇半成品 (SEMI)");
     if (!formData.order_number) return setFormError("請填寫包裝單號");
-
-    // 🌟 成品代碼結尾格式防呆 (僅新建時判斷)
-    if (!editingId) {
-      if (!formData.new_product_code) return setFormError("請填寫成品代碼");
-      if (!/[a-zA-Z0-9]$/.test(formData.new_product_code)) {
-        return setFormError("成品代碼必須以英文字母或數字結尾");
-      }
-    }
 
     setIsSubmitting(true);
     try {
@@ -498,7 +544,12 @@ export default function PackageOrderPage() {
       });
 
       const payload = {
-        ...formData,
+        order_number: formData.order_number,
+        spec: formData.spec,
+        sales_unit: formData.sales_unit,
+        sales_unit_quantity: formData.sales_unit_quantity,
+        sales_pack_unit: formData.sales_pack_unit,
+        sales_pack_quantity: formData.sales_pack_quantity,
         packaging_info,
       };
 
@@ -535,7 +586,7 @@ export default function PackageOrderPage() {
       setIsModalOpen(false);
       showAlert(
         "成功",
-        `已成功${editingId ? "更新" : "建立"}包裝單，並連動成品資料！`,
+        `已成功${editingId ? "更新" : "建立"}包裝單！`,
         "success",
       );
       fetchInitialData();
@@ -552,7 +603,7 @@ export default function PackageOrderPage() {
       type: "confirm",
       status: "warning",
       title: "刪除確認",
-      message: `確定要刪除包裝單 [${orderNumber}] 嗎？這將無法復原。`,
+      message: `確定要刪除包裝單 [${orderNumber}] 嗎？若此包裝單已被成品綁定，也將一併失效。這將無法復原。`,
       onConfirm: async () => {
         closeDialog();
         try {
@@ -612,30 +663,31 @@ export default function PackageOrderPage() {
   }, [formData.outer_pack, formData.inner_pack, formData.additional_packs]);
 
   const filteredOrders = useMemo(() => {
-    return packageOrders.filter(
-      (order) =>
+    if (!searchTerm) return packageOrders;
+
+    return packageOrders.filter((order) => {
+      const matchPO =
         (order.order_number || "")
           .toLowerCase()
           .includes(searchTerm.toLowerCase()) ||
-        (order.product_name || "")
-          .toLowerCase()
-          .includes(searchTerm.toLowerCase()) ||
-        (order.product_code || "")
-          .toLowerCase()
-          .includes(searchTerm.toLowerCase()) ||
-        (order.semi_material_name || "")
-          .toLowerCase()
-          .includes(searchTerm.toLowerCase()) ||
-        (order.semi_material_code || "")
-          .toLowerCase()
-          .includes(searchTerm.toLowerCase()),
-    );
+        (order.spec || "").toLowerCase().includes(searchTerm.toLowerCase());
+
+      const matchRel = order.relations.some(
+        (rel) =>
+          (rel.product_code || "")
+            .toLowerCase()
+            .includes(searchTerm.toLowerCase()) ||
+          (rel.product_name || "")
+            .toLowerCase()
+            .includes(searchTerm.toLowerCase()),
+      );
+
+      return matchPO || matchRel;
+    });
   }, [packageOrders, searchTerm]);
 
   const canSave = useMemo(() => {
     if (!formData.order_number) return false;
-    if (!editingId && !formData.new_product_code) return false;
-    if (!formData.semi_material) return false;
 
     const hasMainPack = !!formData.outer_pack || !!formData.inner_pack;
     const hasAdditionalPack = formData.additional_packs.some(
@@ -643,12 +695,12 @@ export default function PackageOrderPage() {
     );
 
     return hasMainPack || hasAdditionalPack;
-  }, [formData, editingId]);
+  }, [formData]);
 
   return (
     <div className="p-6 md:p-10 max-w-[1400px] mx-auto bg-slate-50 min-h-screen font-sans text-slate-800">
       <div className="flex justify-between items-center mb-6 gap-4">
-        <h2 className="text-2xl md:text-3xl font-bold text-slate-900 tracking-tight">
+        <h2 className="text-2xl md:text-3xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
           包裝單管理
         </h2>
       </div>
@@ -659,23 +711,25 @@ export default function PackageOrderPage() {
         </p>
         <ul className="list-disc list-inside space-y-1 ml-6 text-slate-700 font-medium">
           <li>
-            建立包裝單時，系統將根據您輸入的自訂代號，
-            <strong>自動產生對應的新成品</strong>。
+            此頁面顯示所有已建立的包裝單範本，及其內部的包材細項與關聯成品。
           </li>
-          <li>系統便會自動推算規格文本並試算包材總成本。</li>
-          <li>設定好的包裝單，可在報價單以及訂購單產生頁面使用。</li>
+          <li>
+            您可以在此處建立與管理共用的<strong>包裝單範本</strong>
+            ，供研發部門在「配方建立」時快速套用。
+          </li>
+          <li>修改包裝單內容會同步更新所有引用此範本的成品規格及成本試算。</li>
         </ul>
       </div>
 
       <div className="flex flex-col sm:flex-row justify-between items-center gap-4 mb-6">
-        <div className="relative w-full sm:w-80">
+        <div className="relative w-full sm:w-96">
           <Search
             className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
             size={16}
           />
           <input
             type="text"
-            placeholder="搜尋包裝單號、成品或半成品..."
+            placeholder="搜尋包裝單號、規格或關聯成品..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full pl-9 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl text-[14px] font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/10 focus:border-blue-400 shadow-sm transition-all"
@@ -685,28 +739,26 @@ export default function PackageOrderPage() {
           onClick={() => handleOpenModal()}
           className="w-full sm:w-auto px-6 py-2.5 bg-blue-600 text-white font-medium rounded-xl hover:bg-blue-700 transition-all shadow-sm flex items-center justify-center gap-2 active:scale-95"
         >
-          <Plus size={16} /> 建立包裝單
+          <Plus size={16} /> 建立包裝單範本
         </button>
       </div>
 
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
         <div className="overflow-x-auto w-full custom-scrollbar">
-          <table className="w-full text-left border-collapse table-fixed min-w-[1000px]">
-            <thead className="bg-slate-50 text-[12px] text-slate-500 font-medium uppercase tracking-wider border-b border-slate-200">
+          <table className="w-full text-left border-collapse min-w-[1100px]">
+            <thead className="bg-slate-50 text-[12px] text-slate-500 font-bold uppercase tracking-wider border-b border-slate-200">
               <tr>
-                {/* 🌟 調整百分比配重 */}
-                <th className="p-4 w-[15%]">包裝單號</th>
-                <th className="p-4 w-[22%]">成品</th>
-                <th className="p-4 w-[22%]">半成品</th>
-                <th className="p-4 w-[15%]">規格</th>
-                <th className="p-4 w-[25%] text-center">操作</th>
+                <th className="p-5 w-[20%]">包裝單號 / 規格</th>
+                <th className="p-5 w-[25%]">關聯成品清單</th>
+                <th className="p-5 w-[40%]">包裝內容明細</th>
+                <th className="p-5 w-[15%] text-center">操作</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-[13px]">
               {loading ? (
                 <tr>
                   <td
-                    colSpan="5"
+                    colSpan="4"
                     className="p-16 text-center text-slate-400 font-medium"
                   >
                     <div className="flex flex-col items-center gap-3">
@@ -718,61 +770,119 @@ export default function PackageOrderPage() {
               ) : filteredOrders.length === 0 ? (
                 <tr>
                   <td
-                    colSpan="5"
+                    colSpan="4"
                     className="p-16 text-center text-slate-400 font-medium"
                   >
-                    找不到符合條件的包裝單
+                    找不到符合條件的資料
                   </td>
                 </tr>
               ) : (
                 filteredOrders.map((order) => (
                   <tr
-                    key={order.id}
-                    className="hover:bg-slate-50/50 transition-colors group"
+                    key={order.package_order_id}
+                    className="hover:bg-slate-50/30 transition-colors group"
                   >
-                    <td className="p-4 align-middle">
-                      <span className="font-mono text-[14px] font-bold text-slate-700 bg-slate-100 px-2.5 py-1 rounded-lg border border-slate-200">
-                        {order.order_number}
-                      </span>
-                    </td>
-                    <td className="p-4 align-middle">
-                      <div className="flex flex-col gap-0.5 pr-2">
-                        <span className="font-mono text-[14px] font-bold text-blue-700">
-                          {order.product_code}
+                    <td className="p-5 align-top">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="font-mono text-[14px] font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 shadow-sm">
+                          {order.order_number}
                         </span>
-                        <span className="font-medium text-slate-600 line-clamp-1 text-[12px]">
-                          {order.product_name}
+                        <span className="font-bold text-slate-700 bg-emerald-50 text-emerald-700 px-2.5 py-1 rounded-lg border border-emerald-100 shadow-sm whitespace-nowrap text-[12px]">
+                          {order.spec || "尚未設定規格"}
                         </span>
                       </div>
                     </td>
-                    <td className="p-4 align-middle">
-                      <div className="flex flex-col gap-0.5 pr-2">
-                        <span className="font-mono text-[14px] font-bold text-purple-700">
-                          {order.semi_material_code}
-                        </span>
-                        <span className="font-medium text-slate-600 line-clamp-1 text-[12px]">
-                          {order.semi_material_name}
-                        </span>
-                      </div>
+                    <td className="p-5 align-top">
+                      {order.relations.length === 0 ? (
+                        <div className="text-slate-400 italic text-[12px] flex items-center gap-1.5 py-1">
+                          尚無綁定成品
+                        </div>
+                      ) : (
+                        <div className="flex flex-col gap-1.5">
+                          {order.relations.map((rel, i) => (
+                            <div
+                              key={i}
+                              className="flex items-center gap-2 bg-white border border-slate-200 px-2.5 py-1.5 rounded-lg shadow-sm"
+                            >
+                              <Package size={14} className="text-blue-400" />
+                              <span className="font-mono font-bold text-[13px] text-slate-700">
+                                {rel.product_code}
+                              </span>
+                              <span
+                                className="text-[12px] font-medium text-slate-600 truncate"
+                                title={rel.product_name}
+                              >
+                                {rel.product_name}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </td>
-                    <td className="p-4 align-middle font-medium text-slate-600">
-                      {order.spec || "-"}
+                    <td className="p-5 align-top">
+                      {order.packaging_info.length === 0 ? (
+                        <span className="text-slate-400 italic text-[12px]">
+                          無包材設定
+                        </span>
+                      ) : (
+                        <div className="flex flex-col gap-1.5">
+                          {order.packaging_info.map((pi, idx) => {
+                            let layerLabel = "其他包材";
+                            let layerColor =
+                              "text-slate-500 bg-slate-100 border-slate-200";
+                            if (pi.layer === "outer") {
+                              layerLabel = "包材單位";
+                              layerColor =
+                                "text-blue-600 bg-blue-50 border-blue-200";
+                            } else if (pi.layer === "inner") {
+                              layerLabel = "輔助單位";
+                              layerColor =
+                                "text-amber-600 bg-amber-50 border-amber-200";
+                            }
+
+                            return (
+                              <div
+                                key={idx}
+                                className="flex items-center gap-2.5"
+                              >
+                                <span
+                                  className={`text-[10px] font-bold px-1.5 py-0.5 rounded border whitespace-nowrap ${layerColor}`}
+                                >
+                                  {layerLabel}
+                                </span>
+                                <span className="font-mono text-[12px] font-bold text-slate-500 bg-slate-50 px-1 rounded border border-slate-200">
+                                  [{pi.material_code}]
+                                </span>
+                                <span className="text-[13px] font-medium text-slate-700 truncate">
+                                  {pi.material_name}
+                                </span>
+                                <span className="text-[12px] font-black text-slate-500 ml-auto bg-slate-100 px-1.5 py-0.5 rounded">
+                                  x {formatNum(pi.qty)}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                     </td>
-                    <td className="p-4 align-middle text-center">
-                      <div className="flex justify-center gap-2 opacity-80 group-hover:opacity-100 transition-opacity">
+                    <td className="p-5 align-top text-center">
+                      <div className="flex justify-center flex-wrap gap-2 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity pt-1">
                         <button
                           onClick={() => handleOpenModal(order)}
-                          className="px-3 py-1.5 bg-white border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50 hover:text-blue-600 transition-all text-[12px] font-medium shadow-sm flex items-center gap-1.5"
+                          className="px-3 py-2 bg-white border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50 hover:text-blue-600 transition-all text-[12px] font-bold shadow-sm flex items-center gap-1.5"
                         >
-                          <Edit2 size={13} /> 編輯
+                          <Edit2 size={13} strokeWidth={2.5} /> 編輯
                         </button>
                         <button
                           onClick={() =>
-                            handleDelete(order.id, order.order_number)
+                            handleDelete(
+                              order.package_order_id,
+                              order.order_number,
+                            )
                           }
-                          className="px-3 py-1.5 bg-red-50 border border-red-100 text-red-600 rounded-lg hover:bg-red-500 hover:text-white transition-all text-[12px] font-medium shadow-sm flex items-center gap-1.5"
+                          className="px-3 py-2 bg-white border border-red-200 text-red-600 rounded-lg hover:bg-red-50 transition-all text-[12px] font-bold shadow-sm flex items-center gap-1.5"
                         >
-                          <Trash2 size={13} /> 刪除
+                          <Trash2 size={13} strokeWidth={2.5} /> 刪除
                         </button>
                       </div>
                     </td>
@@ -789,7 +899,7 @@ export default function PackageOrderPage() {
       {/* ========================================== */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
-          <div className="bg-white rounded-3xl shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col relative animate-in fade-in zoom-in-95 duration-200">
+          <div className="bg-white rounded-3xl shadow-xl w-full max-w-3xl max-h-[90vh] flex flex-col relative animate-in fade-in zoom-in-95 duration-200">
             <div className="px-6 py-5 border-b border-slate-100 flex justify-between items-center rounded-t-3xl bg-white shrink-0">
               <h3 className="text-[18px] font-bold text-slate-800 flex items-center gap-2.5">
                 <Package
@@ -797,7 +907,7 @@ export default function PackageOrderPage() {
                   size={20}
                   strokeWidth={2.5}
                 />
-                {editingId ? "編輯包裝單" : "建立包裝單"}
+                {editingId ? "編輯包裝單內容" : "建立獨立包裝單範本"}
               </h3>
               <button
                 onClick={() => setIsModalOpen(false)}
@@ -812,65 +922,21 @@ export default function PackageOrderPage() {
               className="flex-1 overflow-y-auto custom-scrollbar flex flex-col"
             >
               <div className="p-6 md:p-8 space-y-8 flex-1">
-                {/* 區塊 1：基本與連動資訊 */}
-                <div className="space-y-4">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-                    <div className="sm:col-span-2">
-                      <label className="block text-[12px] font-bold text-slate-600 mb-1.5">
-                        選擇物料 <span className="text-red-500">*</span>
-                      </label>
-                      <FilterableDropdown
-                        value={formData.semi_material}
-                        onChange={(val) =>
-                          updateFormField("semi_material", val)
-                        }
-                        options={semiMaterials}
-                        placeholder="搜尋半成品料號或名稱"
-                        renderItem={(m) => (
-                          <div className="flex justify-between items-center w-full">
-                            <span className="text-[13px] text-slate-400 font-mono">
-                              [{m.code}]
-                            </span>
-                            <span className="text-[13px] text-slate-700 font-medium ml-2 truncate">
-                              {m.name}
-                            </span>
-                          </div>
-                        )}
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[12px] font-bold text-slate-600 mb-1.5">
-                        自訂成品代碼 <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        required={!editingId}
-                        disabled={!!editingId}
-                        value={formData.new_product_code}
-                        onChange={(e) =>
-                          updateFormField("new_product_code", e.target.value)
-                        }
-                        placeholder="例如: P-001"
-                        className="w-full px-3.5 py-2.5 h-[42px] bg-white border border-slate-200 rounded-xl focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10 outline-none text-[14px] font-mono font-medium text-slate-800 disabled:bg-slate-50 disabled:text-slate-500 shadow-sm transition-all"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[12px] font-bold text-slate-600 mb-1.5">
-                        自訂包裝單號 <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        disabled={!!editingId}
-                        value={formData.order_number}
-                        onChange={(e) =>
-                          updateFormField("order_number", e.target.value)
-                        }
-                        placeholder="例如: PKG-001"
-                        className="w-full px-3.5 py-2.5 h-[42px] bg-white border border-slate-200 rounded-xl focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10 outline-none text-[14px] font-mono font-medium text-slate-800 disabled:bg-slate-50 disabled:text-slate-500 shadow-sm transition-all"
-                      />
-                    </div>
-                  </div>
+                {/* 獨立的包裝單號輸入框 */}
+                <div className="bg-blue-50/50 p-4 rounded-2xl border border-blue-100 flex flex-col sm:flex-row sm:items-center gap-4">
+                  <label className="text-[13px] font-black text-blue-700 whitespace-nowrap">
+                    設定包裝單號 <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={formData.order_number}
+                    onChange={(e) =>
+                      updateFormField("order_number", e.target.value)
+                    }
+                    placeholder="例如: PKG-202610-001"
+                    className="flex-1 h-[42px] px-4 bg-white border border-slate-200 rounded-xl font-mono font-bold text-[14px] text-slate-800 focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10 outline-none shadow-sm transition-all"
+                  />
                 </div>
 
                 {/* 區塊 2：包材結構與換算設定 */}
@@ -959,8 +1025,13 @@ export default function PackageOrderPage() {
                             options={packMaterials.filter(
                               (pm) => pm.type === "PACK" || !pm.id,
                             )}
+                            disabled={!formData.outer_pack}
                             disabledIds={disabledMaterialIds}
-                            placeholder="-- 無需對應內包裝 --"
+                            placeholder={
+                              formData.outer_pack
+                                ? "-- 無需對應內包裝 --"
+                                : "請先選擇外包材"
+                            }
                             renderItem={(m) =>
                               m.id ? `[${m.code}] ${m.name}` : m.name
                             }
@@ -975,6 +1046,7 @@ export default function PackageOrderPage() {
                             type="text"
                             inputMode="decimal"
                             placeholder="數量"
+                            disabled={!formData.outer_pack}
                             value={formData.sales_pack_quantity}
                             onChange={(e) =>
                               updateFormField(
@@ -982,18 +1054,19 @@ export default function PackageOrderPage() {
                                 handleNumericTextInput(e.target.value),
                               )
                             }
-                            className="w-full h-11 pl-7 pr-3 bg-white border border-slate-200 rounded-xl text-center font-mono font-medium text-[13px] focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10 outline-none shadow-sm transition-all"
+                            className="w-full h-11 pl-7 pr-3 bg-white border border-slate-200 rounded-xl text-center font-mono font-medium text-[13px] focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10 outline-none shadow-sm transition-all disabled:bg-slate-50 disabled:text-slate-400"
                           />
                         </div>
                         <div className="col-span-2 sm:col-span-1">
                           <input
                             type="text"
                             placeholder="單位 (包)"
+                            disabled={!formData.outer_pack}
                             value={formData.sales_pack_unit}
                             onChange={(e) =>
                               updateFormField("sales_pack_unit", e.target.value)
                             }
-                            className="w-full h-11 px-3 bg-white border border-slate-200 rounded-xl text-center font-medium text-[13px] focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10 outline-none shadow-sm transition-all"
+                            className="w-full h-11 px-3 bg-white border border-slate-200 rounded-xl text-center font-medium text-[13px] focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10 outline-none shadow-sm transition-all disabled:bg-slate-50 disabled:text-slate-400"
                           />
                         </div>
                       </div>
@@ -1056,7 +1129,7 @@ export default function PackageOrderPage() {
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
                       <div className="flex flex-col gap-1.5">
                         <label className="text-[12px] font-bold text-slate-500 uppercase">
-                          包裝規格
+                          包裝規格預覽
                         </label>
                         <input
                           type="text"
@@ -1064,13 +1137,13 @@ export default function PackageOrderPage() {
                           onChange={(e) =>
                             updateFormField("spec", e.target.value)
                           }
-                          placeholder="如：1KG*10包/箱"
+                          placeholder="選填，如不滿意自動產生之預覽可手動更改"
                           className="w-full h-11 px-3.5 bg-white border border-slate-200 rounded-xl font-medium text-[14px] text-slate-800 focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10 outline-none shadow-sm transition-all"
                         />
                       </div>
                       <div className="flex flex-col gap-1.5">
                         <label className="text-[12px] font-bold text-slate-500 uppercase">
-                          預估包材成本
+                          預估包材總成本
                         </label>
                         <div className="w-full h-11 px-4 bg-blue-50 border border-blue-100 rounded-xl flex items-center justify-between shadow-inner">
                           <span className="text-blue-700 font-bold text-[14px] font-mono">

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import CustomDialog from "./components/customDialog";
 import {
   Printer,
@@ -9,6 +9,8 @@ import {
   Search,
   Calendar,
   Tag,
+  ChevronDown,
+  CheckCircle2,
 } from "lucide-react";
 import { fetchWithAuth } from "./utils/fetchWithAuth";
 import { useNavigate } from "react-router-dom";
@@ -500,6 +502,95 @@ const getDaysAgoStr = (days) => {
   return `${yyyy}-${mm}-${dd}`;
 };
 
+// ==========================================
+// 🌟 專屬：營養快照自訂下拉選單 (支援全客製化樣式)
+// ==========================================
+const SnapshotSelectDropdown = ({ snapshots, selectedId, onChange }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const dropdownRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  if (!snapshots || snapshots.length === 0) {
+    return (
+      <div className="w-full h-[42px] px-4 bg-slate-50 border border-slate-200 rounded-xl text-[13px] font-bold text-slate-400 flex items-center shadow-sm cursor-not-allowed select-none">
+        尚無核准資料
+      </div>
+    );
+  }
+
+  const selectedSnap = snapshots.find(
+    (s) => String(s.id) === String(selectedId),
+  );
+
+  return (
+    <div className="relative w-full" ref={dropdownRef}>
+      <button
+        type="button"
+        onClick={() => setIsOpen(!isOpen)}
+        className={`w-full h-[42px] pl-4 pr-10 border rounded-xl text-[13px] font-bold flex justify-between items-center transition-all shadow-sm ${
+          isOpen
+            ? "bg-white border-purple-400 ring-4 ring-purple-500/15 text-purple-800"
+            : "bg-white border-purple-200 text-purple-800 hover:border-purple-300 hover:bg-purple-50/50"
+        }`}
+      >
+        <span className="truncate">
+          {selectedSnap
+            ? `${selectedSnap.version_num} (${new Date(selectedSnap.created_at).toLocaleDateString()})`
+            : "請選擇營養價值版本..."}
+        </span>
+        <ChevronDown
+          size={16}
+          className={`absolute right-3.5 transition-transform duration-200 ${
+            isOpen ? "rotate-180 text-purple-600" : "text-purple-400"
+          }`}
+        />
+      </button>
+
+      {isOpen && (
+        <div className="absolute z-50 top-[calc(100%+8px)] left-0 w-full bg-white/95 backdrop-blur-md border border-purple-100 rounded-xl shadow-xl flex flex-col max-h-56 overflow-y-auto animate-in fade-in slide-in-from-top-2 duration-200 custom-scrollbar py-1.5">
+          {snapshots.map((s) => {
+            const isSelected = String(s.id) === String(selectedId);
+            return (
+              <div
+                key={s.id}
+                onClick={() => {
+                  onChange(s.id);
+                  setIsOpen(false);
+                }}
+                className={`px-4 py-3 text-[13px] font-bold cursor-pointer transition-colors flex items-center justify-between mx-1.5 rounded-lg mb-0.5 last:mb-0 ${
+                  isSelected
+                    ? "bg-purple-100 text-purple-800"
+                    : "text-slate-600 hover:bg-purple-50 hover:text-purple-700"
+                }`}
+              >
+                <span className="truncate">
+                  {s.version_num} ({new Date(s.created_at).toLocaleDateString()}
+                  )
+                </span>
+                {isSelected && (
+                  <CheckCircle2
+                    size={16}
+                    className="text-purple-600 shrink-0 ml-2"
+                  />
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+};
+
 // ==============================================
 // 🌟 標籤專用輔助函數與組件
 // ==============================================
@@ -548,6 +639,10 @@ const ProductLabelTemplate = ({
   servingsPerContainer,
   calculatedNut100,
   fullMatData,
+  manufacturer = "基香食品有限公司",
+  tel = "03-4988228",
+  fax = "03-4988159",
+  address = "桃園市觀音區崙坪里1鄰1之10號",
 }) => {
   if (!order || !order.product_profile) return null;
   const p = order.product_profile;
@@ -718,9 +813,11 @@ const ProductLabelTemplate = ({
             <div>有效期限：{expDateDisplay}</div>
             <div>包裝規格：{specStr}</div>
             <div>原產地：{p.origin || "台灣"}</div>
-            <div>製造商：基香食品有限公司</div>
-            <div>TEL: 03-4988228 FAX: 03-4988159</div>
-            <div>桃園市觀音區崙坪里1鄰1之10號</div>
+            <div>製造商：{manufacturer}</div>
+            <div>
+              TEL: {tel} FAX: {fax}
+            </div>
+            <div>{address}</div>
           </div>
           <div className="mt-1 font-bold text-[12px]">{storageStr}</div>
         </div>
@@ -1816,6 +1913,10 @@ const ProductionOrderPrintTemplate = ({ data, type, sortBySequence }) => {
               servingsPerContainer={info.servingsPerContainer}
               calculatedNut100={info.calculatedNut100}
               fullMatData={info.fullMatData}
+              manufacturer={info.manufacturer}
+              tel={info.tel}
+              fax={info.fax}
+              address={info.address}
             />
           </div>
         ))}
@@ -1920,6 +2021,12 @@ export default function ProductionOrderPage() {
     servingsPerContainer: 1,
     calculatedNut100: null,
     fullMatData: null,
+    selectedSnapshotId: "",
+    snapshots: [],
+    manufacturer: "基香食品有限公司",
+    tel: "03-4988228",
+    fax: "03-4988159",
+    address: "桃園市觀音區崙坪里1鄰1之10號",
   });
 
   useEffect(() => {
@@ -2073,15 +2180,32 @@ export default function ProductionOrderPage() {
 
     let calculatedNut100 = orderToPrint.product_profile?.nutrition_fact || {};
     let fullMatData = null;
+    let initialSnapshotId = "";
+    let fetchedSnapshots = []; // 🌟 準備存放撈回來的快照
 
     try {
-      const matRes = await fetchWithAuth(
-        `/api/materials/${orderToPrint.product_id}?lite=true`,
-      );
+      // 🌟 同時抓取精簡版物料清單 與 獨立的快照清單
+      const [matRes, snapRes] = await Promise.all([
+        fetchWithAuth(`/api/materials/${orderToPrint.product_id}?lite=true`),
+        fetchWithAuth(
+          `/api/nutrition_snapshots?material=${orderToPrint.product_id}`,
+        ),
+      ]);
+
       if (matRes.ok) {
         const matJson = await matRes.json();
         fullMatData = matJson.data || matJson;
-        if (fullMatData) {
+      }
+
+      if (snapRes.ok) {
+        const snapJson = await snapRes.json();
+        fetchedSnapshots = snapJson.data || snapJson.results || snapJson || [];
+
+        // 如果有快照，預設選中第一筆(最新)，否則依賴 BOM 重算
+        if (fetchedSnapshots.length > 0) {
+          initialSnapshotId = fetchedSnapshots[0].id;
+          calculatedNut100 = fetchedSnapshots[0].nutrition_fact;
+        } else if (fullMatData) {
           calculatedNut100 = calculateNutritionFromBOMsAndIngredients(
             fullMatData.boms,
             fullMatData.ingredients,
@@ -2090,7 +2214,7 @@ export default function ProductionOrderPage() {
         }
       }
     } catch (err) {
-      console.error("Failed to fetch material BOMs", err);
+      console.error("Failed to fetch material BOMs or snapshots", err);
     }
 
     const p = orderToPrint.product_profile;
@@ -2108,6 +2232,12 @@ export default function ProductionOrderPage() {
       servingsPerContainer: defaultTotalServings,
       calculatedNut100,
       fullMatData,
+      selectedSnapshotId: initialSnapshotId,
+      snapshots: fetchedSnapshots,
+      manufacturer: "基香食品有限公司",
+      tel: "03-4988228",
+      fax: "03-4988159",
+      address: "桃園市觀音區崙坪里1鄰1之10號",
     });
   };
 
@@ -2119,6 +2249,10 @@ export default function ProductionOrderPage() {
       servingsPerContainer,
       calculatedNut100,
       fullMatData,
+      manufacturer,
+      tel,
+      fax,
+      address,
     } = labelModal;
 
     try {
@@ -2144,6 +2278,10 @@ export default function ProductionOrderPage() {
         servingsPerContainer,
         calculatedNut100,
         fullMatData,
+        manufacturer,
+        tel,
+        fax,
+        address,
       },
     ]);
     setLabelModal((prev) => ({ ...prev, isOpen: false }));
@@ -2598,7 +2736,7 @@ export default function ProductionOrderPage() {
         {/* 🌟 WYSIWYG 標籤設定與預覽 Modal */}
         {/* ========================================================= */}
         {labelModal.isOpen && labelModal.order && (
-          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
             <div className="bg-slate-50 rounded-3xl shadow-2xl w-full max-w-6xl h-[95vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 border border-slate-200/50">
               <div className="p-5 border-b border-slate-200/60 flex justify-between items-center bg-white/90 backdrop-blur-md shrink-0">
                 <h3 className="text-xl font-black text-slate-800 flex items-center gap-2">
@@ -2617,7 +2755,29 @@ export default function ProductionOrderPage() {
               <div className="flex flex-col lg:flex-row flex-1 overflow-hidden">
                 {/* 左側：設定控制面板 */}
                 <div className="w-full lg:w-[350px] bg-white border-r border-slate-200/60 p-6 flex flex-col gap-6 overflow-y-auto custom-scrollbar">
-                  <div className="text-[12px] text-slate-600 leading-relaxed font-bold mt-2 flex items-center gap-1.5">
+                  {/* 🌟 1. & 2. 營養價值快照選擇與即時運算面板 */}
+                  <div className="bg-purple-50/50 p-4 rounded-2xl border border-purple-100 flex flex-col gap-3">
+                    <label className="block text-[11px] font-bold text-purple-700 uppercase flex items-center gap-1.5">
+                      <Tag size={14} /> 選擇營養價值版本
+                    </label>
+                    <SnapshotSelectDropdown
+                      snapshots={labelModal.snapshots}
+                      selectedId={labelModal.selectedSnapshotId}
+                      onChange={(snapId) => {
+                        const snap = labelModal.snapshots.find(
+                          (s) => String(s.id) === String(snapId),
+                        );
+                        setLabelModal((prev) => ({
+                          ...prev,
+                          selectedSnapshotId: snapId,
+                          calculatedNut100: snap
+                            ? snap.nutrition_fact
+                            : prev.calculatedNut100,
+                        }));
+                      }}
+                    />
+                  </div>
+                  <div className="text-[12px] text-slate-600 leading-relaxed font-bold flex items-center gap-1.5">
                     <Calendar size={14} className="text-amber-600" />
                     此物料保存期限：
                     <span className="text-amber-600">
@@ -2662,6 +2822,61 @@ export default function ProductionOrderPage() {
                     </div>
                   </div>
 
+                  {/* 🌟 3. 廠商客製化設定面板 */}
+                  <div className="bg-blue-50/50 p-4 rounded-2xl border border-blue-100 flex flex-col gap-3">
+                    <label className="block text-[11px] font-bold text-blue-700 uppercase">
+                      標籤廠商聯絡資訊
+                    </label>
+                    <div>
+                      <input
+                        type="text"
+                        placeholder="製造商名稱"
+                        value={labelModal.manufacturer}
+                        onChange={(e) =>
+                          setLabelModal({
+                            ...labelModal,
+                            manufacturer: e.target.value,
+                          })
+                        }
+                        className="w-full px-3 py-1.5 bg-white border border-blue-200 rounded-lg text-sm font-bold focus:ring-2 focus:border-blue-400 outline-none transition-all shadow-sm"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <input
+                        type="text"
+                        placeholder="TEL"
+                        value={labelModal.tel}
+                        onChange={(e) =>
+                          setLabelModal({ ...labelModal, tel: e.target.value })
+                        }
+                        className="w-full px-3 py-1.5 bg-white border border-blue-200 rounded-lg text-sm font-bold focus:ring-2 focus:border-blue-400 outline-none transition-all shadow-sm"
+                      />
+                      <input
+                        type="text"
+                        placeholder="FAX"
+                        value={labelModal.fax}
+                        onChange={(e) =>
+                          setLabelModal({ ...labelModal, fax: e.target.value })
+                        }
+                        className="w-full px-3 py-1.5 bg-white border border-blue-200 rounded-lg text-sm font-bold focus:ring-2 focus:border-blue-400 outline-none transition-all shadow-sm"
+                      />
+                    </div>
+                    <div>
+                      <input
+                        type="text"
+                        placeholder="地址"
+                        value={labelModal.address}
+                        onChange={(e) =>
+                          setLabelModal({
+                            ...labelModal,
+                            address: e.target.value,
+                          })
+                        }
+                        className="w-full px-3 py-1.5 bg-white border border-blue-200 rounded-lg text-sm font-bold focus:ring-2 focus:border-blue-400 outline-none transition-all shadow-sm"
+                      />
+                    </div>
+                  </div>
+
                   <div className="text-[11px] text-slate-400 leading-relaxed font-bold">
                     💡
                     提示：右側為法規標籤預覽。當您點擊「儲存並列印」時，所選的製造日期將被寫入資料庫保存。
@@ -2678,6 +2893,11 @@ export default function ProductionOrderPage() {
                       servingsPerContainer={labelModal.servingsPerContainer}
                       calculatedNut100={labelModal.calculatedNut100}
                       fullMatData={labelModal.fullMatData}
+                      // 🌟 將輸入框的值丟入預覽模組
+                      manufacturer={labelModal.manufacturer}
+                      tel={labelModal.tel}
+                      fax={labelModal.fax}
+                      address={labelModal.address}
                     />
                   </div>
                 </div>

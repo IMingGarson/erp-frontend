@@ -902,6 +902,7 @@ const RequirementOrderPage = () => {
   const [vendors, setVendors] = useState([]);
   const [mrpPlans, setMrpPlans] = useState([]);
   const [packageOrders, setPackageOrders] = useState([]);
+  const [productRelations, setProductRelations] = useState([]); // 🌟 抓取產品包裝關聯表
 
   const [customerQuotes, setCustomerQuotes] = useState([]);
 
@@ -1089,6 +1090,7 @@ const RequirementOrderPage = () => {
         seqRes,
         coSeqRes,
         poRes,
+        relRes, // 🌟 新增
       ] = await Promise.all([
         fetchWithAuth("/api/materials"),
         fetchWithAuth("/api/boms"),
@@ -1098,6 +1100,7 @@ const RequirementOrderPage = () => {
         fetchWithAuth("/api/mrp/daily_sequence"),
         fetchWithAuth("/api/customer_orders/daily_sequence"),
         fetchWithAuth("/api/package_orders"),
+        fetchWithAuth("/api/product_package_relations"), // 🌟 新增抓取關聯表
       ]);
       if (
         !matRes.ok ||
@@ -1107,7 +1110,8 @@ const RequirementOrderPage = () => {
         !mrpRes.ok ||
         !seqRes.ok ||
         !coSeqRes.ok ||
-        !poRes.ok
+        !poRes.ok ||
+        !relRes.ok
       )
         throw new Error("資料載入失敗，請確認 API 狀態");
 
@@ -1120,6 +1124,7 @@ const RequirementOrderPage = () => {
         seqJson,
         coSeqJson,
         poJson,
+        relJson, // 🌟 新增
       ] = await Promise.all([
         matRes.json(),
         bomRes.json(),
@@ -1129,6 +1134,7 @@ const RequirementOrderPage = () => {
         seqRes.json(),
         coSeqRes.json(),
         poRes.json(),
+        relRes.json(), // 🌟 新增
       ]);
 
       const loadedMaterials = matJson.data || matJson.results || matJson || [];
@@ -1137,6 +1143,7 @@ const RequirementOrderPage = () => {
       setBatches(batchJson.data || batchJson.results || batchJson || []);
       setVendors(venJson.data || venJson.results || venJson || []);
       setPackageOrders(poJson.data || poJson.results || poJson || []);
+      setProductRelations(relJson.data || relJson.results || relJson || []); // 🌟 存入 state
 
       const remoteMrp = mrpJson.data || mrpJson.results || mrpJson || [];
       setMrpPlans(remoteMrp);
@@ -1361,9 +1368,16 @@ const RequirementOrderPage = () => {
           ? String(quoteItem.final_price_per_kg)
           : "";
 
-        const po = packageOrders.find(
-          (p) => p.product_code === item.product_code,
+        // 🌟 改用關聯表尋找 PackageOrder，而不是用 product_code 盲找
+        let targetPo = null;
+        const matchedRel = productRelations.find(
+          (r) => String(r.product) === String(item.product_id),
         );
+        if (matchedRel) {
+          targetPo = packageOrders.find(
+            (p) => String(p.id) === String(matchedRel.package_order),
+          );
+        }
 
         let outId = quoteItem.outer_pack || null;
         let inId = quoteItem.inner_pack || null;
@@ -1375,13 +1389,13 @@ const RequirementOrderPage = () => {
           ...item,
           profile_id: quoteItem.id,
           spec: quoteItem.spec || "",
-          unit: quoteItem.sales_unit || po?.sales_unit || "箱",
+          unit: quoteItem.sales_unit || targetPo?.sales_unit || "箱",
           unit_price: salesPrice,
           sales_unit_quantity: quoteItem.sales_unit_quantity
             ? String(quoteItem.sales_unit_quantity)
             : "1",
           sales_pack_unit:
-            quoteItem.sales_pack_unit || po?.sales_pack_unit || "包",
+            quoteItem.sales_pack_unit || targetPo?.sales_pack_unit || "包",
           sales_pack_quantity: quoteItem.sales_pack_quantity
             ? String(quoteItem.sales_pack_quantity)
             : "10",
@@ -1490,11 +1504,22 @@ const RequirementOrderPage = () => {
 
       buildDrafts(fItem.product_id, totalWeightFrac, motherId, null);
 
-      const po = packageOrders.find(
-        (p) => String(p.product_code) === String(fItem.product_code),
+      // 🌟 使用 product_package_relations 反查
+      let targetPo = null;
+      const matchedRel = productRelations.find(
+        (r) => String(r.product) === String(fItem.product_id),
       );
+      if (matchedRel) {
+        targetPo = packageOrders.find(
+          (p) => String(p.id) === String(matchedRel.package_order),
+        );
+      }
 
-      if (po && po.packaging_info && po.packaging_info.length > 0) {
+      if (
+        targetPo &&
+        targetPo.packaging_info &&
+        targetPo.packaging_info.length > 0
+      ) {
         generatedItems.push({
           id: `${motherId}-${childDraftSeq++}`,
           parentDraftId: motherId,
@@ -1507,7 +1532,7 @@ const RequirementOrderPage = () => {
           productCode: fItem.product_code,
           remark: "包裝耗材",
           isPackagingNode: true,
-          packaging_info: po.packaging_info,
+          packaging_info: targetPo.packaging_info,
           outer_pack_id: fItem.outer_pack_id,
           inner_pack_id: fItem.inner_pack_id,
         });
@@ -1537,7 +1562,7 @@ const RequirementOrderPage = () => {
       });
       return updated;
     });
-  }, [formItems, materials, boms, packageOrders]);
+  }, [formItems, materials, boms, packageOrders, productRelations]);
 
   useEffect(() => {
     if (orderItems.length === 0 && mrpPlans.length === 0) return;
@@ -1915,9 +1940,17 @@ const RequirementOrderPage = () => {
       );
 
       if (quoteItem) {
-        const po = packageOrders.find(
-          (p) => String(p.product_code) === String(item.product_code),
+        let po = null;
+        // 🌟 使用關聯表反查 PO
+        const matchedRel = productRelations.find(
+          (r) => String(r.product) === String(item.product_id),
         );
+        if (matchedRel) {
+          po = packageOrders.find(
+            (p) => String(p.id) === String(matchedRel.package_order),
+          );
+        }
+
         if (po && po.packaging_info) {
           po.packaging_info.forEach((pkg) => {
             let matId = pkg.material_id;
@@ -2065,12 +2098,26 @@ const RequirementOrderPage = () => {
 
           const fItem = formItems.find((f) => f.id === item.id);
           if (fItem) {
-            const packAllocNode = allocations[`${fItem.id}-PACK`] || {};
+            // 🌟 修正 BUG：正確找到 PACKAGING 節點並抓取其分配資料
+            const packNode = orderItems.find(
+              (i) => i.parentDraftId === fItem.id && i.type === "PACKAGING",
+            );
+            const packAllocNode =
+              packNode && allocations[packNode.id]
+                ? allocations[packNode.id]
+                : {};
             const combinedBatchInfo = {};
 
-            const po = packageOrders.find(
-              (p) => String(p.product_code) === String(fItem.product_code),
+            let po = null;
+            // 🌟 使用關聯表反查 PO
+            const matchedRel = productRelations.find(
+              (r) => String(r.product) === String(fItem.product_id),
             );
+            if (matchedRel) {
+              po = packageOrders.find(
+                (p) => String(p.id) === String(matchedRel.package_order),
+              );
+            }
 
             if (po && po.packaging_info) {
               po.packaging_info.forEach((pkg) => {
@@ -2304,11 +2351,17 @@ const RequirementOrderPage = () => {
       spec = primaryCmo.spec || "";
       sales_unit = primaryCmo.unit || "";
 
-      const po = packageOrders.find(
-        (p) => p.product_code === primaryCmo.product_code,
+      // 🌟 使用 product_package_relations 反查
+      const matchedRel = productRelations.find(
+        (r) => String(r.product) === String(primaryCmo.product_id),
       );
-      if (po && po.sales_pack_unit) {
-        sales_pack_unit = po.sales_pack_unit;
+      if (matchedRel) {
+        const po = packageOrders.find(
+          (p) => String(p.id) === String(matchedRel.package_order),
+        );
+        if (po && po.sales_pack_unit) {
+          sales_pack_unit = po.sales_pack_unit;
+        }
       }
     }
 
@@ -2375,11 +2428,17 @@ const RequirementOrderPage = () => {
                 spec = primaryCmo.spec || "";
                 sales_unit = primaryCmo.unit || "";
 
-                const po = packageOrders.find(
-                  (p) => p.product_code === primaryCmo.product_code,
+                // 🌟 使用 product_package_relations 反查
+                const matchedRel = productRelations.find(
+                  (r) => String(r.product) === String(primaryCmo.product_id),
                 );
-                if (po && po.sales_pack_unit) {
-                  sales_pack_unit = po.sales_pack_unit;
+                if (matchedRel) {
+                  const po = packageOrders.find(
+                    (p) => String(p.id) === String(matchedRel.package_order),
+                  );
+                  if (po && po.sales_pack_unit) {
+                    sales_pack_unit = po.sales_pack_unit;
+                  }
                 }
               }
 
@@ -2491,9 +2550,17 @@ const RequirementOrderPage = () => {
         });
 
         if (co.package_items && co.package_items.length > 0) {
-          const po = packageOrders.find(
-            (p) => p.product_code === (co.product_code || order.product_code),
+          let po = null;
+          // 🌟 使用關聯表反查 PO
+          const matchedRel = productRelations.find(
+            (r) => String(r.product) === String(co.product_id),
           );
+          if (matchedRel) {
+            po = packageOrders.find(
+              (p) => String(p.id) === String(matchedRel.package_order),
+            );
+          }
+
           const outer_pack_id = co.logistics_info?.outer_pack_id;
           const inner_pack_id = co.logistics_info?.inner_pack_id;
 
@@ -2530,14 +2597,42 @@ const RequirementOrderPage = () => {
             let remarkStr = "";
             const parentMrp = mrpPlans.find((p) => p.id === co.mrp);
             if (parentMrp) {
-              const childMrp = mrpPlans.find(
-                (p) =>
-                  p.parent_id === parentMrp.mrp_id &&
-                  Array.isArray(p.batch_inventory_info) &&
-                  p.batch_inventory_info.some((info) => info.is_pack === 1),
-              );
+              const childMrp = mrpPlans.find((p) => {
+                if (p.parent_id !== parentMrp.mrp_id) return false;
+                try {
+                  const info =
+                    typeof p.batch_inventory_info === "string"
+                      ? JSON.parse(p.batch_inventory_info)
+                      : p.batch_inventory_info;
+                  if (Array.isArray(info)) {
+                    return info.some(
+                      (i) =>
+                        i.is_pack === 1 ||
+                        i.is_pack === true ||
+                        i.type === "PACKAGING",
+                    );
+                  } else if (info && typeof info === "object") {
+                    return Object.values(info).some(
+                      (i) =>
+                        i &&
+                        (i.is_pack === 1 ||
+                          i.is_pack === true ||
+                          i.type === "PACKAGING"),
+                    );
+                  }
+                } catch (e) {}
+                return false;
+              });
+
               if (childMrp && childMrp.batch_inventory_info) {
-                const alloc = childMrp.batch_inventory_info.find(
+                const info =
+                  typeof childMrp.batch_inventory_info === "string"
+                    ? JSON.parse(childMrp.batch_inventory_info)
+                    : childMrp.batch_inventory_info;
+                const infoArray = Array.isArray(info)
+                  ? info
+                  : Object.values(info);
+                const alloc = infoArray.find(
                   (a) => String(a.code) === String(pkg.product_code),
                 );
                 if (alloc && alloc.batches) {
@@ -2595,18 +2690,37 @@ const RequirementOrderPage = () => {
         let packIdx = 1;
         const parentMrp = mrpPlans.find((p) => p.id === primaryCmo.mrp);
         if (parentMrp) {
-          const childMrp = mrpPlans.find(
-            (p) =>
-              p.parent_id === parentMrp.mrp_id &&
-              Array.isArray(p.batch_inventory_info) &&
-              p.batch_inventory_info.some((info) => info.is_pack === 1),
-          );
+          const childMrp = mrpPlans.find((p) => {
+            if (p.parent_id !== parentMrp.mrp_id) return false;
+            try {
+              const info =
+                typeof p.batch_inventory_info === "string"
+                  ? JSON.parse(p.batch_inventory_info)
+                  : p.batch_inventory_info;
+              if (Array.isArray(info)) {
+                return info.some(
+                  (i) =>
+                    i.is_pack === 1 ||
+                    i.is_pack === true ||
+                    i.type === "PACKAGING",
+                );
+              } else if (info && typeof info === "object") {
+                return Object.values(info).some(
+                  (i) =>
+                    i &&
+                    (i.is_pack === 1 ||
+                      i.is_pack === true ||
+                      i.type === "PACKAGING"),
+                );
+              }
+            } catch (e) {}
+            return false;
+          });
           if (childMrp) {
             const parts = childMrp.mrp_id.split("-");
             packIdx = parts[parts.length - 1];
           }
         }
-
         const packOrderNo =
           orderNos.length > 0
             ? orderNos.map((no) => `${no}-${packIdx}`).join(", ")
@@ -3195,11 +3309,24 @@ const RequirementOrderPage = () => {
                                               String(item.product_id),
                                           )
                                           .map((q) => {
-                                            const po = packageOrders.find(
-                                              (p) =>
-                                                String(p.product_code) ===
-                                                String(item.product_code),
-                                            );
+                                            let po = null;
+                                            // 🌟 使用關聯表反查 PO
+                                            const matchedRel =
+                                              productRelations.find(
+                                                (r) =>
+                                                  String(r.product) ===
+                                                  String(item.product_id),
+                                              );
+                                            if (matchedRel) {
+                                              po = packageOrders.find(
+                                                (p) =>
+                                                  String(p.id) ===
+                                                  String(
+                                                    matchedRel.package_order,
+                                                  ),
+                                              );
+                                            }
+
                                             const prefix =
                                               po && po.order_number
                                                 ? `[${po.order_number}] `
@@ -3871,12 +3998,41 @@ const RequirementOrderPage = () => {
 
                                           {/* 🌟 額外渲染包裝單據 (若存在) */}
                                           {mrpPlans
-                                            .filter(
-                                              (p) =>
-                                                p.parent_id === d.mrp_id &&
-                                                String(p.product_id) ===
-                                                  String(d.product_id),
-                                            )
+                                            .filter((p) => {
+                                              if (p.parent_id !== d.mrp_id)
+                                                return false;
+                                              try {
+                                                const info =
+                                                  typeof p.batch_inventory_info ===
+                                                  "string"
+                                                    ? JSON.parse(
+                                                        p.batch_inventory_info,
+                                                      )
+                                                    : p.batch_inventory_info;
+                                                if (Array.isArray(info)) {
+                                                  return info.some(
+                                                    (i) =>
+                                                      i.is_pack === 1 ||
+                                                      i.is_pack === true ||
+                                                      i.type === "PACKAGING",
+                                                  );
+                                                } else if (
+                                                  info &&
+                                                  typeof info === "object"
+                                                ) {
+                                                  return Object.values(
+                                                    info,
+                                                  ).some(
+                                                    (i) =>
+                                                      i &&
+                                                      (i.is_pack === 1 ||
+                                                        i.is_pack === true ||
+                                                        i.type === "PACKAGING"),
+                                                  );
+                                                }
+                                              } catch (e) {}
+                                              return false;
+                                            })
                                             .map((packPlan, idx) => (
                                               <div
                                                 key={packPlan.id}

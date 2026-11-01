@@ -712,6 +712,7 @@ const QuotationCreatePage = () => {
   const [vendors, setVendors] = useState([]);
   const [allMaterials, setAllMaterials] = useState([]);
   const [packageOrders, setPackageOrders] = useState([]);
+  const [productRelations, setProductRelations] = useState([]);
   const [bomMap, setBomMap] = useState({
     product_to_semi: {},
     semi_to_boms: {},
@@ -747,21 +748,26 @@ const QuotationCreatePage = () => {
   useEffect(() => {
     const fetchInitialData = async () => {
       try {
-        const [vendorRes, matRes, poRes, bomMapRes] = await Promise.all([
-          fetchWithAuth("/api/vendors?is_active=true"),
-          fetchWithAuth("/api/materials?type__in=SEMI,PRODUCT,PACK"), // 🌟 取消不需要的原料，加快效能
-          fetchWithAuth("/api/package_orders"),
-          fetchWithAuth("/api/boms/mapping"), // 🌟 為了預覽直接拿
-        ]);
+        const [vendorRes, matRes, poRes, relRes, bomMapRes] = await Promise.all(
+          [
+            fetchWithAuth("/api/vendors?is_active=true"),
+            fetchWithAuth("/api/materials?type__in=SEMI,PRODUCT,PACK"),
+            fetchWithAuth("/api/package_orders"),
+            fetchWithAuth("/api/product_package_relations"), // 🌟 新增抓取關聯表
+            fetchWithAuth("/api/boms/mapping"),
+          ],
+        );
 
         const vendorJson = await vendorRes.json();
         const matJson = await matRes.json();
         const poJson = await poRes.json();
+        const relJson = await relRes.json(); // 🌟 解析關聯表
         const bomMapData = await bomMapRes.json();
 
         setVendors(vendorJson.data || vendorJson || []);
         setAllMaterials(matJson.data || matJson || []);
-        setPackageOrders(poJson.data || poJson || []);
+        setPackageOrders(poJson.data || poJson.results || poJson || []);
+        setProductRelations(relJson.data || relJson.results || relJson || []); // 🌟 存入 State
         setBomMap(
           bomMapData.data ||
             bomMapData || { product_to_semi: {}, semi_to_boms: {} },
@@ -782,26 +788,17 @@ const QuotationCreatePage = () => {
     fetchInitialData();
   }, [navigate]);
 
-  // 🌟 將所有的 成品 (PRODUCT) 與 半成品 (SEMI) 合併為一個下拉選單選項
   const quoteTargetOptions = useMemo(() => {
-    const prodOpts = packageOrders.map((po) => ({
-      id: `po_${po.id}`,
-      type: "PRODUCT",
-      code: po.product_code,
-      name: po.product_name,
-      po: po,
-    }));
-    const semiOpts = allMaterials
-      .filter((m) => m.type === "SEMI")
+    return allMaterials
+      .filter((m) => m.type === "PRODUCT" || m.type === "SEMI")
       .map((m) => ({
-        id: `semi_${m.id}`,
-        type: "SEMI",
+        id: `${m.type.toLowerCase()}_${m.id}`,
+        type: m.type,
         code: m.code,
         name: m.name,
         mat: m,
       }));
-    return [...prodOpts, ...semiOpts];
-  }, [packageOrders, allMaterials]);
+  }, [allMaterials]);
 
   const handleAddItem = () => {
     setFormData((prev) => ({
@@ -856,7 +853,6 @@ const QuotationCreatePage = () => {
     });
   };
 
-  // 🌟 處理選擇成品或半成品，直接取用後端 estimated_cost
   const handleSelectTarget = (index, selectedId) => {
     const target = quoteTargetOptions.find((o) => o.id === selectedId);
     if (!target) return;
@@ -864,50 +860,67 @@ const QuotationCreatePage = () => {
     setFormData((prev) => {
       const newItems = [...prev.items];
       let updatedItem = { ...newItems[index], target_id: selectedId };
+      const prodMat = target.mat;
+
+      let totalMatCost = parseFloat(prodMat?.estimated_cost || 0);
 
       if (target.type === "PRODUCT") {
-        const po = target.po;
-        const prodMat = allMaterials.find(
-          (m) => String(m.id) === String(po.product),
+        // 🌟 透過關聯表尋找對應的 Package Order
+        const matchedRel = productRelations.find(
+          (r) => String(r.product) === String(prodMat.id),
         );
+        const po = matchedRel
+          ? packageOrders.find(
+              (p) => String(p.id) === String(matchedRel.package_order),
+            )
+          : null;
 
         let packCost = 0;
         let innerCap = null;
         let outerCap = null;
 
-        const innerPackId = String(po.inner_pack || "");
-        const outerPackId = String(po.outer_pack || "");
+        if (po) {
+          const innerPackId = String(po.inner_pack || "");
+          const outerPackId = String(po.outer_pack || "");
 
-        (po.packaging_info || []).forEach((p) => {
-          const m = allMaterials.find(
-            (mat) => String(mat.id) === String(p.material_id),
-          );
-          if (m) {
-            packCost +=
-              (parseFloat(m.estimated_cost) || 0) * (Number(p.qty) || 1);
-            if (innerPackId && String(p.material_id) === innerPackId) {
-              innerCap = m.pack_capacity;
-            } else if (
-              !innerPackId &&
-              outerPackId &&
-              String(p.material_id) === outerPackId
-            ) {
-              outerCap = m.pack_capacity;
+          (po.packaging_info || []).forEach((p) => {
+            const m = allMaterials.find(
+              (mat) => String(mat.id) === String(p.material_id),
+            );
+            if (m) {
+              packCost +=
+                (parseFloat(m.estimated_cost) || 0) * (Number(p.qty) || 1);
+              if (innerPackId && String(p.material_id) === innerPackId) {
+                innerCap = m.pack_capacity;
+              } else if (
+                !innerPackId &&
+                outerPackId &&
+                String(p.material_id) === outerPackId
+              ) {
+                outerCap = m.pack_capacity;
+              }
             }
-          }
-        });
+          });
 
-        // 🌟 直接取用後端運算好的 estimated_cost (PRODUCT的成本 = 內含的 SEMI 原料成本)
-        let totalMatCost = parseFloat(prodMat?.estimated_cost || 0);
+          updatedItem.spec = po.spec || "";
+          updatedItem.sales_unit = po.sales_unit || "箱";
+          updatedItem.sales_unit_quantity = String(po.sales_unit_quantity || 1);
+          updatedItem.sales_pack_unit = po.sales_pack_unit || "包";
+          updatedItem.sales_pack_quantity = String(po.sales_pack_quantity || 0);
+          updatedItem.outer_pack = po.outer_pack || "";
+          updatedItem.inner_pack = po.inner_pack || "";
+        } else {
+          // 若還沒有包裝單的預設值
+          updatedItem.spec = "";
+          updatedItem.sales_unit = "箱";
+          updatedItem.sales_unit_quantity = "1";
+          updatedItem.sales_pack_unit = "包";
+          updatedItem.sales_pack_quantity = "0";
+          updatedItem.outer_pack = "";
+          updatedItem.inner_pack = "";
+        }
 
-        updatedItem.product = po.product;
-        updatedItem.spec = po.spec || "";
-        updatedItem.sales_unit = po.sales_unit || "箱";
-        updatedItem.sales_unit_quantity = String(po.sales_unit_quantity || 1);
-        updatedItem.sales_pack_unit = po.sales_pack_unit || "包";
-        updatedItem.sales_pack_quantity = String(po.sales_pack_quantity || 0);
-        updatedItem.outer_pack = po.outer_pack || "";
-        updatedItem.inner_pack = po.inner_pack || "";
+        updatedItem.product = prodMat.id;
         updatedItem.outer_pack_capacity = outerCap;
         updatedItem.inner_pack_capacity = innerCap;
 
@@ -923,14 +936,9 @@ const QuotationCreatePage = () => {
           },
         };
       } else {
-        const semi = target.mat;
-
-        // 🌟 SEMI 同樣直接取用 estimated_cost
-        let totalMatCost = parseFloat(semi.estimated_cost) || 0;
-
-        updatedItem.product = semi.id;
+        updatedItem.product = prodMat.id;
         updatedItem.spec = "";
-        updatedItem.sales_unit = semi.unit || "KG";
+        updatedItem.sales_unit = prodMat.unit || "KG";
         updatedItem.sales_unit_quantity = "1";
         updatedItem.sales_pack_unit = "";
         updatedItem.sales_pack_quantity = "0";
@@ -1030,10 +1038,10 @@ const QuotationCreatePage = () => {
       isOpen: true,
       type: "confirm",
       status: "warning",
-      title: formData.status === "CONFIRMED" ? "正式成立報價單" : "儲存草稿",
+      title: formData.status === "CONFIRMED" ? "建立報價單" : "儲存草稿",
       message:
         formData.status === "CONFIRMED"
-          ? "確定要成立此報價單嗎？系統將會自動把所有相關的 IN_DEV 原物料推進至 IN_PROD 狀態！"
+          ? "確定要成立此報價單嗎？"
           : "確定要將此報價單儲存為草稿嗎？",
       onConfirm: async () => {
         setIsSubmitting(true);

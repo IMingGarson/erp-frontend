@@ -3,13 +3,10 @@ import { useNavigate } from "react-router-dom";
 import {
   ChevronDown,
   Search,
-  ArrowLeft,
+  AlertCircle,
   Database,
   FlaskConical,
-  Calculator,
-  RefreshCw,
   Trash2,
-  Droplets,
   Activity,
   CheckCircle2,
   Plus,
@@ -140,6 +137,8 @@ const TYPE_OPTIONS = [
   { value: "SEMI", label: "半成品" },
   { value: "PRODUCT", label: "成品" },
   { value: "PACK", label: "包材" },
+  { value: "STICKER", label: "標籤貼紙" },
+  { value: "OTHER", label: "其他" },
 ];
 
 const PHASE_OPTIONS = [
@@ -667,6 +666,10 @@ export default function MaterialPage() {
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
+
+  const [rejectModalOpen, setRejectModalOpen] = useState(false);
+  const [rejectNote, setRejectNote] = useState("");
+  const [pendingRejectSnapshotId, setPendingRejectSnapshotId] = useState(null);
 
   const initialFormData = {
     code: "",
@@ -1400,21 +1403,18 @@ export default function MaterialPage() {
     });
   };
 
-  const handleReviewSnapshot = async (snapshotId, actionType) => {
-    const actionText = actionType === "approve" ? "核准" : "退回";
-    const promptText = window.prompt(`請輸入${actionText}備註 (選填):`);
-
-    if (promptText === null) return;
+  const submitSnapshotReview = async () => {
+    if (!pendingRejectSnapshotId) return;
 
     try {
       const res = await fetchWithAuth(
-        `/api/nutrition_snapshots/${snapshotId}/review`,
+        `/api/nutrition_snapshots/${pendingRejectSnapshotId}/review`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            action: actionType,
-            review_note: promptText,
+            action: "reject",
+            review_note: rejectNote.trim(),
           }),
         },
       );
@@ -1424,21 +1424,74 @@ export default function MaterialPage() {
         throw new Error(errJson.detail || "審核失敗");
       }
 
-      showAlert("審核成功", `已成功${actionText}該快照版本。`, "success");
+      showAlert("退回成功", `已成功退回該快照版本。`, "success");
       fetchMaterials();
 
       setFormData((prev) => ({
         ...prev,
         nutrition_snapshots: prev.nutrition_snapshots.map((s) =>
-          s.id === snapshotId
-            ? {
-                ...s,
-                status: actionType === "approve" ? "APPROVED" : "REJECTED",
-                review_note: promptText,
-              }
+          s.id === pendingRejectSnapshotId
+            ? { ...s, status: "REJECTED", review_note: rejectNote.trim() }
             : s,
         ),
       }));
+
+      setRejectModalOpen(false);
+      setPendingRejectSnapshotId(null);
+      setRejectNote("");
+    } catch (err) {
+      showAlert("發生錯誤", err.message, "error");
+    }
+  };
+
+  // 🌟 修改：移除 prompt，改由 Modal 處理 reject，並確保核准時同步更新 Viewing UI
+  const handleReviewSnapshot = async (snapshotId, actionType) => {
+    if (actionType === "reject") {
+      setPendingRejectSnapshotId(snapshotId);
+      setRejectNote("");
+      setRejectModalOpen(true);
+      return;
+    }
+
+    // 核准流程 (不帶備註)
+    try {
+      const res = await fetchWithAuth(
+        `/api/nutrition_snapshots/${snapshotId}/review`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "approve",
+            review_note: "",
+          }),
+        },
+      );
+
+      if (!res.ok) {
+        const errJson = await res.json();
+        throw new Error(errJson.detail || "審核失敗");
+      }
+
+      showAlert("審核成功", `已成功核准該快照版本。`, "success");
+      fetchMaterials();
+
+      // 🌟 更新編輯模式下的資料狀態
+      setFormData((prev) => ({
+        ...prev,
+        nutrition_snapshots: prev.nutrition_snapshots.map((s) =>
+          s.id === snapshotId ? { ...s, status: "APPROVED" } : s,
+        ),
+      }));
+
+      // 🌟 新增：同時更新詳情模式下的資料狀態，讓 UI 即時反應
+      if (viewingMaterial) {
+        setViewingMaterial((prev) => ({
+          ...prev,
+          nutrition_snapshots: prev.nutrition_snapshots.map((s) =>
+            s.id === snapshotId ? { ...s, status: "APPROVED" } : s,
+          ),
+        }));
+      }
     } catch (err) {
       showAlert("發生錯誤", err.message, "error");
     }
@@ -1492,15 +1545,13 @@ export default function MaterialPage() {
           <li>檢視或維護原物料、半成品、成品、標籤以及包材資料。</li>
           <li>
             配方過敏原與成分將會
-            <strong className="text-blue-700">
-              自動從底層 BOM 遞迴展算並聯集帶出
-            </strong>
+            <strong className="text-blue-700">自動從「配方」展開算出</strong>
             ，免除人工遺漏。
           </li>
           <li>
             半成品與成品{" "}
             <strong className="text-blue-700">
-              預設自動依 BOM 配方展算營養素
+              預設自動依「配方」展開計算營養素
             </strong>
             。
           </li>
@@ -1722,7 +1773,7 @@ export default function MaterialPage() {
                 {/* 🌟 左側：基本資訊與品管 */}
                 <div
                   className={
-                    viewingMaterial.type !== "PACK"
+                    ["PRODUCT", "SEMI", "RAW"].includes(viewingMaterial.type)
                       ? "lg:col-span-8 space-y-6"
                       : "lg:col-span-12 space-y-6"
                   }
@@ -1991,7 +2042,7 @@ export default function MaterialPage() {
                 </div>
 
                 {/* 🌟 右側：Snapshot 切換與預覽面板 (移除列表) */}
-                {viewingMaterial.type !== "PACK" && (
+                {["PRODUCT", "SEMI", "RAW"].includes(viewingMaterial.type) && (
                   <div className="lg:col-span-4 space-y-6">
                     {viewingMaterial.nutrition_snapshots &&
                       viewingMaterial.nutrition_snapshots.length > 0 && (
@@ -2018,7 +2069,7 @@ export default function MaterialPage() {
                               )}
                               value={activeSnapshotId}
                               onChange={(val) => setActiveSnapshotId(val)}
-                              placeholder="選擇營養價值快照版本"
+                              placeholder="選擇營養價值"
                               className="w-full border-purple-200 text-purple-700 font-mono"
                               menuClassName="w-full font-mono text-sm"
                             />
@@ -2045,7 +2096,7 @@ export default function MaterialPage() {
                           {activeSnapshotData && (
                             <div className="w-full mt-6 bg-slate-50 p-4 rounded-xl border border-slate-200 shadow-sm text-left">
                               <span className="text-[10px] uppercase font-bold text-slate-400 mb-1 block">
-                                快照成分展開
+                                成分細節
                               </span>
                               <span className="text-xs font-bold text-slate-700 leading-relaxed">
                                 {activeSnapshotData.ingredients_text || "無"}
@@ -2054,12 +2105,11 @@ export default function MaterialPage() {
                           )}
                         </div>
                       )}
-
                     {(!viewingMaterial.nutrition_snapshots ||
                       viewingMaterial.nutrition_snapshots.length === 0) && (
                       <div className="bg-slate-100 p-6 md:p-8 rounded-3xl border border-slate-200/60 shadow-inner flex flex-col items-center relative">
                         <h4 className="text-[11px] font-black text-slate-500 uppercase tracking-widest mb-6 w-full text-center border-b border-slate-200 pb-2 pt-2">
-                          當前主檔法規營養標示
+                          營養標示預覽
                         </h4>
                         <NutritionLabel
                           nutritionData={viewingMaterial.display_nutrition}
@@ -2693,16 +2743,16 @@ export default function MaterialPage() {
                   />
                 </div>
 
-                {/* 🌟 只有 PRODUCT 與 SEMI 顯示歷史快照審核列表 */}
+                {/* 🌟 移到成分清單正下方，並渲染完整的營養標籤 */}
                 {["PRODUCT", "SEMI"].includes(formData.type) && (
                   <div className="bg-white p-6 rounded-3xl border border-slate-200/60 shadow-[0_2px_10px_-4px_rgba(0,0,0,0.05)]">
                     <h4 className="text-[11px] font-black text-purple-600 uppercase tracking-widest mb-4 border-b border-slate-100 pb-2 flex items-center gap-2">
-                      營養價值履歷 (Snapshots)
+                      營養價值履歷
                     </h4>
 
                     {formData.nutrition_snapshots &&
                     formData.nutrition_snapshots.length > 0 ? (
-                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         {formData.nutrition_snapshots.map((snap) => {
                           const isPending = snap.status === "PENDING";
                           const isApproved = snap.status === "APPROVED";
@@ -2711,51 +2761,56 @@ export default function MaterialPage() {
                           return (
                             <div
                               key={snap.id}
-                              className="p-4 rounded-xl border border-slate-200 bg-slate-50 flex flex-col gap-2 relative"
+                              className="p-4 rounded-xl border border-slate-200 bg-slate-50 flex flex-col gap-4 relative"
                             >
-                              <div className="flex justify-between items-start">
-                                <span className="font-mono font-bold text-sm text-slate-800">
-                                  {snap.version_num}
-                                </span>
-                                <span
-                                  className={`text-[10px] font-black px-2 py-0.5 rounded ${isPending ? "bg-amber-100 text-amber-700" : isApproved ? "bg-emerald-100 text-emerald-700" : isRejected ? "bg-rose-100 text-rose-700" : "bg-slate-100 text-slate-500"}`}
-                                >
-                                  {isPending
-                                    ? "待審核"
-                                    : isApproved
-                                      ? "已核准"
-                                      : isRejected
-                                        ? "已退回"
-                                        : "已封存"}
-                                </span>
-                              </div>
-                              <div className="text-[11px] text-slate-500">
-                                <div>
-                                  建立者: {snap.creator_name} (
-                                  {new Date(
-                                    snap.created_at,
-                                  ).toLocaleDateString()}
-                                  )
+                              <div>
+                                <div className="flex justify-between items-start mb-2">
+                                  <span className="font-mono font-bold text-sm text-slate-800">
+                                    {snap.version_num}
+                                  </span>
+                                  <span
+                                    className={`text-[10px] font-black px-2 py-0.5 rounded ${isPending ? "bg-amber-100 text-amber-700" : isApproved ? "bg-emerald-100 text-emerald-700" : isRejected ? "bg-rose-100 text-rose-700" : "bg-slate-100 text-slate-500"}`}
+                                  >
+                                    {isPending
+                                      ? "待審核"
+                                      : isApproved
+                                        ? "已核准"
+                                        : isRejected
+                                          ? "已退回"
+                                          : "已封存"}
+                                  </span>
                                 </div>
-                                {snap.reviewed_by && (
+                                <div className="text-[11px] text-slate-500 space-y-0.5">
                                   <div>
-                                    審核者: {snap.reviewer_name} (
+                                    建立者: {snap.creator_name} (
                                     {new Date(
-                                      snap.reviewed_at,
+                                      snap.created_at,
                                     ).toLocaleDateString()}
                                     )
                                   </div>
-                                )}
+                                  {snap.reviewed_by && (
+                                    <div>
+                                      審核者: {snap.reviewer_name} (
+                                      {new Date(
+                                        snap.reviewed_at,
+                                      ).toLocaleDateString()}
+                                      )
+                                    </div>
+                                  )}
+                                </div>
                               </div>
 
-                              {snap.review_note && (
-                                <div className="mt-1 text-[11px] text-slate-600 bg-white p-2 rounded border border-slate-200">
-                                  備註: {snap.review_note}
+                              {/* 🌟 渲染完整營養標籤 */}
+                              <div className="flex-1 flex justify-center bg-white py-4 rounded-xl border border-slate-200">
+                                <div className="scale-90 origin-top">
+                                  <NutritionLabel
+                                    nutritionData={snap.nutrition_fact}
+                                  />
                                 </div>
-                              )}
+                              </div>
 
                               {isPending && isRD && (
-                                <div className="mt-2 pt-3 border-t border-slate-200 flex gap-2">
+                                <div className="mt-auto pt-3 border-t border-slate-200 flex gap-2">
                                   <button
                                     type="button"
                                     onClick={() =>
@@ -2776,13 +2831,18 @@ export default function MaterialPage() {
                                   </button>
                                 </div>
                               )}
+                              {snap.review_note && (
+                                <div className="mt-2 text-[11px] text-slate-600 bg-white p-2 rounded border border-slate-200">
+                                  備註: {snap.review_note}
+                                </div>
+                              )}
                             </div>
                           );
                         })}
                       </div>
                     ) : (
                       <div className="text-sm font-bold text-slate-400 py-6 text-center border-2 border-dashed border-slate-100 rounded-2xl bg-slate-50/50">
-                        尚無任何營養價值快照紀錄
+                        尚無任何營養標籤紀錄
                       </div>
                     )}
                   </div>
@@ -2808,7 +2868,50 @@ export default function MaterialPage() {
           </div>
         </div>
       )}
-
+      {/* ========================================================= */}
+      {/* 🌟 審核退回輸入備註 Modal */}
+      {/* ========================================================= */}
+      {rejectModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[70] p-4">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="p-6 pb-4">
+              <h3 className="text-lg font-black text-rose-600 flex items-center gap-2 mb-2">
+                <AlertCircle size={20} /> 退回營養價值
+              </h3>
+              <p className="text-sm text-slate-500 font-medium mb-4">
+                請輸入退回備註 (選填)：
+              </p>
+              <textarea
+                autoFocus
+                value={rejectNote}
+                onChange={(e) => setRejectNote(e.target.value)}
+                rows={4}
+                className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-4 focus:ring-rose-500/10 focus:border-rose-500 outline-none text-sm font-medium text-slate-800 transition-all resize-none"
+              />
+            </div>
+            <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setRejectModalOpen(false);
+                  setPendingRejectSnapshotId(null);
+                  setRejectNote("");
+                }}
+                className="px-4 py-2 text-slate-600 hover:bg-slate-200 bg-slate-100 text-sm font-bold rounded-xl transition-colors"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={submitSnapshotReview}
+                className="px-5 py-2 text-white bg-rose-500 hover:bg-rose-600 text-sm font-bold rounded-xl shadow-md transition-colors"
+              >
+                確認退回
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* ========================================================= */}
       {/* 🌟 新增/編輯「成分」 Sub-Modal */}
       {/* ========================================================= */}

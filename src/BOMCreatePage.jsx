@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
+import { createPortal } from "react-dom";
 import {
   Search,
   ChevronDown,
@@ -356,78 +357,82 @@ const FilterableDropdown = ({
         />
       </div>
 
-      {isOpen && !disabled && (
-        <>
-          <div
-            className="fixed inset-0 z-[9998]"
-            onClick={() => setIsOpen(false)}
-          ></div>
-          <div
-            ref={dropdownMenuRef}
-            style={dropdownStyle}
-            className="fixed z-[9999] bg-white/95 backdrop-blur-xl border border-slate-200 rounded-2xl shadow-xl flex flex-col max-h-64 overflow-hidden animate-in fade-in zoom-in-95 duration-150"
-          >
-            <div className="p-2 border-b border-slate-100 bg-slate-50/80 shrink-0">
-              <div className="relative">
-                <Search
-                  size={14}
-                  className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
-                />
-                <input
-                  autoFocus
-                  className="w-full border border-slate-200 bg-white rounded-xl pl-8 pr-3 py-2 text-[13px] font-medium text-slate-700 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10 transition-all shadow-sm"
-                  placeholder="輸入關鍵字搜尋..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                />
-              </div>
-            </div>
-            <div className="overflow-y-auto flex-1 p-1.5 custom-scrollbar">
-              {filteredOptions.length > 0 ? (
-                filteredOptions.map((opt) => {
-                  const isSelected = String(value) === String(opt.id);
-                  const isItemDisabled =
-                    opt.id &&
-                    disabledIds.includes(String(opt.id)) &&
-                    !isSelected;
-
-                  return (
-                    <div
-                      key={opt.id || `empty-${Math.random()}`}
-                      onClick={() => {
-                        if (isItemDisabled) return;
-                        onChange(opt.id);
-                        setIsOpen(false);
-                        setSearchTerm("");
-                      }}
-                      className={`px-3 py-2.5 text-[13px] rounded-xl transition-colors font-medium flex justify-between items-center ${
-                        isSelected
-                          ? "bg-blue-50 text-blue-700 font-bold"
-                          : isItemDisabled
-                            ? "text-slate-400 bg-slate-50/50 cursor-not-allowed"
-                            : "text-slate-700 hover:bg-slate-50 cursor-pointer"
-                      }`}
-                    >
-                      <span className="w-full">
-                        {renderItem ? renderItem(opt) : opt.name}
-                      </span>
-                      {isItemDisabled && (
-                        <span className="text-[10px] text-slate-400 font-bold border border-slate-200 bg-white px-1.5 py-0.5 rounded">
-                          已選
-                        </span>
-                      )}
-                    </div>
-                  );
-                })
-              ) : (
-                <div className="px-3 py-6 text-center text-slate-400 text-[13px] font-medium">
-                  查無資料
+      {/* 🌟 透過 createPortal 將彈出選單移出當前的 DOM 結構堆疊，確保絕對置頂 */}
+      {isOpen && !disabled && document.body
+        ? createPortal(
+            <>
+              <div
+                className="fixed inset-0 z-[9998]"
+                onClick={() => setIsOpen(false)}
+              ></div>
+              <div
+                ref={dropdownMenuRef}
+                style={dropdownStyle}
+                className="fixed z-[9999] bg-white/95 backdrop-blur-xl border border-slate-200 rounded-2xl shadow-xl flex flex-col max-h-64 overflow-hidden animate-in fade-in zoom-in-95 duration-150"
+              >
+                <div className="p-2 border-b border-slate-100 bg-slate-50/80 shrink-0">
+                  <div className="relative">
+                    <Search
+                      size={14}
+                      className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                    />
+                    <input
+                      autoFocus
+                      className="w-full border border-slate-200 bg-white rounded-xl pl-8 pr-3 py-2 text-[13px] font-medium text-slate-700 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10 transition-all shadow-sm"
+                      placeholder="輸入關鍵字搜尋..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                    />
+                  </div>
                 </div>
-              )}
-            </div>
-          </div>
-        </>
-      )}
+                <div className="overflow-y-auto flex-1 p-1.5 custom-scrollbar">
+                  {filteredOptions.length > 0 ? (
+                    filteredOptions.map((opt) => {
+                      const isSelected = String(value) === String(opt.id);
+                      const isItemDisabled =
+                        opt.id &&
+                        disabledIds.includes(String(opt.id)) &&
+                        !isSelected;
+
+                      return (
+                        <div
+                          key={opt.id || `empty-${Math.random()}`}
+                          onClick={() => {
+                            if (isItemDisabled) return;
+                            onChange(opt.id);
+                            setIsOpen(false);
+                            setSearchTerm("");
+                          }}
+                          className={`px-3 py-2.5 text-[13px] rounded-xl transition-colors font-medium flex justify-between items-center ${
+                            isSelected
+                              ? "bg-blue-50 text-blue-700 font-bold"
+                              : isItemDisabled
+                                ? "text-slate-400 bg-slate-50/50 cursor-not-allowed"
+                                : "text-slate-700 hover:bg-slate-50 cursor-pointer"
+                          }`}
+                        >
+                          <span className="w-full">
+                            {renderItem ? renderItem(opt) : opt.name}
+                          </span>
+                          {isItemDisabled && (
+                            <span className="text-[10px] text-slate-400 font-bold border border-slate-200 bg-white px-1.5 py-0.5 rounded">
+                              已選
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div className="px-3 py-6 text-center text-slate-400 text-[13px] font-medium">
+                      查無資料
+                    </div>
+                  )}
+                </div>
+              </div>
+            </>,
+            document.body,
+          )
+        : null}
     </>
   );
 };
@@ -563,6 +568,9 @@ export default function BOMCreatePage() {
   const [originalBomIds, setOriginalBomIds] = useState([]);
   const [materials, setMaterials] = useState([]);
 
+  // 🌟 用於記錄初次載入時的營養與成分狀態，以判定是否需要另存快照
+  const [initialSnapshotData, setInitialSnapshotData] = useState(null);
+
   // 🌟 包材選擇用資料
   const [packMaterials, setPackMaterials] = useState([]);
   const [packageOrdersList, setPackageOrdersList] = useState([]);
@@ -590,7 +598,6 @@ export default function BOMCreatePage() {
   // 🌟 包裝單資料結構
   const [packFormData, setPackFormData] = useState({
     id: null,
-    packageSuffix: "",
     order_number: "",
     outer_pack: "",
     inner_pack: "",
@@ -698,13 +705,16 @@ export default function BOMCreatePage() {
   const fetchInitialData = async () => {
     setLoading(true);
     try {
-      const [matRes, packMatRes, poListRes] = await Promise.all([
+      const [matRes, packMatRes, poListRes, relRes] = await Promise.all([
         fetchWithAuth("/api/materials?lite=true"),
-        fetchWithAuth("/api/materials?type__in=PACK,STICKER,OTHER"),
+        fetchWithAuth("/api/materials?lite=true&type__in=PACK,STICKER,OTHER"),
         fetchWithAuth("/api/package_orders"),
+        fetchWithAuth("/api/product_package_relations"),
       ]);
 
-      if (!matRes.ok) throw new Error("無法取得物料資料");
+      if (!matRes.ok || !packMatRes.ok || !poListRes.ok || !relRes.ok)
+        throw new Error("載入資料失敗");
+
       const matJson = await matRes.json();
       const allMaterials = matJson.data || matJson || [];
 
@@ -714,26 +724,21 @@ export default function BOMCreatePage() {
         ),
       );
 
-      if (packMatRes.ok) {
-        const packMatJson = await packMatRes.json();
-        const allPackMaterials = packMatJson.data || packMatJson || [];
-        setPackMaterials([
-          { id: "", name: "-- 無需對應包材 --", code: "", pack_capacity: null },
-          ...allPackMaterials,
-        ]);
-      } else {
-        setPackMaterials([
-          { id: "", name: "-- 無需對應包材 --", code: "", pack_capacity: null },
-          ...allMaterials.filter((m) =>
-            ["PACK", "STICKER", "OTHER"].includes(m.type),
-          ),
-        ]);
-      }
+      const packMatJson = await packMatRes.json();
+      const allPackMaterials = packMatJson.data || packMatJson || [];
+      setPackMaterials([
+        { id: "", name: "-- 無需對應包材 --", code: "", pack_capacity: null },
+        ...allPackMaterials,
+      ]);
 
-      if (poListRes.ok) {
-        const poListJson = await poListRes.json();
-        setPackageOrdersList(poListJson.data || poListJson || []);
-      }
+      let allPOs = [];
+      const poListJson = await poListRes.json();
+      allPOs = poListJson.data || poListJson.results || poListJson || [];
+      setPackageOrdersList(allPOs);
+
+      let allRels = [];
+      const relJson = await relRes.json();
+      allRels = relJson.data || relJson.results || relJson || [];
 
       if (isEditMode) {
         const specificMatRes = await fetchWithAuth(
@@ -754,18 +759,27 @@ export default function BOMCreatePage() {
         const bomJson = await bomRes.json();
         const bomList = bomJson.data || bomJson || [];
 
+        const latestSnapshot = targetMaterial.nutrition_snapshots?.[0];
+        if (latestSnapshot) {
+          setInitialSnapshotData({
+            nutrition: JSON.stringify(latestSnapshot.nutrition_fact || {}),
+            allergens: latestSnapshot.allergen_info || "",
+            ingredients: latestSnapshot.ingredients_text || "",
+          });
+        } else {
+          setInitialSnapshotData(null);
+        }
+
         if (targetMaterial.type === "PRODUCT") {
           try {
-            const poRes = await fetchWithAuth(
-              `/api/package_orders?search=${targetMaterial.code}`,
+            const matchedRel = allRels.find(
+              (r) => String(r.product) === String(targetMaterial.id),
             );
-            if (poRes.ok) {
-              const poJson = await poRes.json();
-              const poList = poJson.data || poJson || [];
-              const matchedPO = poList.find(
-                (p) => String(p.product_code) === String(targetMaterial.code),
-              );
 
+            if (matchedRel) {
+              const matchedPO = allPOs.find(
+                (po) => String(po.id) === String(matchedRel.package_order),
+              );
               if (matchedPO) {
                 const additional_packs = [];
                 (matchedPO.packaging_info || []).forEach((item, idx) => {
@@ -778,10 +792,14 @@ export default function BOMCreatePage() {
                   }
                 });
 
+                const relCount = allRels.filter(
+                  (r) => String(r.package_order) === String(matchedPO.id),
+                ).length;
+                const isTemplate = relCount > 1;
+
                 setPackFormData({
                   id: matchedPO.id,
-                  packageSuffix: "",
-                  order_number: matchedPO.order_number,
+                  order_number: matchedPO.order_number || "",
                   outer_pack: matchedPO.outer_pack
                     ? String(matchedPO.outer_pack)
                     : "",
@@ -798,12 +816,12 @@ export default function BOMCreatePage() {
                     ? String(matchedPO.sales_pack_quantity)
                     : "0",
                   spec: matchedPO.spec || "",
-                  selectedTemplateId: "",
+                  selectedTemplateId: isTemplate ? matchedPO.id : "",
                 });
               }
             }
           } catch (poErr) {
-            console.error("Fetch Package Order failed", poErr);
+            console.error("Fetch Package Order Relation failed", poErr);
           }
         }
 
@@ -948,6 +966,7 @@ export default function BOMCreatePage() {
       } else {
         setOriginalMaterialId(null);
         setOriginalBomIds([]);
+        setInitialSnapshotData(null);
         setSortConfig({ key: "quantity", direction: "desc" });
         setFormData({
           code: "",
@@ -1015,7 +1034,6 @@ export default function BOMCreatePage() {
     setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
-  // 🌟 包裝單連動函式，完全對齊 PackageOrderPage 預覽字串產生規則
   const updatePackField = (field, value) => {
     setPackFormData((prev) => {
       let updated = { ...prev, [field]: value };
@@ -2306,30 +2324,43 @@ export default function BOMCreatePage() {
 
       await Promise.all(bomPromises);
 
-      const snapshotPayload = {
-        material: currentParentId,
-        nutrition_fact: calculatedNutrition,
-        allergen_info: aggregatedAllergens,
-        ingredients_text: ingredientsText,
-        status: "PENDING",
-        is_active: true,
-      };
+      // 🌟 精準比對營養標籤是否有實質變動
+      const currentNutritionStr = JSON.stringify(calculatedNutrition);
+      const currentAllergensStr = aggregatedAllergens;
+      const currentIngredientsStr = ingredientsText;
 
-      const snapRes = await fetchWithAuth("/api/nutrition_snapshots", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(snapshotPayload),
-      });
+      const needNewSnapshot =
+        !isEditMode ||
+        !initialSnapshotData ||
+        initialSnapshotData.allergens !== currentAllergensStr ||
+        initialSnapshotData.ingredients !== currentIngredientsStr;
 
-      if (!snapRes.ok) {
-        throw new Error(
-          "配方已儲存，但建立營養標籤快照失敗，請聯絡系統管理員。",
-        );
+      if (needNewSnapshot) {
+        const snapshotPayload = {
+          material: currentParentId,
+          nutrition_fact: calculatedNutrition,
+          allergen_info: aggregatedAllergens,
+          ingredients_text: ingredientsText,
+          status: "PENDING",
+          is_active: true,
+        };
+
+        const snapRes = await fetchWithAuth("/api/nutrition_snapshots", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(snapshotPayload),
+        });
+
+        if (!snapRes.ok) {
+          throw new Error(
+            "配方已儲存，但建立營養標籤快照失敗，請聯絡系統管理員。",
+          );
+        }
       }
 
       showAlert(
         "儲存成功",
-        `配方與營養標籤快照已成功${isEditMode ? "更新" : "建立"}！`,
+        `配方明細已成功${isEditMode ? "更新" : "建立"}！}`,
         "success",
         () => window.location.reload(),
       );
@@ -2381,8 +2412,8 @@ export default function BOMCreatePage() {
     showConfirm(
       isEditMode ? "更新確認" : "建立確認",
       isEditMode
-        ? `確定更新配方「${formData.name}」並建立一份新的標籤快照？`
-        : `確定建立配方「${formData.name}」與標籤快照？`,
+        ? `確定更新配方「${formData.name}」？`
+        : `確定建立配方「${formData.name}」？`,
       executeSubmit,
     );
   };
@@ -2420,7 +2451,7 @@ export default function BOMCreatePage() {
             <div className="md:col-span-1">
               <label className="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">
                 {formData.type === "PRODUCT" && !isEditMode
-                  ? "配方代碼 + 包裝單代碼"
+                  ? "配方代碼"
                   : "配方代碼"}{" "}
                 <span className="text-red-500">*</span>
               </label>
@@ -2432,23 +2463,14 @@ export default function BOMCreatePage() {
                       name="code"
                       value={formData.code}
                       onChange={handleMasterChange}
-                      placeholder="P920"
+                      placeholder="P"
                       className="w-full h-[48px] px-4 py-2 border border-slate-200 rounded-xl focus:border-[#007AFF] focus:ring-2 focus:ring-[#007AFF]/20 outline-none font-mono font-bold transition-all shadow-sm"
                     />
-                    <input
-                      type="text"
-                      value={packFormData.packageSuffix}
-                      onChange={(e) =>
-                        updatePackField("packageSuffix", e.target.value)
-                      }
-                      placeholder="-1"
-                      className="w-24 shrink-0 h-[48px] px-3 py-2 border border-blue-200 bg-blue-50 text-blue-700 rounded-xl focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20 outline-none font-mono font-bold transition-all shadow-sm placeholder:text-blue-300"
-                    />
                   </div>
-                  {formData.code && packFormData.packageSuffix && (
+                  {formData.code && packFormData.order_number && (
                     <div className="text-[11px] text-[#007AFF] mt-1.5 font-bold tracking-wider">
-                      成品代碼預覽: {formData.code}
-                      {packFormData.packageSuffix}
+                      完整代碼預覽： {formData.code}
+                      {packFormData.order_number}
                     </div>
                   )}
                 </div>
@@ -2473,7 +2495,7 @@ export default function BOMCreatePage() {
                 name="name"
                 value={formData.name}
                 onChange={handleMasterChange}
-                placeholder="泰式打拋豬肉B"
+                placeholder="輸入名稱"
                 className="w-full h-[48px] px-4 py-2 border border-slate-200 rounded-xl focus:border-[#007AFF] focus:ring-2 focus:ring-[#007AFF]/20 outline-none font-bold text-[15px] transition-all shadow-sm"
               />
             </div>
@@ -2553,7 +2575,7 @@ export default function BOMCreatePage() {
                     {/* 獨立的包裝單號輸入框 */}
                     <div className="bg-blue-50/50 p-4 rounded-2xl border border-blue-100 flex flex-col sm:flex-row sm:items-center gap-4">
                       <label className="text-[13px] font-black text-blue-700 whitespace-nowrap">
-                        設定包裝單號 <span className="text-red-500">*</span>
+                        包裝單號 <span className="text-red-500">*</span>
                       </label>
                       <input
                         type="text"
@@ -2562,7 +2584,7 @@ export default function BOMCreatePage() {
                           updatePackField("order_number", e.target.value)
                         }
                         placeholder="例如: PKG-202610-001"
-                        disabled={isEditMode || isTemplateSelected} // 🌟 修正：使用 isEditMode
+                        disabled={isEditMode || isTemplateSelected}
                         className="flex-1 h-[42px] px-4 bg-white border border-slate-200 rounded-xl font-mono font-bold text-[14px] text-slate-800 focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10 outline-none shadow-sm transition-all disabled:bg-slate-50 disabled:text-slate-400 disabled:cursor-not-allowed"
                       />
                     </div>
@@ -2573,7 +2595,7 @@ export default function BOMCreatePage() {
                         <div className="absolute inset-0 bg-slate-50/40 z-[5] pointer-events-none"></div>
                       )}
 
-                      <div className="flex items-center justify-between relative z-10">
+                      <div className="flex items-center justify-between relative z-99">
                         <h4 className="text-[12px] font-bold text-blue-500 uppercase tracking-widest">
                           包材結構與換算設定
                         </h4>
@@ -2783,7 +2805,6 @@ export default function BOMCreatePage() {
                             onChange={(e) =>
                               updatePackField("spec", e.target.value)
                             }
-                            placeholder="選填，如不滿意自動產生之預覽可手動更改"
                             className="w-full h-11 px-3.5 bg-white border border-slate-200 rounded-xl font-medium text-[14px] text-slate-800 focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10 outline-none shadow-sm transition-all disabled:bg-slate-50 disabled:text-slate-500"
                           />
                         </div>

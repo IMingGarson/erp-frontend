@@ -164,6 +164,18 @@ export default function AccountingPage() {
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [editingMisc, setEditingMisc] = useState(null);
 
+  // 🌟 將展開列的 State 移到頂層
+  const [expandedRows, setExpandedRows] = useState(new Set());
+  const toggleRow = (id) => {
+    const newSet = new Set(expandedRows);
+    if (newSet.has(id)) {
+      newSet.delete(id);
+    } else {
+      newSet.add(id);
+    }
+    setExpandedRows(newSet);
+  };
+
   const initialMiscForm = {
     transaction_date: new Date().toISOString().split("T")[0],
     transaction_type: "EXPENSE",
@@ -594,7 +606,7 @@ export default function AccountingPage() {
       }
     }
 
-    // 3. 封裝 API Payload，將各自備註整合送到後端全域，方便列表查看
+    // 3. 封裝 API Payload
     const globalNotes = [];
     if (transferBlock.note) globalNotes.push(`[轉帳] ${transferBlock.note}`);
     if (cashBlock.note) globalNotes.push(`[現金] ${cashBlock.note}`);
@@ -741,7 +753,7 @@ export default function AccountingPage() {
       async () => {
         closeDialog();
         try {
-          const res = await fetchWithAuth(`/api/payment_record/${id}/`, {
+          const res = await fetchWithAuth(`/api/payment_record/${id}`, {
             method: "DELETE",
           });
           if (!res.ok) throw new Error("作廢失敗");
@@ -1006,7 +1018,7 @@ export default function AccountingPage() {
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-slate-50/50 border-b border-slate-200 text-[11px] uppercase tracking-widest text-slate-400 font-black">
-                <th className="p-5">日期</th>
+                <th className="p-5 text-center w-[120px]">日期</th>
                 <th className="p-5">類型</th>
                 <th className="p-5">類別 (摘要)</th>
                 <th className="p-5 text-right">金額</th>
@@ -1040,7 +1052,7 @@ export default function AccountingPage() {
                     key={row.id}
                     className="hover:bg-slate-50/50 transition-colors group"
                   >
-                    <td className="p-4 font-mono font-bold text-slate-600">
+                    <td className="p-4 align-middle text-center font-mono font-bold text-slate-600">
                       {row.transaction_date}
                     </td>
                     <td className="p-4">
@@ -1147,11 +1159,11 @@ export default function AccountingPage() {
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-slate-50/50 border-b border-slate-200 text-[11px] uppercase tracking-widest text-slate-400 font-black">
-                <th className="p-5">日期</th>
+                <th className="p-5 text-center w-[120px]">日期</th>
                 <th className="p-5">對象</th>
                 <th className="p-5">方式</th>
                 <th className="p-5 text-right">總金額</th>
-                <th className="p-5 w-[25%]">沖銷備註 / 支票細節</th>
+                <th className="p-5 w-[25%]">沖銷備註 / 摘要</th>
                 <th className="p-5 text-center">操作</th>
               </tr>
             </thead>
@@ -1182,103 +1194,261 @@ export default function AccountingPage() {
                   const checks =
                     row.checks && row.checks.length > 0 ? row.checks : [];
                   const chkLegacy = row.check_info || {};
-                  const isClearedVisual =
+
+                  // 只要有任何一張未兌現的支票，就視為未兌現
+                  const hasUnclearedChecks =
                     checks.length > 0
-                      ? checks.every((c) => c.is_cleared)
-                      : chkLegacy.is_cleared;
+                      ? checks.some((c) => !c.is_cleared)
+                      : isCheck && !chkLegacy.is_cleared;
+
+                  // 檢查是否可展開 (有 method_details 或 checks)
+                  const isExpandable =
+                    row.method_details?.length > 0 || checks.length > 0;
+                  const isExpanded = expandedRows.has(row.id);
 
                   return (
-                    <tr
-                      key={row.id}
-                      className={`hover:bg-slate-50/50 transition-colors group ${isCheck && !isClearedVisual && paymentSubTab === "ALL" ? "bg-amber-50/30" : ""}`}
-                    >
-                      <td className="p-4 font-mono font-bold text-slate-600">
-                        {row.payment_date}
-                      </td>
-                      <td className="p-4 font-black text-slate-800">
-                        <span
-                          className={`text-[9px] px-1.5 py-0.5 rounded border mr-2 font-black ${row.partner_type === "CUSTOMER" ? "bg-blue-50 text-blue-600 border-blue-200" : "bg-purple-50 text-purple-600 border-purple-200"}`}
-                        >
-                          {row.partner_type === "CUSTOMER" ? "收" : "付"}
-                        </span>
-                        {row.partner_type === "CUSTOMER"
-                          ? row.customer_name
-                          : row.provider_name}
-                      </td>
-                      <td className="p-4">
-                        <span className="text-[11px] font-bold text-slate-600 px-2.5 py-1 bg-slate-100 rounded-lg border border-slate-200">
-                          {row.payment_method === "CASH"
-                            ? "現金"
-                            : row.payment_method === "TRANSFER"
-                              ? "匯款"
-                              : row.payment_method === "MIXED"
-                                ? "混合支付"
-                                : "票據"}
-                        </span>
-                      </td>
-                      <td
-                        className={`p-4 text-right font-mono font-black text-base ${row.partner_type === "CUSTOMER" ? "text-blue-600" : "text-slate-700"}`}
+                    <React.Fragment key={row.id}>
+                      <tr
+                        className={`transition-colors group ${isCheck && hasUnclearedChecks && paymentSubTab === "ALL" ? "bg-amber-50/30" : ""} ${isExpandable ? "hover:bg-slate-50/80 cursor-pointer" : "hover:bg-slate-50/50"}`}
+                        onClick={() => isExpandable && toggleRow(row.id)}
                       >
-                        ${formatMoney(row.amount)}
-                      </td>
-                      <td className="p-4">
-                        <div className="text-xs font-bold text-slate-500 mb-1">
-                          {row.reference_notes || "-"}
-                        </div>
-                        {checks.length > 0 ? (
-                          checks.map((chk, idx) => (
-                            <div
-                              key={idx}
-                              className="bg-amber-50/80 border border-amber-200 rounded-lg p-2 text-[10px] font-bold text-amber-800 font-mono mt-2"
+                        <td className="p-4 align-middle relative text-center">
+                          {isExpandable && (
+                            <div className="absolute left-4 top-1/2 -translate-y-1/2">
+                              <ChevronDown
+                                size={16}
+                                className={`text-slate-400 transition-transform ${isExpanded ? "rotate-180" : ""}`}
+                              />
+                            </div>
+                          )}
+                          <span className="font-mono font-bold text-slate-600">
+                            {row.payment_date}
+                          </span>
+                        </td>
+                        <td className="p-4 font-black text-slate-800">
+                          <span
+                            className={`text-[9px] px-1.5 py-0.5 rounded border mr-2 font-black ${row.partner_type === "CUSTOMER" ? "bg-blue-50 text-blue-600 border-blue-200" : "bg-purple-50 text-purple-600 border-purple-200"}`}
+                          >
+                            {row.partner_type === "CUSTOMER" ? "收" : "付"}
+                          </span>
+                          {row.partner_type === "CUSTOMER"
+                            ? row.customer_name
+                            : row.provider_name}
+                        </td>
+                        <td className="p-4">
+                          <span className="text-[11px] font-bold text-slate-600 px-2.5 py-1 bg-slate-100 rounded-lg border border-slate-200">
+                            {row.payment_method === "CASH"
+                              ? "現金"
+                              : row.payment_method === "TRANSFER"
+                                ? "匯款"
+                                : row.payment_method === "MIXED"
+                                  ? "混合支付"
+                                  : "票據"}
+                          </span>
+                        </td>
+                        <td
+                          className={`p-4 text-right font-mono font-black text-base ${row.partner_type === "CUSTOMER" ? "text-blue-600" : "text-slate-700"}`}
+                        >
+                          ${formatMoney(row.amount)}
+                        </td>
+                        <td className="p-4">
+                          <div
+                            className="text-xs font-bold text-slate-500 mb-1 line-clamp-2"
+                            title={row.reference_notes}
+                          >
+                            {row.reference_notes || "-"}
+                          </div>
+                        </td>
+                        <td className="p-4 text-center">
+                          <div className="flex w-full justify-center gap-2">
+                            {isCheck && hasUnclearedChecks && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation(); // 阻止展開收合
+                                  handleClearCheck(row.id);
+                                }}
+                                className="px-3 py-1.5 bg-emerald-50 text-emerald-600 border border-emerald-200 hover:bg-emerald-500 hover:text-white rounded-lg transition-all text-[11px] font-bold shadow-sm whitespace-nowrap"
+                              >
+                                確認兌現
+                              </button>
+                            )}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeletePayment(row.id);
+                              }}
+                              className="px-3 py-1.5 bg-red-50 text-red-600 border border-red-200 hover:bg-red-500 hover:text-white rounded-lg transition-all text-[11px] font-bold shadow-sm whitespace-nowrap opacity-60 group-hover:opacity-100"
                             >
-                              銀行: {chk.issuer_bank || "未指定"} <br />
-                              抬頭: {chk.title || "-"} <br />
-                              兌現日: {chk.due_date} <br />
-                              狀態:{" "}
-                              {chk.is_cleared ? (
-                                <span className="text-emerald-600">
-                                  ✅ 已入帳
-                                </span>
-                              ) : (
-                                <span className="text-red-500">⏳ 待兌現</span>
+                              作廢
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+
+                      {/* 展開的詳細資訊區塊 */}
+                      {isExpanded && (
+                        <tr className="bg-slate-50/80 border-b border-slate-200 shadow-inner">
+                          <td colSpan={6} className="p-4 px-6 md:px-12">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                              {row.method_details?.length > 0 && (
+                                <div className="space-y-3">
+                                  <h4 className="text-xs font-black text-slate-500 uppercase tracking-widest border-b border-slate-200 pb-1">
+                                    支付方式細節
+                                  </h4>
+                                  {row.method_details.map((detail, idx) => (
+                                    <div
+                                      key={idx}
+                                      className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow relative overflow-hidden"
+                                    >
+                                      <div
+                                        className={`absolute left-0 top-0 bottom-0 w-1 ${detail.payment_method === "TRANSFER" ? "bg-blue-500" : "bg-emerald-500"}`}
+                                      ></div>
+                                      <div className="flex justify-between items-center mb-3">
+                                        <div className="flex items-center gap-2">
+                                          <span
+                                            className={`p-1.5 rounded-lg ${detail.payment_method === "TRANSFER" ? "bg-blue-50 text-blue-600" : "bg-emerald-50 text-emerald-600"}`}
+                                          >
+                                            {detail.payment_method ===
+                                            "TRANSFER" ? (
+                                              <ArrowRightLeft size={14} />
+                                            ) : (
+                                              <Banknote size={14} />
+                                            )}
+                                          </span>
+                                          <span className="font-black text-slate-700 text-sm">
+                                            {detail.payment_method ===
+                                            "TRANSFER"
+                                              ? "銀行轉帳"
+                                              : "現金"}
+                                          </span>
+                                        </div>
+                                        <span className="font-mono text-base font-black text-slate-800">
+                                          ${formatMoney(detail.amount)}
+                                        </span>
+                                      </div>
+
+                                      {detail.company_bank_account && (
+                                        <div className="text-slate-500 text-xs font-medium bg-slate-50 p-2 rounded-lg mb-2 flex items-center gap-2">
+                                          <Landmark
+                                            size={12}
+                                            className="text-slate-400"
+                                          />
+                                          <span>
+                                            轉入帳戶:{" "}
+                                            <span className="font-mono font-bold text-slate-600">
+                                              {detail.company_bank_account}
+                                            </span>
+                                          </span>
+                                        </div>
+                                      )}
+
+                                      {detail.note && (
+                                        <div className="text-slate-500 text-xs mt-2 pt-2 border-t border-slate-100 flex items-start gap-2">
+                                          <FileText
+                                            size={12}
+                                            className="text-slate-400 mt-0.5 shrink-0"
+                                          />
+                                          <span className="leading-relaxed">
+                                            {detail.note}
+                                          </span>
+                                        </div>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+
+                              {checks.length > 0 && (
+                                <div className="space-y-3">
+                                  <h4 className="text-xs font-black text-slate-500 uppercase tracking-widest border-b border-slate-200 pb-1">
+                                    支票細節
+                                  </h4>
+                                  {checks.map((chk, idx) => (
+                                    <div
+                                      key={idx}
+                                      className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow relative overflow-hidden"
+                                    >
+                                      <div className="absolute left-0 top-0 bottom-0 w-1 bg-amber-500"></div>
+                                      <div className="flex justify-between items-center mb-3">
+                                        <div className="flex items-center gap-2">
+                                          <span className="p-1.5 rounded-lg bg-amber-50 text-amber-600">
+                                            <CreditCard size={14} />
+                                          </span>
+                                          <span className="font-black text-slate-700 text-sm">
+                                            票號:{" "}
+                                            <span className="font-mono text-amber-700">
+                                              {chk.check_number || "未指定"}
+                                            </span>
+                                          </span>
+                                        </div>
+                                        <span className="font-mono text-base font-black text-slate-800">
+                                          ${formatMoney(chk.amount)}
+                                        </span>
+                                      </div>
+
+                                      <div className="grid grid-cols-2 gap-2 mb-2">
+                                        <div className="text-slate-500 text-xs font-medium bg-slate-50 p-2 rounded-lg">
+                                          <div className="text-slate-400 mb-0.5">
+                                            銀行
+                                          </div>
+                                          <div className="font-bold text-slate-600 truncate">
+                                            {chk.issuer_bank || "未指定"}
+                                          </div>
+                                        </div>
+                                        <div className="text-slate-500 text-xs font-medium bg-slate-50 p-2 rounded-lg">
+                                          <div className="text-slate-400 mb-0.5">
+                                            到期日
+                                          </div>
+                                          <div className="font-bold font-mono text-slate-600">
+                                            {chk.due_date}
+                                          </div>
+                                        </div>
+                                        {chk.title && (
+                                          <div className="col-span-2 text-slate-500 text-xs font-medium bg-slate-50 p-2 rounded-lg flex items-center gap-2">
+                                            <span className="text-slate-400 shrink-0">
+                                              抬頭:
+                                            </span>
+                                            <span className="font-bold text-slate-600 truncate">
+                                              {chk.title}
+                                            </span>
+                                          </div>
+                                        )}
+                                      </div>
+
+                                      <div className="flex justify-between items-center mt-2 pt-2 border-t border-slate-100">
+                                        <div className="flex items-center gap-1.5 text-xs font-bold">
+                                          {chk.is_cleared ? (
+                                            <span className="flex items-center gap-1 px-2 py-1 rounded-md bg-emerald-50 text-emerald-600">
+                                              <CheckCircle2 size={12} /> 已入帳
+                                            </span>
+                                          ) : (
+                                            <span className="flex items-center gap-1 px-2 py-1 rounded-md bg-rose-50 text-rose-600">
+                                              <AlertCircle size={12} /> 待兌現
+                                            </span>
+                                          )}
+                                        </div>
+                                      </div>
+
+                                      {chk.note && (
+                                        <div className="text-slate-500 text-xs mt-2 pt-2 border-t border-slate-100 flex items-start gap-2">
+                                          <FileText
+                                            size={12}
+                                            className="text-slate-400 mt-0.5 shrink-0"
+                                          />
+                                          <span className="leading-relaxed">
+                                            {chk.note}
+                                          </span>
+                                        </div>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
                               )}
                             </div>
-                          ))
-                        ) : isCheck && chkLegacy.target_bank ? (
-                          <div className="bg-amber-50/80 border border-amber-200 rounded-lg p-2 text-[10px] font-bold text-amber-800 font-mono mt-2">
-                            銀行: {chkLegacy.target_bank} <br />
-                            抬頭: {chkLegacy.title} <br />
-                            兌現日: {chkLegacy.cash_date} <br />
-                            狀態:{" "}
-                            {chkLegacy.is_cleared ? (
-                              <span className="text-emerald-600">
-                                ✅ 已入帳
-                              </span>
-                            ) : (
-                              <span className="text-red-500">⏳ 待兌現</span>
-                            )}
-                          </div>
-                        ) : null}
-                      </td>
-                      <td className="p-4 text-center">
-                        <div className="flex w-full justify-center gap-2">
-                          {isCheck && !isClearedVisual && (
-                            <button
-                              onClick={() => handleClearCheck(row.id)}
-                              className="px-3 py-1.5 bg-emerald-50 text-emerald-600 border border-emerald-200 hover:bg-emerald-500 hover:text-white rounded-lg transition-all text-[11px] font-bold shadow-sm whitespace-nowrap"
-                            >
-                              確認兌現
-                            </button>
-                          )}
-                          <button
-                            onClick={() => handleDeletePayment(row.id)}
-                            className="px-3 py-1.5 bg-red-50 text-red-600 border border-red-200 hover:bg-red-500 hover:text-white rounded-lg transition-all text-[11px] font-bold shadow-sm whitespace-nowrap opacity-60 group-hover:opacity-100"
-                          >
-                            作廢
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
                   );
                 })
               )}
@@ -1300,7 +1470,7 @@ export default function AccountingPage() {
 
     if (unpaidNotesList.length === 0) {
       return (
-        <div className="mt-4 p-6 bg-slate-50 border border-slate-200 rounded-xl text-center text-slate-400 font-bold text-sm">
+        <div className="mt-4 p-6 bg-slate-50 border border-slate-200 rounded-xl text-center text-slate-400 font-bold text-sm mx-6">
           查無任何未結清的單據
         </div>
       );
@@ -1977,6 +2147,7 @@ export default function AccountingPage() {
                         </label>
                         <input
                           type="text"
+                          required
                           value={checkBlock.check_number}
                           onChange={(e) =>
                             setCheckBlock({
@@ -1993,6 +2164,7 @@ export default function AccountingPage() {
                         </label>
                         <input
                           type="date"
+                          required
                           value={checkBlock.due_date}
                           onChange={(e) =>
                             setCheckBlock({

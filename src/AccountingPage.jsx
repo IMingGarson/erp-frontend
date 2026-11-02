@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import {
   Search,
   Database,
@@ -18,6 +18,8 @@ import {
   ChevronDown,
   CheckSquare,
   Square,
+  Banknote,
+  ArrowRightLeft,
 } from "lucide-react";
 import CustomDialog from "./components/customDialog";
 import { fetchWithAuth } from "./utils/fetchWithAuth";
@@ -105,7 +107,6 @@ const CustomSelect = ({
           className={`text-slate-400 transition-transform flex-shrink-0 ml-2 ${isOpen ? "rotate-180 text-blue-500" : ""}`}
         />
       </div>
-      {/* 這裡的下拉選單維持 absolute，會自然蓋在外部 */}
       {isOpen && !disabled && (
         <div
           className={`absolute z-[100] top-[calc(100%+8px)] left-0 w-full bg-white border border-slate-200 rounded-xl shadow-xl max-h-60 overflow-y-auto animate-in fade-in slide-in-from-top-2 duration-200 custom-scrollbar ${menuClassName}`}
@@ -156,9 +157,8 @@ export default function AccountingPage() {
   const [customers, setCustomers] = useState([]);
   const [providers, setProviders] = useState([]);
 
-  // 用於金流 Modal 內選取客戶時的近期銷貨單
-  const [customerDeliveryNotes, setCustomerDeliveryNotes] = useState([]);
-  const [selectedNotes, setSelectedNotes] = useState([]);
+  // 統一儲存未銷單據的 Pool
+  const [unpaidNotesList, setUnpaidNotesList] = useState([]);
 
   const [isMiscModalOpen, setIsMiscModalOpen] = useState(false);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
@@ -167,6 +167,7 @@ export default function AccountingPage() {
   const initialMiscForm = {
     transaction_date: new Date().toISOString().split("T")[0],
     transaction_type: "EXPENSE",
+    sub_category: "OTHER",
     amount: "",
     category: "",
     note: "",
@@ -174,19 +175,36 @@ export default function AccountingPage() {
   };
   const [miscForm, setMiscForm] = useState(initialMiscForm);
 
-  const initialPaymentForm = {
+  // 🌟 三種金流區塊的 Initial State
+  const initialBlockState = {
+    amount: "",
+    account_in: "",
+    account_out: "",
+    title_in: "",
+    title_out: "",
+    tax_id_in: "",
+    tax_id_out: "",
+    check_number: "",
+    due_date: "",
+    issuer_bank: "",
+    note: "",
+    selected_notes: [],
+  };
+
+  const initialPaymentGlobal = {
     payment_date: new Date().toISOString().split("T")[0],
     partner_type: "CUSTOMER",
     customer_id: "",
     provider_id: "",
-    amount: "",
-    payment_method: "TRANSFER",
-    reference_notes: "",
-    check_target_bank: "",
-    check_title: "基香食品",
-    check_cash_date: "",
   };
-  const [paymentForm, setPaymentForm] = useState(initialPaymentForm);
+
+  const [paymentGlobal, setPaymentGlobal] = useState(initialPaymentGlobal);
+  const [transferBlock, setTransferBlock] = useState(initialBlockState);
+  const [cashBlock, setCashBlock] = useState(initialBlockState);
+  const [checkBlock, setCheckBlock] = useState(initialBlockState);
+
+  // 用於金流 Modal 內的 Tab 切換
+  const [activePaymentMode, setActivePaymentMode] = useState("TRANSFER");
 
   const [dialog, setDialog] = useState({
     isOpen: false,
@@ -226,14 +244,8 @@ export default function AccountingPage() {
         fetchWithAuth("/api/vendors"),
         fetchWithAuth("/api/material_providers"),
       ]);
-      if (cusRes.ok) {
-        const data = await cusRes.json();
-        setCustomers(extractArrayData(data));
-      }
-      if (provRes.ok) {
-        const data = await provRes.json();
-        setProviders(extractArrayData(data));
-      }
+      if (cusRes.ok) setCustomers(extractArrayData(await cusRes.json()));
+      if (provRes.ok) setProviders(extractArrayData(await provRes.json()));
     } catch (e) {
       console.error(e);
     }
@@ -247,26 +259,17 @@ export default function AccountingPage() {
         const res = await fetchWithAuth(
           `/api/accounting_report/ar_report${dateParams}`,
         );
-        if (res.ok) {
-          const data = await res.json();
-          setArData(extractArrayData(data));
-        }
+        if (res.ok) setArData(extractArrayData(await res.json()));
       } else if (reportSubTab === "AP") {
         const res = await fetchWithAuth(
           `/api/accounting_report/ap_report${dateParams}`,
         );
-        if (res.ok) {
-          const data = await res.json();
-          setApData(extractArrayData(data));
-        }
+        if (res.ok) setApData(extractArrayData(await res.json()));
       } else if (reportSubTab === "DEBT") {
         const res = await fetchWithAuth(
           `/api/accounting_report/accumulated_debt`,
         );
-        if (res.ok) {
-          const data = await res.json();
-          setDebtData(extractArrayData(data));
-        }
+        if (res.ok) setDebtData(extractArrayData(await res.json()));
       }
     } catch (e) {
       showAlert("錯誤", "報表載入失敗", "error");
@@ -279,11 +282,11 @@ export default function AccountingPage() {
     setIsLoading(true);
     try {
       const res = await fetchWithAuth(
-        `/api/misc_trans_record/?start_date=${startDate}&end_date=${endDate}`,
+        `/api/misc_trans_record?start_date=${startDate}&end_date=${endDate}`,
       );
       if (res.ok) {
         const data = await res.json();
-        setMiscRecords(extractArrayData(data));
+        setMiscRecords(data.data);
       }
     } catch (e) {
       showAlert("錯誤", "雜支紀錄載入失敗", "error");
@@ -296,17 +299,11 @@ export default function AccountingPage() {
     setIsLoading(true);
     try {
       if (paymentSubTab === "ALL") {
-        const res = await fetchWithAuth(`/api/payment_record/`);
-        if (res.ok) {
-          const data = await res.json();
-          setPayments(extractArrayData(data));
-        }
+        const res = await fetchWithAuth(`/api/payment_record`);
+        if (res.ok) setPayments(extractArrayData(await res.json()));
       } else {
-        const res = await fetchWithAuth(`/api/payment_record/pending_checks/`);
-        if (res.ok) {
-          const data = await res.json();
-          setPendingChecks(extractArrayData(data));
-        }
+        const res = await fetchWithAuth(`/api/payment_record/pending_checks`);
+        if (res.ok) setPendingChecks(extractArrayData(await res.json()));
       }
     } catch (e) {
       showAlert("錯誤", "金流紀錄載入失敗", "error");
@@ -315,32 +312,85 @@ export default function AccountingPage() {
     }
   };
 
+  // 🌟 動態獲取該對象的未付清單據
   useEffect(() => {
-    const fetchDeliveryNotesForCustomer = async () => {
-      if (paymentForm.partner_type === "CUSTOMER" && paymentForm.customer_id) {
+    const fetchUnpaidNotes = async () => {
+      setTransferBlock((prev) => ({ ...prev, selected_notes: [] }));
+      setCashBlock((prev) => ({ ...prev, selected_notes: [] }));
+      setCheckBlock((prev) => ({ ...prev, selected_notes: [] }));
+      setUnpaidNotesList([]);
+
+      if (
+        paymentGlobal.partner_type === "CUSTOMER" &&
+        paymentGlobal.customer_id
+      ) {
         const targetCustomer = customers.find(
-          (c) => String(c.id) === String(paymentForm.customer_id),
+          (c) => String(c.id) === String(paymentGlobal.customer_id),
         );
         if (targetCustomer) {
           try {
             const res = await fetchWithAuth(
-              `/api/delivery_notes/?customer_code=${targetCustomer.code}`,
+              `/api/delivery_notes?customer_code=${targetCustomer.code}&unpaid_only=true`,
             );
             if (res.ok) {
               const data = await res.json();
-              setCustomerDeliveryNotes(extractArrayData(data));
+              const normalized = extractArrayData(data).map((d) => ({
+                id: d.id,
+                display_number: d.note_number,
+                display_date: d.note_date,
+                unpaid_amount: parseFloat(
+                  d.unpaid_amount || d.grand_total || 0,
+                ),
+                grand_total: parseFloat(d.grand_total || 0),
+                type: "DELIVERY_NOTE",
+              }));
+              setUnpaidNotesList(normalized);
             }
           } catch (e) {
             console.error("無法取得客戶銷貨單", e);
           }
         }
-      } else {
-        setCustomerDeliveryNotes([]);
-        setSelectedNotes([]);
+      } else if (
+        paymentGlobal.partner_type === "VENDOR" &&
+        paymentGlobal.provider_id
+      ) {
+        try {
+          const res = await fetchWithAuth(
+            `/api/purchase_requisitions?unpaid_only=true`,
+          );
+          if (res.ok) {
+            const data = await res.json();
+            const filtered = extractArrayData(data).filter(
+              (pr) =>
+                pr.items &&
+                pr.items.some(
+                  (i) =>
+                    String(i.material_provider_id) ===
+                    String(paymentGlobal.provider_id),
+                ),
+            );
+            const normalized = filtered.map((d) => ({
+              id: d.id,
+              display_number: `PR#${d.id}`,
+              display_date: d.request_date,
+              unpaid_amount: parseFloat(d.unpaid_amount || d.grand_total || 0),
+              grand_total: parseFloat(d.grand_total || 0),
+              type: "PURCHASE_REQUISITION",
+            }));
+            setUnpaidNotesList(normalized);
+          }
+        } catch (e) {
+          console.error("無法取得廠商進貨單", e);
+        }
       }
     };
-    fetchDeliveryNotesForCustomer();
-  }, [paymentForm.customer_id, paymentForm.partner_type, customers]);
+    fetchUnpaidNotes();
+  }, [
+    paymentGlobal.partner_type,
+    paymentGlobal.customer_id,
+    paymentGlobal.provider_id,
+    customers,
+  ]);
 
   useEffect(() => {
     fetchBaseData();
@@ -359,8 +409,8 @@ export default function AccountingPage() {
     e.preventDefault();
     const payload = { ...miscForm };
     const url = editingMisc
-      ? `/api/misc_trans_record/${editingMisc.id}/`
-      : "/api/misc_trans_record/";
+      ? `/api/misc_trans_record/${editingMisc.id}`
+      : "/api/misc_trans_record";
     const method = editingMisc ? "PUT" : "POST";
 
     try {
@@ -382,7 +432,7 @@ export default function AccountingPage() {
     showConfirm("刪除確認", "確定要刪除這筆雜支紀錄嗎？", async () => {
       closeDialog();
       try {
-        const res = await fetchWithAuth(`/api/misc_trans_record/${id}/`, {
+        const res = await fetchWithAuth(`/api/misc_trans_record/${id}`, {
           method: "DELETE",
         });
         if (!res.ok) throw new Error("刪除失敗");
@@ -395,68 +445,272 @@ export default function AccountingPage() {
   };
 
   // ==========================================
-  // 事件處理：金流 (Payments)
+  // 🌟 核心：跨區塊水位分配計算 (Waterfall Allocation)
   // ==========================================
-  const handleToggleNote = (note) => {
-    let newSelected;
-    if (selectedNotes.find((n) => n.id === note.id)) {
-      newSelected = selectedNotes.filter((n) => n.id !== note.id);
-    } else {
-      newSelected = [...selectedNotes, note];
-    }
-    setSelectedNotes(newSelected);
-
-    const totalAutoAmount = newSelected.reduce(
-      (sum, n) => sum + (parseFloat(n.grand_total) || 0),
-      0,
-    );
-    const noteNumbers = newSelected.map((n) => n.note_number).join(", ");
-
-    setPaymentForm((prev) => ({
-      ...prev,
-      amount: totalAutoAmount > 0 ? totalAutoAmount : prev.amount,
-      reference_notes: noteNumbers ? `沖銷單號: ${noteNumbers}` : "",
+  const { globalAllocations, finalNotes } = useMemo(() => {
+    const notesState = unpaidNotesList.map((n) => ({
+      ...n,
+      current_unpaid: n.unpaid_amount,
     }));
+
+    const allocations = {
+      TRANSFER: {},
+      CASH: {},
+      CHECK: {},
+    };
+
+    const blocks = [
+      {
+        name: "TRANSFER",
+        amount: parseFloat(transferBlock.amount) || 0,
+        selected: transferBlock.selected_notes,
+      },
+      {
+        name: "CASH",
+        amount: parseFloat(cashBlock.amount) || 0,
+        selected: cashBlock.selected_notes,
+      },
+      {
+        name: "CHECK",
+        amount: parseFloat(checkBlock.amount) || 0,
+        selected: checkBlock.selected_notes,
+      },
+    ];
+
+    blocks.forEach((block) => {
+      let remainingAmount = block.amount;
+      block.selected.forEach((noteId) => {
+        const note = notesState.find((n) => n.id === noteId);
+        if (note && remainingAmount > 0 && note.current_unpaid > 0) {
+          const alloc = Math.min(remainingAmount, note.current_unpaid);
+          allocations[block.name][noteId] = alloc;
+          remainingAmount -= alloc;
+          note.current_unpaid -= alloc;
+        } else {
+          allocations[block.name][noteId] = 0;
+        }
+      });
+    });
+
+    return { globalAllocations: allocations, finalNotes: notesState };
+  }, [unpaidNotesList, transferBlock, cashBlock, checkBlock]);
+
+  // 切換單據勾選狀態 (解除 disabled 限制，完全依照金額控制)
+  const handleToggleNoteForBlock = (blockName, noteId) => {
+    if (blockName === "TRANSFER") {
+      setTransferBlock((prev) => ({
+        ...prev,
+        selected_notes: prev.selected_notes.includes(noteId)
+          ? prev.selected_notes.filter((id) => id !== noteId)
+          : [...prev.selected_notes, noteId],
+      }));
+    } else if (blockName === "CASH") {
+      setCashBlock((prev) => ({
+        ...prev,
+        selected_notes: prev.selected_notes.includes(noteId)
+          ? prev.selected_notes.filter((id) => id !== noteId)
+          : [...prev.selected_notes, noteId],
+      }));
+    } else if (blockName === "CHECK") {
+      setCheckBlock((prev) => ({
+        ...prev,
+        selected_notes: prev.selected_notes.includes(noteId)
+          ? prev.selected_notes.filter((id) => id !== noteId)
+          : [...prev.selected_notes, noteId],
+      }));
+    }
+  };
+
+  const buildExtNote = (block, type) => {
+    const parts = [];
+    if (type === "TRANSFER") {
+      if (block.account_out) parts.push(`轉出帳號:${block.account_out}`);
+      if (block.tax_id_out) parts.push(`轉出統編:${block.tax_id_out}`);
+      if (block.title_out) parts.push(`轉出抬頭:${block.title_out}`);
+      if (block.tax_id_in) parts.push(`轉入統編:${block.tax_id_in}`);
+      if (block.title_in) parts.push(`轉入抬頭:${block.title_in}`);
+    } else if (type === "CASH") {
+      if (block.tax_id_in) parts.push(`轉入統編:${block.tax_id_in}`);
+      if (block.title_in) parts.push(`轉入抬頭:${block.title_in}`);
+    }
+    return parts.join(" | ");
   };
 
   const handleSavePayment = async (e) => {
     e.preventDefault();
-    let check_info = {};
-    if (paymentForm.payment_method === "CHECK") {
-      check_info = {
-        target_bank: paymentForm.check_target_bank,
-        title: paymentForm.check_title,
-        cash_date: paymentForm.check_cash_date,
-        is_cleared: false,
-      };
+
+    const tAmt = parseFloat(transferBlock.amount) || 0;
+    const cAmt = parseFloat(cashBlock.amount) || 0;
+    const chkAmt = parseFloat(checkBlock.amount) || 0;
+    const totalAmount = tAmt + cAmt + chkAmt;
+
+    // 1. 驗證總金額
+    if (totalAmount <= 0) {
+      showAlert("提示", "請至少在其中一種付款方式中輸入金額", "warning");
+      return;
     }
 
+    // 2. 進行嚴格的必填驗證
+    if (tAmt > 0) {
+      if (
+        !transferBlock.account_out ||
+        !transferBlock.account_in ||
+        !transferBlock.tax_id_out ||
+        !transferBlock.tax_id_in ||
+        !transferBlock.title_out ||
+        !transferBlock.title_in
+      ) {
+        showAlert(
+          "提示",
+          "請完整填寫「銀行轉帳」區塊的所有必填欄位",
+          "warning",
+        );
+        return;
+      }
+    }
+    if (cAmt > 0) {
+      if (
+        !cashBlock.account_in ||
+        !cashBlock.tax_id_in ||
+        !cashBlock.title_in
+      ) {
+        showAlert("提示", "請完整填寫「現金」區塊的所有必填欄位", "warning");
+        return;
+      }
+    }
+    if (chkAmt > 0) {
+      if (
+        !checkBlock.check_number ||
+        !checkBlock.due_date ||
+        !checkBlock.issuer_bank ||
+        !checkBlock.account_in
+      ) {
+        showAlert(
+          "提示",
+          "請完整填寫「支票/票據」區塊的所有必填欄位",
+          "warning",
+        );
+        return;
+      }
+    }
+
+    // 3. 封裝 API Payload，將各自備註整合送到後端全域，方便列表查看
+    const globalNotes = [];
+    if (transferBlock.note) globalNotes.push(`[轉帳] ${transferBlock.note}`);
+    if (cashBlock.note) globalNotes.push(`[現金] ${cashBlock.note}`);
+    if (checkBlock.note) globalNotes.push(`[支票] ${checkBlock.note}`);
+
     const payload = {
-      payment_date: paymentForm.payment_date,
-      partner_type: paymentForm.partner_type,
+      payment_date: paymentGlobal.payment_date,
+      partner_type: paymentGlobal.partner_type,
       customer:
-        paymentForm.partner_type === "CUSTOMER"
-          ? paymentForm.customer_id
+        paymentGlobal.partner_type === "CUSTOMER"
+          ? paymentGlobal.customer_id
           : null,
       provider:
-        paymentForm.partner_type === "VENDOR" ? paymentForm.provider_id : null,
-      amount: paymentForm.amount,
-      payment_method: paymentForm.payment_method,
-      reference_notes: paymentForm.reference_notes,
-      check_info: Object.keys(check_info).length > 0 ? check_info : null,
+        paymentGlobal.partner_type === "VENDOR"
+          ? paymentGlobal.provider_id
+          : null,
+      amount: totalAmount,
+      payment_method: "MIXED",
+      reference_notes: globalNotes.join(" | "),
+      method_details: [],
+      checks: [],
+      write_offs: [],
     };
 
+    if (tAmt > 0) {
+      payload.method_details.push({
+        payment_method: "TRANSFER",
+        amount: tAmt,
+        company_bank_account: transferBlock.account_in,
+        note: buildExtNote(transferBlock, "TRANSFER"),
+      });
+
+      transferBlock.selected_notes.forEach((noteId) => {
+        const allocated = globalAllocations["TRANSFER"][noteId];
+        if (allocated > 0) {
+          const writeOff = {
+            payment_method: "TRANSFER",
+            allocated_amount: allocated,
+          };
+          const noteData = unpaidNotesList.find((n) => n.id === noteId);
+          if (noteData.type === "DELIVERY_NOTE")
+            writeOff.delivery_note = noteId;
+          if (noteData.type === "PURCHASE_REQUISITION")
+            writeOff.purchase_requisition = noteId;
+          payload.write_offs.push(writeOff);
+        }
+      });
+    }
+
+    if (cAmt > 0) {
+      payload.method_details.push({
+        payment_method: "CASH",
+        amount: cAmt,
+        company_bank_account: cashBlock.account_in,
+        note: buildExtNote(cashBlock, "CASH"),
+      });
+
+      cashBlock.selected_notes.forEach((noteId) => {
+        const allocated = globalAllocations["CASH"][noteId];
+        if (allocated > 0) {
+          const writeOff = {
+            payment_method: "CASH",
+            allocated_amount: allocated,
+          };
+          const noteData = unpaidNotesList.find((n) => n.id === noteId);
+          if (noteData.type === "DELIVERY_NOTE")
+            writeOff.delivery_note = noteId;
+          if (noteData.type === "PURCHASE_REQUISITION")
+            writeOff.purchase_requisition = noteId;
+          payload.write_offs.push(writeOff);
+        }
+      });
+    }
+
+    if (chkAmt > 0) {
+      payload.checks.push({
+        check_number: checkBlock.check_number,
+        due_date: checkBlock.due_date,
+        amount: chkAmt,
+        issuer_bank: checkBlock.issuer_bank,
+        deposit_bank_account: checkBlock.account_in,
+        title: checkBlock.title_in || checkBlock.title_out,
+        note: checkBlock.note,
+      });
+
+      checkBlock.selected_notes.forEach((noteId) => {
+        const allocated = globalAllocations["CHECK"][noteId];
+        if (allocated > 0) {
+          const writeOff = {
+            payment_method: "CHECK",
+            allocated_amount: allocated,
+          };
+          const noteData = unpaidNotesList.find((n) => n.id === noteId);
+          if (noteData.type === "DELIVERY_NOTE")
+            writeOff.delivery_note = noteId;
+          if (noteData.type === "PURCHASE_REQUISITION")
+            writeOff.purchase_requisition = noteId;
+          payload.write_offs.push(writeOff);
+        }
+      });
+    }
+
     try {
-      const res = await fetchWithAuth("/api/payment_record/", {
+      const res = await fetchWithAuth("/api/payment_record", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      if (!res.ok) throw new Error("儲存金流失敗，請檢查客戶/廠商是否已選取");
-      showAlert("成功", "金流紀錄已建立", "success");
+      if (!res.ok)
+        throw new Error("儲存金流失敗，請檢查輸入與單據分配是否正確");
+      showAlert("成功", "金流紀錄已建立，並自動完成沖銷！", "success");
       setIsPaymentModalOpen(false);
-      setPaymentForm(initialPaymentForm);
-      setSelectedNotes([]);
+      setPaymentGlobal(initialPaymentGlobal);
+      setTransferBlock(initialBlockState);
+      setCashBlock(initialBlockState);
+      setCheckBlock(initialBlockState);
       fetchPayments();
     } catch (err) {
       showAlert("錯誤", err.message, "error");
@@ -468,7 +722,7 @@ export default function AccountingPage() {
       closeDialog();
       try {
         const res = await fetchWithAuth(
-          `/api/payment_record/${id}/clear_check/`,
+          `/api/payment_record/${id}/clear_check`,
           { method: "POST" },
         );
         if (!res.ok) throw new Error("兌現處理失敗");
@@ -483,7 +737,7 @@ export default function AccountingPage() {
   const handleDeletePayment = (id) => {
     showConfirm(
       "作廢確認",
-      "確定要作廢這筆金流紀錄嗎？(這將會影響累積欠款計算)",
+      "確定要作廢這筆金流紀錄嗎？(單據沖銷金額將自動回滾並恢復欠款)",
       async () => {
         closeDialog();
         try {
@@ -491,7 +745,7 @@ export default function AccountingPage() {
             method: "DELETE",
           });
           if (!res.ok) throw new Error("作廢失敗");
-          showAlert("成功", "已成功作廢", "success");
+          showAlert("成功", "已成功作廢，金額已回滾", "success");
           fetchPayments();
         } catch (err) {
           showAlert("錯誤", err.message, "error");
@@ -795,11 +1049,18 @@ export default function AccountingPage() {
                       >
                         {row.transaction_type === "INCOME"
                           ? "收入(入零用金)"
-                          : "支出(各項費用)"}
+                          : "應付費用"}
                       </span>
                     </td>
                     <td className="p-4 font-black text-slate-800">
-                      {row.category}
+                      <div className="flex items-center gap-2">
+                        {row.category}
+                        {row.sub_category && row.sub_category !== "OTHER" && (
+                          <span className="px-2 py-0.5 bg-slate-100 text-slate-500 rounded text-[10px] font-bold">
+                            {row.sub_category}
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td
                       className={`p-4 text-right font-mono font-black text-base ${row.transaction_type === "INCOME" ? "text-emerald-600" : "text-slate-700"}`}
@@ -869,8 +1130,11 @@ export default function AccountingPage() {
           </div>
           <button
             onClick={() => {
-              setPaymentForm(initialPaymentForm);
-              setSelectedNotes([]);
+              setPaymentGlobal(initialPaymentGlobal);
+              setTransferBlock(initialBlockState);
+              setCashBlock(initialBlockState);
+              setCheckBlock(initialBlockState);
+              setActivePaymentMode("TRANSFER");
               setIsPaymentModalOpen(true);
             }}
             className="bg-[#007AFF] hover:bg-[#0056b3] text-white px-6 py-2.5 rounded-xl shadow-[0_2px_8px_rgba(0,122,255,0.3)] transition-all text-sm font-bold flex items-center gap-2 hover:-translate-y-0.5"
@@ -886,7 +1150,7 @@ export default function AccountingPage() {
                 <th className="p-5">日期</th>
                 <th className="p-5">對象</th>
                 <th className="p-5">方式</th>
-                <th className="p-5 text-right">金額</th>
+                <th className="p-5 text-right">總金額</th>
                 <th className="p-5 w-[25%]">沖銷備註 / 支票細節</th>
                 <th className="p-5 text-center">操作</th>
               </tr>
@@ -912,13 +1176,21 @@ export default function AccountingPage() {
                 </tr>
               ) : (
                 tableData.map((row) => {
-                  const isCheck = row.payment_method === "CHECK";
-                  const chk = row.check_info || {};
+                  const isCheck =
+                    row.payment_method === "CHECK" ||
+                    row.payment_method === "MIXED";
+                  const checks =
+                    row.checks && row.checks.length > 0 ? row.checks : [];
+                  const chkLegacy = row.check_info || {};
+                  const isClearedVisual =
+                    checks.length > 0
+                      ? checks.every((c) => c.is_cleared)
+                      : chkLegacy.is_cleared;
 
                   return (
                     <tr
                       key={row.id}
-                      className={`hover:bg-slate-50/50 transition-colors group ${isCheck && !chk.is_cleared && paymentSubTab === "ALL" ? "bg-amber-50/30" : ""}`}
+                      className={`hover:bg-slate-50/50 transition-colors group ${isCheck && !isClearedVisual && paymentSubTab === "ALL" ? "bg-amber-50/30" : ""}`}
                     >
                       <td className="p-4 font-mono font-bold text-slate-600">
                         {row.payment_date}
@@ -939,7 +1211,9 @@ export default function AccountingPage() {
                             ? "現金"
                             : row.payment_method === "TRANSFER"
                               ? "匯款"
-                              : "票據"}
+                              : row.payment_method === "MIXED"
+                                ? "混合支付"
+                                : "票據"}
                         </span>
                       </td>
                       <td
@@ -951,13 +1225,32 @@ export default function AccountingPage() {
                         <div className="text-xs font-bold text-slate-500 mb-1">
                           {row.reference_notes || "-"}
                         </div>
-                        {isCheck && (
+                        {checks.length > 0 ? (
+                          checks.map((chk, idx) => (
+                            <div
+                              key={idx}
+                              className="bg-amber-50/80 border border-amber-200 rounded-lg p-2 text-[10px] font-bold text-amber-800 font-mono mt-2"
+                            >
+                              銀行: {chk.issuer_bank || "未指定"} <br />
+                              抬頭: {chk.title || "-"} <br />
+                              兌現日: {chk.due_date} <br />
+                              狀態:{" "}
+                              {chk.is_cleared ? (
+                                <span className="text-emerald-600">
+                                  ✅ 已入帳
+                                </span>
+                              ) : (
+                                <span className="text-red-500">⏳ 待兌現</span>
+                              )}
+                            </div>
+                          ))
+                        ) : isCheck && chkLegacy.target_bank ? (
                           <div className="bg-amber-50/80 border border-amber-200 rounded-lg p-2 text-[10px] font-bold text-amber-800 font-mono mt-2">
-                            銀行: {chk.target_bank} <br />
-                            抬頭: {chk.title} <br />
-                            兌現日: {chk.cash_date} <br />
+                            銀行: {chkLegacy.target_bank} <br />
+                            抬頭: {chkLegacy.title} <br />
+                            兌現日: {chkLegacy.cash_date} <br />
                             狀態:{" "}
-                            {chk.is_cleared ? (
+                            {chkLegacy.is_cleared ? (
                               <span className="text-emerald-600">
                                 ✅ 已入帳
                               </span>
@@ -965,11 +1258,11 @@ export default function AccountingPage() {
                               <span className="text-red-500">⏳ 待兌現</span>
                             )}
                           </div>
-                        )}
+                        ) : null}
                       </td>
                       <td className="p-4 text-center">
                         <div className="flex w-full justify-center gap-2">
-                          {isCheck && !chk.is_cleared && (
+                          {isCheck && !isClearedVisual && (
                             <button
                               onClick={() => handleClearCheck(row.id)}
                               className="px-3 py-1.5 bg-emerald-50 text-emerald-600 border border-emerald-200 hover:bg-emerald-500 hover:text-white rounded-lg transition-all text-[11px] font-bold shadow-sm whitespace-nowrap"
@@ -991,6 +1284,120 @@ export default function AccountingPage() {
               )}
             </tbody>
           </table>
+        </div>
+      </div>
+    );
+  };
+
+  // ==========================================
+  // 🌟 共用的 Notes Pool 渲染組件
+  // ==========================================
+  const renderNotesPool = (blockName, blockState) => {
+    if (paymentGlobal.partner_type === "CUSTOMER" && !paymentGlobal.customer_id)
+      return null;
+    if (paymentGlobal.partner_type === "VENDOR" && !paymentGlobal.provider_id)
+      return null;
+
+    if (unpaidNotesList.length === 0) {
+      return (
+        <div className="mt-4 p-6 bg-slate-50 border border-slate-200 rounded-xl text-center text-slate-400 font-bold text-sm">
+          查無任何未結清的單據
+        </div>
+      );
+    }
+
+    const noteTypeLabel =
+      paymentGlobal.partner_type === "CUSTOMER" ? "銷貨單" : "進貨單";
+    const totalCheckedUnpaid = blockState.selected_notes.reduce((sum, id) => {
+      const note = unpaidNotesList.find((n) => n.id === id);
+      return sum + (note ? note.unpaid_amount : 0);
+    }, 0);
+
+    return (
+      <div className="mt-4 bg-slate-50/80 p-4 rounded-xl border border-slate-200 mx-6">
+        <div className="flex justify-between items-center mb-3 border-b border-slate-200/60 pb-2">
+          <h4 className="text-[11px] font-black text-slate-600 uppercase tracking-widest flex items-center gap-1.5">
+            <CheckCircle2 size={14} className="text-blue-500" /> 選擇要沖銷的
+            {noteTypeLabel} (金額由上往下依序扣抵)
+          </h4>
+          {blockState.selected_notes.length > 0 && (
+            <span className="text-[10px] font-bold text-slate-500 bg-slate-200/50 px-2 py-1 rounded">
+              已選欠款總計: ${formatMoney(totalCheckedUnpaid)}
+            </span>
+          )}
+        </div>
+
+        <div className="max-h-48 overflow-y-auto custom-scrollbar space-y-2 pr-1">
+          {unpaidNotesList.map((note) => {
+            const isSelectedHere = blockState.selected_notes.includes(note.id);
+            const allocInfo = globalAllocations[blockName]?.[note.id] || 0;
+            const finalRemainAmount =
+              finalNotes.find((n) => n.id === note.id)?.current_unpaid || 0;
+
+            // 判斷是否已被其他區塊扣光且當前區塊未選 -> disabled
+            const isExhaustedElsewhere =
+              !isSelectedHere && finalRemainAmount <= 0;
+
+            return (
+              <div
+                key={note.id}
+                onClick={() =>
+                  !isExhaustedElsewhere &&
+                  handleToggleNoteForBlock(blockName, note.id)
+                }
+                className={`flex items-center justify-between p-3 rounded-xl border transition-colors ${
+                  isExhaustedElsewhere
+                    ? "bg-slate-50 border-slate-100 opacity-50 cursor-not-allowed"
+                    : isSelectedHere
+                      ? "bg-blue-50 border-blue-300 cursor-pointer"
+                      : "bg-white border-slate-200 hover:bg-blue-50/50 cursor-pointer shadow-sm"
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  {isSelectedHere ? (
+                    <CheckSquare
+                      size={18}
+                      className="text-blue-600 flex-shrink-0"
+                    />
+                  ) : (
+                    <Square
+                      size={18}
+                      className={`flex-shrink-0 ${isExhaustedElsewhere ? "text-slate-200" : "text-slate-300"}`}
+                    />
+                  )}
+                  <div>
+                    <div
+                      className={`text-sm font-bold ${isSelectedHere ? "text-blue-800" : "text-slate-700"}`}
+                    >
+                      {note.display_number}
+                    </div>
+                    <div className="text-[10px] text-slate-500">
+                      {isExhaustedElsewhere
+                        ? "已由其他付款方式扣抵完畢"
+                        : note.display_date}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="text-right">
+                  <div
+                    className={`font-mono font-black ${isSelectedHere ? "text-blue-700" : "text-slate-600"}`}
+                  >
+                    未結清: ${formatMoney(note.unpaid_amount)}
+                  </div>
+                  <div
+                    className={`text-[10px] font-bold mt-0.5 ${allocInfo > 0 ? "text-emerald-600" : "text-slate-400"}`}
+                  >
+                    已銷: ${formatMoney(allocInfo)} <br />
+                    需付: $
+                    {formatMoney(
+                      isSelectedHere ? finalRemainAmount : note.unpaid_amount,
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
     );
@@ -1031,7 +1438,7 @@ export default function AccountingPage() {
       {activeTab === "MISC" && renderMisc()}
       {activeTab === "PAYMENTS" && renderPayments()}
 
-      {/* 🌟 雜支 Modal (透過把 overflow 交給外層 Backdrop 來避免下拉選單被裁切) */}
+      {/* 🌟 雜支 Modal */}
       {isMiscModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm overflow-y-auto custom-scrollbar flex justify-center items-start p-4 pt-12 pb-20">
           <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg h-fit animate-in fade-in zoom-in-95 duration-200 relative">
@@ -1048,15 +1455,15 @@ export default function AccountingPage() {
               </button>
             </div>
             <form onSubmit={handleSaveMisc} className="p-6 space-y-5">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-2 gap-4 relative z-20">
                 <div>
                   <label className="block text-[11px] font-bold text-slate-500 mb-1.5 uppercase">
-                    收支類型 <span className="text-red-500">*</span>
+                    收支大項 <span className="text-red-500">*</span>
                   </label>
                   <CustomSelect
                     options={[
-                      { label: "支出 (如: 費用)", value: "EXPENSE" },
-                      { label: "收入 (如: 入零用金)", value: "INCOME" },
+                      { label: "應付費用", value: "EXPENSE" },
+                      { label: "應收費用", value: "INCOME" },
                     ]}
                     value={miscForm.transaction_type}
                     onChange={(v) =>
@@ -1066,21 +1473,40 @@ export default function AccountingPage() {
                 </div>
                 <div>
                   <label className="block text-[11px] font-bold text-slate-500 mb-1.5 uppercase">
-                    日期 <span className="text-red-500">*</span>
+                    次項分類 <span className="text-red-500">*</span>
                   </label>
-                  <input
-                    type="date"
-                    required
-                    value={miscForm.transaction_date}
-                    onChange={(e) =>
-                      setMiscForm({
-                        ...miscForm,
-                        transaction_date: e.target.value,
-                      })
+                  <CustomSelect
+                    options={[
+                      { label: "修繕", value: "FIX" },
+                      { label: "水電", value: "FACILITY" },
+                      { label: "人事", value: "LABOR" },
+                      { label: "佣金", value: "COMMISSION" },
+                      { label: "設備", value: "EQUIPPMENT" },
+                      { label: "其他", value: "OTHER" },
+                    ]}
+                    value={miscForm.sub_category}
+                    onChange={(v) =>
+                      setMiscForm({ ...miscForm, sub_category: v })
                     }
-                    className="w-full px-4 py-3 border border-slate-300 rounded-xl text-sm font-bold text-slate-700 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all"
                   />
                 </div>
+              </div>
+              <div>
+                <label className="block text-[11px] font-bold text-slate-500 mb-1.5 uppercase">
+                  日期 <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="date"
+                  required
+                  value={miscForm.transaction_date}
+                  onChange={(e) =>
+                    setMiscForm({
+                      ...miscForm,
+                      transaction_date: e.target.value,
+                    })
+                  }
+                  className="w-full px-4 py-3 border border-slate-300 rounded-xl text-sm font-bold text-slate-700 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all"
+                />
               </div>
               <div>
                 <label className="block text-[11px] font-bold text-slate-500 mb-1.5 uppercase">
@@ -1152,11 +1578,11 @@ export default function AccountingPage() {
         </div>
       )}
 
-      {/* 🌟 金流 Modal (透過把 overflow 交給外層 Backdrop 來避免下拉選單被裁切) */}
+      {/* 🌟 金流 Modal */}
       {isPaymentModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm overflow-y-auto custom-scrollbar flex justify-center items-start p-4 pt-12 pb-20">
-          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl h-fit animate-in fade-in zoom-in-95 duration-200 relative">
-            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50 rounded-t-3xl">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-4xl h-fit animate-in fade-in zoom-in-95 duration-200 relative overflow-hidden flex flex-col">
+            <div className="p-6 border-b border-slate-200 flex justify-between items-center bg-white shrink-0">
               <h3 className="text-xl font-black text-slate-800 flex items-center gap-2">
                 <Wallet className="text-blue-500" /> 建立金流沖銷紀錄
               </h3>
@@ -1167,275 +1593,504 @@ export default function AccountingPage() {
                 &times;
               </button>
             </div>
-            <form onSubmit={handleSavePayment} className="p-6 md:p-8 space-y-6">
-              <div className="bg-blue-50/50 p-5 rounded-2xl border border-blue-100 grid grid-cols-2 gap-5 relative z-10">
-                <div>
-                  <label className="block text-[11px] font-bold text-blue-700 mb-1.5 uppercase">
-                    收付款方向 <span className="text-red-500">*</span>
-                  </label>
-                  <CustomSelect
-                    options={[
-                      { label: "向客戶收款 (應收沖銷)", value: "CUSTOMER" },
-                      { label: "付給廠商 (應付沖銷)", value: "VENDOR" },
-                    ]}
-                    value={paymentForm.partner_type}
-                    onChange={(v) =>
-                      setPaymentForm({
-                        ...paymentForm,
-                        partner_type: v,
-                        customer_id: "",
-                        provider_id: "",
-                      })
-                    }
-                    className="border-blue-200"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[11px] font-bold text-blue-700 mb-1.5 uppercase">
-                    指定對象 <span className="text-red-500">*</span>
-                  </label>
-                  {paymentForm.partner_type === "CUSTOMER" ? (
-                    <CustomSelect
-                      options={customers.map((c) => ({
-                        label: `[${c.code}] ${c.name}`,
-                        value: c.id,
-                      }))}
-                      value={paymentForm.customer_id}
-                      onChange={(v) =>
-                        setPaymentForm({ ...paymentForm, customer_id: v })
+
+            <form
+              onSubmit={handleSavePayment}
+              className="flex flex-col flex-1 overflow-hidden"
+            >
+              <div className="p-6 pb-0 shrink-0">
+                {/* 1. Global 上半部資訊 */}
+                <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200 grid grid-cols-1 md:grid-cols-3 gap-5 relative z-20">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-500 mb-1.5 uppercase">
+                      交易日期 <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="date"
+                      required
+                      value={paymentGlobal.payment_date}
+                      onChange={(e) =>
+                        setPaymentGlobal({
+                          ...paymentGlobal,
+                          payment_date: e.target.value,
+                        })
                       }
-                      placeholder="搜尋並選擇客戶"
-                      className="border-blue-200"
+                      className="w-full px-4 py-2.5 border border-slate-300 rounded-xl text-sm font-bold text-slate-700 outline-none focus:border-blue-500"
                     />
-                  ) : (
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-500 mb-1.5 uppercase">
+                      方向 <span className="text-red-500">*</span>
+                    </label>
                     <CustomSelect
-                      options={providers.map((p) => ({
-                        label: `[${p.code}] ${p.name}`,
-                        value: p.id,
-                      }))}
-                      value={paymentForm.provider_id}
+                      options={[
+                        { label: "向客戶收款 (應收)", value: "CUSTOMER" },
+                        { label: "付給廠商 (應付)", value: "VENDOR" },
+                      ]}
+                      value={paymentGlobal.partner_type}
                       onChange={(v) =>
-                        setPaymentForm({ ...paymentForm, provider_id: v })
+                        setPaymentGlobal({
+                          ...paymentGlobal,
+                          partner_type: v,
+                          customer_id: "",
+                          provider_id: "",
+                        })
                       }
-                      placeholder="搜尋並選擇廠商"
-                      className="border-blue-200"
                     />
-                  )}
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-500 mb-1.5 uppercase">
+                      指定對象 <span className="text-red-500">*</span>
+                    </label>
+                    {paymentGlobal.partner_type === "CUSTOMER" ? (
+                      <CustomSelect
+                        options={customers.map((c) => ({
+                          label: `[${c.code}] ${c.name}`,
+                          value: c.id,
+                        }))}
+                        value={paymentGlobal.customer_id}
+                        onChange={(v) =>
+                          setPaymentGlobal({ ...paymentGlobal, customer_id: v })
+                        }
+                        placeholder="選擇客戶"
+                      />
+                    ) : (
+                      <CustomSelect
+                        options={providers.map((p) => ({
+                          label: `[${p.code}] ${p.name}`,
+                          value: p.id,
+                        }))}
+                        value={paymentGlobal.provider_id}
+                        onChange={(v) =>
+                          setPaymentGlobal({ ...paymentGlobal, provider_id: v })
+                        }
+                        placeholder="選擇廠商"
+                      />
+                    )}
+                  </div>
                 </div>
               </div>
 
-              {/* 🌟 選取近期銷貨單 (自動加總) */}
-              {paymentForm.partner_type === "CUSTOMER" &&
-                paymentForm.customer_id &&
-                customerDeliveryNotes.length > 0 && (
-                  <div className="bg-emerald-50/50 p-5 rounded-2xl border border-emerald-100 animate-in fade-in slide-in-from-top-2">
-                    <h4 className="text-[11px] font-black text-emerald-700 uppercase tracking-widest flex items-center gap-1.5 border-b border-emerald-200/50 pb-2 mb-3">
-                      <CheckCircle2 size={14} /> 選擇要沖銷的近期銷貨單
-                      (可多選，自動加總)
-                    </h4>
-                    <div className="max-h-40 overflow-y-auto custom-scrollbar space-y-2">
-                      {customerDeliveryNotes.map((note) => {
-                        const isSelected = selectedNotes.some(
-                          (n) => n.id === note.id,
-                        );
-                        return (
-                          <div
-                            key={note.id}
-                            onClick={() => handleToggleNote(note)}
-                            className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-colors ${isSelected ? "bg-emerald-100 border-emerald-300" : "bg-white border-slate-200 hover:bg-slate-50"}`}
-                          >
-                            <div className="flex items-center gap-3">
-                              {isSelected ? (
-                                <CheckSquare
-                                  size={18}
-                                  className="text-emerald-600"
-                                />
-                              ) : (
-                                <Square size={18} className="text-slate-300" />
-                              )}
-                              <div>
-                                <div
-                                  className={`text-sm font-bold ${isSelected ? "text-emerald-800" : "text-slate-700"}`}
-                                >
-                                  {note.note_number}
-                                </div>
-                                <div className="text-[10px] text-slate-500">
-                                  {note.note_date}
-                                </div>
-                              </div>
-                            </div>
-                            <div
-                              className={`font-mono font-black ${isSelected ? "text-emerald-700" : "text-slate-600"}`}
-                            >
-                              ${formatMoney(note.grand_total)}
-                            </div>
-                          </div>
-                        );
-                      })}
+              {/* 🌟 單據 Pool 拉到 Global 區塊下方、Tabs 上方 */}
+              {renderNotesPool(
+                activePaymentMode,
+                activePaymentMode === "TRANSFER"
+                  ? transferBlock
+                  : activePaymentMode === "CASH"
+                    ? cashBlock
+                    : checkBlock,
+              )}
+
+              {/* 2. 切換 Tab UI */}
+              <div className="px-6 shrink-0 mt-4">
+                <div className="flex gap-4 border-b border-slate-200">
+                  <button
+                    type="button"
+                    onClick={() => setActivePaymentMode("TRANSFER")}
+                    className={`pb-3 px-1 text-sm font-bold flex items-center gap-2 border-b-2 transition-colors ${activePaymentMode === "TRANSFER" ? "border-blue-600 text-blue-700" : "border-transparent text-slate-500 hover:text-slate-700"}`}
+                  >
+                    <ArrowRightLeft size={16} /> 銀行轉帳
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActivePaymentMode("CASH")}
+                    className={`pb-3 px-1 text-sm font-bold flex items-center gap-2 border-b-2 transition-colors ${activePaymentMode === "CASH" ? "border-blue-600 text-blue-700" : "border-transparent text-slate-500 hover:text-slate-700"}`}
+                  >
+                    <Banknote size={16} /> 現金
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActivePaymentMode("CHECK")}
+                    className={`pb-3 px-1 text-sm font-bold flex items-center gap-2 border-b-2 transition-colors ${activePaymentMode === "CHECK" ? "border-blue-600 text-blue-700" : "border-transparent text-slate-500 hover:text-slate-700"}`}
+                  >
+                    <CreditCard size={16} /> 支票/票據
+                  </button>
+                </div>
+              </div>
+
+              {/* 3. Tab Content 區塊 */}
+              <div className="flex-1 overflow-y-auto custom-scrollbar p-6 pt-4">
+                {/* ===================== TRANSFER ===================== */}
+                {activePaymentMode === "TRANSFER" && (
+                  <div className="animate-in fade-in space-y-5">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="col-span-2">
+                        <label className="block text-[11px] font-bold text-slate-500 mb-1.5 uppercase">
+                          轉帳金額
+                        </label>
+                        <div className="relative max-w-sm">
+                          <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold">
+                            $
+                          </span>
+                          <input
+                            type="number"
+                            placeholder="0"
+                            value={transferBlock.amount}
+                            onChange={(e) =>
+                              setTransferBlock({
+                                ...transferBlock,
+                                amount: e.target.value,
+                              })
+                            }
+                            className="w-full pl-8 pr-4 py-3 border border-slate-300 rounded-xl text-lg font-mono font-black outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">
+                          轉出帳號 <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={transferBlock.account_out}
+                          onChange={(e) =>
+                            setTransferBlock({
+                              ...transferBlock,
+                              account_out: e.target.value,
+                            })
+                          }
+                          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-bold focus:border-blue-500 outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">
+                          轉入帳號 <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={transferBlock.account_in}
+                          onChange={(e) =>
+                            setTransferBlock({
+                              ...transferBlock,
+                              account_in: e.target.value,
+                            })
+                          }
+                          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-bold focus:border-blue-500 outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">
+                          轉出統編 <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={transferBlock.tax_id_out}
+                          onChange={(e) =>
+                            setTransferBlock({
+                              ...transferBlock,
+                              tax_id_out: e.target.value,
+                            })
+                          }
+                          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-bold focus:border-blue-500 outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">
+                          轉入統編 <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={transferBlock.tax_id_in}
+                          onChange={(e) =>
+                            setTransferBlock({
+                              ...transferBlock,
+                              tax_id_in: e.target.value,
+                            })
+                          }
+                          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-bold focus:border-blue-500 outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">
+                          轉出抬頭 <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={transferBlock.title_out}
+                          onChange={(e) =>
+                            setTransferBlock({
+                              ...transferBlock,
+                              title_out: e.target.value,
+                            })
+                          }
+                          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-bold focus:border-blue-500 outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">
+                          轉入抬頭 <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={transferBlock.title_in}
+                          onChange={(e) =>
+                            setTransferBlock({
+                              ...transferBlock,
+                              title_in: e.target.value,
+                            })
+                          }
+                          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-bold focus:border-blue-500 outline-none"
+                        />
+                      </div>
+                      <div className="col-span-2">
+                        <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">
+                          本筆備註
+                        </label>
+                        <input
+                          type="text"
+                          value={transferBlock.note}
+                          onChange={(e) =>
+                            setTransferBlock({
+                              ...transferBlock,
+                              note: e.target.value,
+                            })
+                          }
+                          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-bold focus:border-blue-500 outline-none"
+                          placeholder="選填..."
+                        />
+                      </div>
                     </div>
                   </div>
                 )}
 
-              <div className="grid grid-cols-2 gap-5 relative z-0">
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-500 mb-1.5 uppercase">
-                    交易日期 <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="date"
-                    required
-                    value={paymentForm.payment_date}
-                    onChange={(e) =>
-                      setPaymentForm({
-                        ...paymentForm,
-                        payment_date: e.target.value,
-                      })
-                    }
-                    className="w-full px-4 py-3 border border-slate-300 rounded-xl text-sm font-bold text-slate-700 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-500 mb-1.5 uppercase">
-                    交易金額 <span className="text-red-500">*</span>
-                  </label>
-                  <div className="relative">
-                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold">
-                      $
-                    </span>
-                    <input
-                      type="number"
-                      step="any"
-                      required
-                      value={paymentForm.amount}
-                      onChange={(e) =>
-                        setPaymentForm({
-                          ...paymentForm,
-                          amount: e.target.value,
-                        })
-                      }
-                      className="w-full pl-8 pr-4 py-3 border border-slate-300 rounded-xl text-lg font-mono font-black text-slate-800 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all"
-                      placeholder="0.00"
-                    />
+                {/* ===================== CASH ===================== */}
+                {activePaymentMode === "CASH" && (
+                  <div className="animate-in fade-in space-y-5">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="col-span-2">
+                        <label className="block text-[11px] font-bold text-slate-500 mb-1.5 uppercase">
+                          現金金額
+                        </label>
+                        <div className="relative max-w-sm">
+                          <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold">
+                            $
+                          </span>
+                          <input
+                            type="number"
+                            placeholder="0"
+                            value={cashBlock.amount}
+                            onChange={(e) =>
+                              setCashBlock({
+                                ...cashBlock,
+                                amount: e.target.value,
+                              })
+                            }
+                            className="w-full pl-8 pr-4 py-3 border border-slate-300 rounded-xl text-lg font-mono font-black outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">
+                          轉入帳號 <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={cashBlock.account_in}
+                          onChange={(e) =>
+                            setCashBlock({
+                              ...cashBlock,
+                              account_in: e.target.value,
+                            })
+                          }
+                          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-bold focus:border-blue-500 outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">
+                          轉入統編 <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={cashBlock.tax_id_in}
+                          onChange={(e) =>
+                            setCashBlock({
+                              ...cashBlock,
+                              tax_id_in: e.target.value,
+                            })
+                          }
+                          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-bold focus:border-blue-500 outline-none"
+                        />
+                      </div>
+                      <div className="col-span-2">
+                        <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">
+                          轉入抬頭 <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={cashBlock.title_in}
+                          onChange={(e) =>
+                            setCashBlock({
+                              ...cashBlock,
+                              title_in: e.target.value,
+                            })
+                          }
+                          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-bold focus:border-blue-500 outline-none"
+                        />
+                      </div>
+                      <div className="col-span-2">
+                        <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">
+                          本筆備註
+                        </label>
+                        <input
+                          type="text"
+                          value={cashBlock.note}
+                          onChange={(e) =>
+                            setCashBlock({ ...cashBlock, note: e.target.value })
+                          }
+                          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-bold focus:border-blue-500 outline-none"
+                          placeholder="選填..."
+                        />
+                      </div>
+                    </div>
                   </div>
-                </div>
+                )}
+
+                {/* ===================== CHECK ===================== */}
+                {activePaymentMode === "CHECK" && (
+                  <div className="animate-in fade-in space-y-5">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="col-span-2">
+                        <label className="block text-[11px] font-bold text-slate-500 mb-1.5 uppercase">
+                          支票金額
+                        </label>
+                        <div className="relative max-w-sm">
+                          <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold">
+                            $
+                          </span>
+                          <input
+                            type="number"
+                            placeholder="0"
+                            value={checkBlock.amount}
+                            onChange={(e) =>
+                              setCheckBlock({
+                                ...checkBlock,
+                                amount: e.target.value,
+                              })
+                            }
+                            className="w-full pl-8 pr-4 py-3 border border-slate-300 rounded-xl text-lg font-mono font-black outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">
+                          票號 <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={checkBlock.check_number}
+                          onChange={(e) =>
+                            setCheckBlock({
+                              ...checkBlock,
+                              check_number: e.target.value,
+                            })
+                          }
+                          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-bold focus:border-blue-500 outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">
+                          到期日 <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="date"
+                          value={checkBlock.due_date}
+                          onChange={(e) =>
+                            setCheckBlock({
+                              ...checkBlock,
+                              due_date: e.target.value,
+                            })
+                          }
+                          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-bold focus:border-blue-500 outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">
+                          開票人的銀行 <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="如: 玉山銀行"
+                          value={checkBlock.issuer_bank}
+                          onChange={(e) =>
+                            setCheckBlock({
+                              ...checkBlock,
+                              issuer_bank: e.target.value,
+                            })
+                          }
+                          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-bold focus:border-blue-500 outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">
+                          存入的銀行帳號 <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={checkBlock.account_in}
+                          onChange={(e) =>
+                            setCheckBlock({
+                              ...checkBlock,
+                              account_in: e.target.value,
+                            })
+                          }
+                          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-bold focus:border-blue-500 outline-none"
+                        />
+                      </div>
+                      <div className="col-span-2">
+                        <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">
+                          本筆備註
+                        </label>
+                        <input
+                          type="text"
+                          value={checkBlock.note}
+                          onChange={(e) =>
+                            setCheckBlock({
+                              ...checkBlock,
+                              note: e.target.value,
+                            })
+                          }
+                          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-bold focus:border-blue-500 outline-none"
+                          placeholder="選填..."
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-5 items-start">
-                <div className="relative z-[5]">
-                  <label className="block text-[11px] font-bold text-slate-500 mb-1.5 uppercase">
-                    付款方式 <span className="text-red-500">*</span>
-                  </label>
-                  <CustomSelect
-                    options={[
-                      { label: "銀行匯款", value: "TRANSFER" },
-                      { label: "現金", value: "CASH" },
-                      { label: "支票/票據", value: "CHECK" },
-                    ]}
-                    value={paymentForm.payment_method}
-                    onChange={(v) =>
-                      setPaymentForm({ ...paymentForm, payment_method: v })
-                    }
-                  />
+              {/* 4. Bottom Footer (Summary & Submit) */}
+              <div className="p-6 bg-slate-50 border-t border-slate-200 flex justify-between items-center shrink-0 rounded-b-3xl">
+                <div className="text-slate-500 text-sm font-bold">
+                  本次預計沖銷總額:
+                  <span className="text-xl text-blue-600 font-mono ml-2">
+                    $
+                    {formatMoney(
+                      (parseFloat(transferBlock.amount) || 0) +
+                        (parseFloat(cashBlock.amount) || 0) +
+                        (parseFloat(checkBlock.amount) || 0),
+                    )}
+                  </span>
+                  <span className="text-[11px] font-medium text-slate-400 block mt-1">
+                    (轉帳: ${formatMoney(parseFloat(transferBlock.amount) || 0)}{" "}
+                    | 現金: ${formatMoney(parseFloat(cashBlock.amount) || 0)} |
+                    支票: ${formatMoney(parseFloat(checkBlock.amount) || 0)})
+                  </span>
                 </div>
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-500 mb-1.5 uppercase">
-                    沖銷備註 (單號)
-                  </label>
-                  <input
-                    type="text"
-                    value={paymentForm.reference_notes}
-                    onChange={(e) =>
-                      setPaymentForm({
-                        ...paymentForm,
-                        reference_notes: e.target.value,
-                      })
-                    }
-                    className="w-full px-4 py-3 border border-slate-300 rounded-xl text-sm font-bold text-slate-800 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all"
-                    placeholder="對應單號..."
-                  />
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setIsPaymentModalOpen(false)}
+                    className="px-6 py-3 text-slate-600 bg-white border border-slate-300 hover:bg-slate-100 text-sm font-bold rounded-xl transition-colors"
+                  >
+                    取消
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-8 py-3 text-white bg-[#007AFF] hover:bg-[#0056b3] text-sm font-bold rounded-xl shadow-md transition-all"
+                  >
+                    確認建立金流
+                  </button>
                 </div>
-              </div>
-
-              {paymentForm.payment_method === "CHECK" && (
-                <div className="bg-amber-50/50 p-5 rounded-2xl border border-amber-200 animate-in fade-in slide-in-from-top-2 space-y-4 relative z-0">
-                  <h4 className="text-[11px] font-black text-amber-700 uppercase tracking-widest flex items-center gap-1.5 border-b border-amber-200/50 pb-2">
-                    <CreditCard size={14} /> 支票詳細資訊
-                  </h4>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div>
-                      <label className="block text-[10px] font-bold text-amber-700 mb-1 uppercase">
-                        目標銀行 <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        value={paymentForm.check_target_bank}
-                        onChange={(e) =>
-                          setPaymentForm({
-                            ...paymentForm,
-                            check_target_bank: e.target.value,
-                          })
-                        }
-                        className="w-full px-3 py-2.5 border border-amber-200 rounded-lg text-sm font-bold outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-500/20"
-                        placeholder="如: 玉山銀行"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[10px] font-bold text-amber-700 mb-1 uppercase">
-                        抬頭 <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        value={paymentForm.check_title}
-                        onChange={(e) =>
-                          setPaymentForm({
-                            ...paymentForm,
-                            check_title: e.target.value,
-                          })
-                        }
-                        className="w-full px-3 py-2.5 border border-amber-200 rounded-lg text-sm font-bold outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-500/20"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[10px] font-bold text-amber-700 mb-1 uppercase">
-                        預計兌現日 <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="date"
-                        required
-                        value={paymentForm.check_cash_date}
-                        onChange={(e) =>
-                          setPaymentForm({
-                            ...paymentForm,
-                            check_cash_date: e.target.value,
-                          })
-                        }
-                        className="w-full px-3 py-2.5 border border-amber-200 rounded-lg text-sm font-bold outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-500/20"
-                      />
-                    </div>
-                  </div>
-                  <div className="text-[10px] font-bold text-amber-600 pt-1 flex items-center gap-1.5">
-                    <AlertCircle size={12} />{" "}
-                    支票建立後預設為「未兌現」，請至「待兌現支票匣」核銷入帳。
-                  </div>
-                </div>
-              )}
-
-              <div className="pt-4 flex justify-end gap-3 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setIsPaymentModalOpen(false)}
-                  className="px-6 py-3 text-slate-600 bg-slate-100 hover:bg-slate-200 text-sm font-bold rounded-xl transition-colors"
-                >
-                  取消
-                </button>
-                <button
-                  type="submit"
-                  className="px-8 py-3 text-white bg-[#007AFF] hover:bg-[#0056b3] text-sm font-bold rounded-xl shadow-md transition-all"
-                >
-                  確認建立金流
-                </button>
               </div>
             </form>
           </div>

@@ -88,6 +88,43 @@ const ALLERGEN_OPTIONS = [
   { value: "SULFITE", label: "亞硫酸鹽類" },
 ];
 
+const ALLERGEN_MAP = {
+  CRUSTACEAN: "甲殼類",
+  MANGO: "芒果",
+  PEANUT: "花生",
+  MILK: "奶類",
+  EGG: "蛋",
+  NUT: "堅果類",
+  SESAME: "芝麻",
+  GLUTEN: "含麩質之穀物",
+  SOY: "大豆",
+  FISH: "魚類",
+  SULFITE: "二氧化硫",
+};
+
+const calculateExpDateForLabel = (mfgDateObj, storageLifeStr) => {
+  if (!mfgDateObj || isNaN(mfgDateObj.getTime())) return "詳見包裝標示";
+  const d = new Date(mfgDateObj);
+
+  let monthsToAdd = 0;
+  if (storageLifeStr) {
+    const monthMatch = storageLifeStr.match(/(\d+)\s*個月/);
+    const yearMatch = storageLifeStr.match(/(\d+)\s*年/);
+    const dayMatch = storageLifeStr.match(/(\d+)\s*天/);
+
+    if (monthMatch) monthsToAdd += parseInt(monthMatch[1], 10);
+    if (yearMatch) monthsToAdd += parseInt(yearMatch[1], 10) * 12;
+
+    if (monthsToAdd > 0) {
+      d.setMonth(d.getMonth() + monthsToAdd);
+      d.setDate(d.getDate() - 1);
+    } else if (dayMatch) {
+      d.setDate(d.getDate() + parseInt(dayMatch[1], 10) - 1);
+    }
+  }
+  return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, "0")}.${String(d.getDate()).padStart(2, "0")}`;
+};
+
 const emptyNutrition = {
   energy_kcal: "0",
   protein: "0",
@@ -255,6 +292,158 @@ const NutritionLabel = ({ nutritionData }) => {
           </tr>
         </tbody>
       </table>
+    </div>
+  );
+};
+
+const ProductLabelTemplate = ({
+  name,
+  ingredientsText,
+  allergenInfo,
+  nutritionFact,
+  spec,
+  stickerInfo,
+  storageLife,
+  storageMethod = "ROOM_TEMP",
+}) => {
+  const today = new Date();
+  const mfgDateDisplay = `${today.getFullYear()}.${String(today.getMonth() + 1).padStart(2, "0")}.${String(today.getDate()).padStart(2, "0")}`;
+  const expDateDisplay = calculateExpDateForLabel(today, storageLife);
+
+  // 過敏原格式化
+  const rawAllergens = allergenInfo ? allergenInfo.split(",") : [];
+  const activeAllergens = rawAllergens
+    .map((a) => ALLERGEN_MAP[a.trim()] || a.trim())
+    .filter(Boolean);
+  const allergenStr =
+    activeAllergens.length > 0 ? `本品含有${activeAllergens.join("、")}` : "";
+
+  // 營養素格式化
+  const nut100 = nutritionFact || emptyNutrition;
+  const format100g = (val) => parseFloat(val || 0).toFixed(1);
+  const calcPerServing = (val) =>
+    ((parseFloat(val || 0) / 100) * 10).toFixed(1); // 預設每份10g供預覽
+
+  const NutRow = ({ label, indent, valKey, unit }) => (
+    <tr>
+      <td className={`text-left py-[3px] ${indent ? "pl-3 text-[11px]" : ""}`}>
+        {label}
+      </td>
+      <td className="py-[3px]">
+        <div className="flex justify-end gap-2 w-full pr-1">
+          <span>{calcPerServing(nut100[valKey])}</span>
+          <span className="w-[28px] text-left">{unit}</span>
+        </div>
+      </td>
+      <td className="py-[3px]">
+        <div className="flex justify-end gap-2 w-full">
+          <span>{format100g(nut100[valKey])}</span>
+          <span className="w-[28px] text-left">{unit}</span>
+        </div>
+      </td>
+    </tr>
+  );
+
+  let storageStr =
+    "常溫保存，貯存於乾燥陰涼處，避免陽光直射，開封後請儘速使用。";
+  if (storageMethod === "REFRIGERATED") {
+    storageStr =
+      "請冷藏保存於 7°C 以下，離開冷藏請勿超過半小時，開封後請儘速使用完畢。";
+  } else if (storageMethod === "FROZEN") {
+    storageStr =
+      "請冷凍保存於 -18°C 以下，請勿反覆解凍，開封後請儘速使用完畢。";
+  }
+  const manufacturer = stickerInfo?.manufacturer || "";
+  const tel = stickerInfo?.tel || "";
+  const fax = stickerInfo?.fax || "";
+  const address = stickerInfo?.address || "";
+
+  return (
+    <div className="w-[130mm] min-w-[130mm] shrink-0 bg-white p-4 font-sans text-black border-[3px] border-black mx-auto box-border overflow-hidden">
+      <div className="text-center font-black text-2xl tracking-widest mb-3 border-b-[3px] border-black pb-2">
+        {name || "產品名稱"}
+      </div>
+
+      <div className="flex gap-4 text-[11px] leading-tight">
+        <div className="w-[55%] flex flex-col gap-1.5 justify-between text-[11px]">
+          <div>
+            <span className="font-bold">成份：</span>
+            {ingredientsText || "無"}
+          </div>
+          <div className="font-bold text-justify leading-relaxed">
+            本產品生產製程廠房，其設備或生產管線有處理甲殼類、芒果、花生、奶類、蛋、堅果類、芝麻、含麩質之穀物、大豆、魚類及二氧化硫
+          </div>
+          {allergenStr && <div className="font-bold">{allergenStr}</div>}
+
+          <div className="mt-1 flex flex-col gap-1 text-[12px]">
+            <div>製造日期：{mfgDateDisplay}</div>
+            <div>有效期限：{expDateDisplay}</div>
+            <div>包裝規格：{spec || "-"}</div>
+            <div>原產地：台灣</div>
+            <div>製造商：{manufacturer}</div>
+            <div>
+              TEL: {tel} {fax ? `FAX: ${fax}` : ""}
+            </div>
+            <div>{address}</div>
+          </div>
+          <div className="mt-1 font-bold text-[12px]">{storageStr}</div>
+        </div>
+
+        <div className="w-[60%] flex flex-col">
+          <div className="border-[2px] border-black p-1.5 flex-1">
+            <div className="text-center font-bold text-[15px] border-b-[2px] border-black pb-1 mb-1.5 tracking-widest">
+              營養標示
+            </div>
+            <div className="flex justify-between border-b border-black pb-1 text-[12px]">
+              <span>每一份量</span>
+              <div className="flex justify-end gap-2 pr-1">
+                <span>10</span>
+                <span className="w-[28px] text-left">公克</span>
+              </div>
+            </div>
+            <div className="flex justify-between border-b-[2px] border-black pb-1 mb-1 text-[12px]">
+              <span>本包裝含</span>
+              <div className="flex justify-end gap-2 pr-1">
+                <span>100</span>
+                <span className="w-[28px] text-left">份</span>
+              </div>
+            </div>
+            <table className="w-full text-right mt-1 text-[12px] border-collapse">
+              <thead>
+                <tr className="border-b border-black">
+                  <th className="text-left font-normal pb-1"></th>
+                  <th className="font-normal pb-1 text-right pr-[16px]">
+                    每份
+                  </th>
+                  <th className="font-normal pb-1 text-right pr-[12px]">
+                    每100公克
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                <NutRow label="熱量" valKey="energy_kcal" unit="大卡" />
+                <NutRow label="蛋白質" valKey="protein" unit="公克" />
+                <NutRow label="脂肪" valKey="fat" unit="公克" />
+                <NutRow
+                  label="飽和脂肪"
+                  indent
+                  valKey="saturated_fat"
+                  unit="公克"
+                />
+                <NutRow
+                  label="反式脂肪"
+                  indent
+                  valKey="trans_fat"
+                  unit="公克"
+                />
+                <NutRow label="碳水化合物" valKey="carbs" unit="公克" />
+                <NutRow label="糖" indent valKey="sugar" unit="公克" />
+                <NutRow label="鈉" valKey="sodium" unit="毫克" />
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
     </div>
   );
 };
@@ -570,6 +759,7 @@ export default function BOMCreatePage() {
 
   // 🌟 用於記錄初次載入時的營養與成分狀態，以判定是否需要另存快照
   const [initialSnapshotData, setInitialSnapshotData] = useState(null);
+  const [existingSnapshots, setExistingSnapshots] = useState([]);
 
   // 🌟 包材選擇用資料
   const [packMaterials, setPackMaterials] = useState([]);
@@ -765,10 +955,13 @@ export default function BOMCreatePage() {
             nutrition: JSON.stringify(latestSnapshot.nutrition_fact || {}),
             allergens: latestSnapshot.allergen_info || "",
             ingredients: latestSnapshot.ingredients_text || "",
+            labelInfo: latestSnapshot.label_info || {},
           });
         } else {
           setInitialSnapshotData(null);
         }
+
+        setExistingSnapshots(targetMaterial.nutrition_snapshots || []);
 
         if (targetMaterial.type === "PRODUCT") {
           try {
@@ -967,6 +1160,7 @@ export default function BOMCreatePage() {
         setOriginalMaterialId(null);
         setOriginalBomIds([]);
         setInitialSnapshotData(null);
+        setExistingSnapshots([]);
         setSortConfig({ key: "quantity", direction: "desc" });
         setFormData({
           code: "",
@@ -2083,13 +2277,44 @@ export default function BOMCreatePage() {
   }, [formData.items]);
 
   const ingredientsText = useMemo(() => {
-    const sorted = [...formData.items]
-      .filter((i) => !["PACK", "STICKER", "OTHER"].includes(i.type))
-      .sort(
-        (a, b) => (parseFloat(b.quantity) || 0) - (parseFloat(a.quantity) || 0),
-      );
-    return sorted.map((i) => i.material_name).join("、");
-  }, [formData.items]);
+    const weightMap = new Map();
+
+    const addWeight = (matId, matName, type, qty) => {
+      if (["PACK", "STICKER", "OTHER"].includes(type)) return;
+
+      if (type === "SEMI") {
+        const semiMat = materials.find((m) => m.id === matId);
+        if (semiMat && semiMat.boms && semiMat.boms.length > 0) {
+          const base = parseFloat(semiMat.boms[0]?.base_quantity) || 1;
+          semiMat.boms.forEach((bom) => {
+            if (bom.is_active === false) return;
+            if (["PACK", "STICKER", "OTHER"].includes(bom.child_type)) return;
+
+            const childReq = parseFloat(bom.quantity_required) || 0;
+            const childQty = (childReq / base) * qty;
+
+            weightMap.set(
+              bom.child_name,
+              (weightMap.get(bom.child_name) || 0) + childQty,
+            );
+          });
+          return;
+        }
+      }
+
+      weightMap.set(matName, (weightMap.get(matName) || 0) + qty);
+    };
+
+    formData.items.forEach((item) => {
+      const qty = parseFloat(item.quantity) || 0;
+      addWeight(item.material_id, item.material_name, item.type, qty);
+    });
+
+    return Array.from(weightMap.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map((entry) => entry[0])
+      .join("、");
+  }, [formData.items, materials]);
 
   const executeSubmit = async () => {
     setIsSubmitting(true);
@@ -2324,16 +2549,47 @@ export default function BOMCreatePage() {
 
       await Promise.all(bomPromises);
 
-      // 🌟 精準比對營養標籤是否有實質變動
-      const currentNutritionStr = JSON.stringify(calculatedNutrition);
+      let currentStickerInfo = null;
+      if (formData.type === "PRODUCT") {
+        for (const p of packFormData.additional_packs) {
+          const mat = packMaterials.find(
+            (m) => String(m.id) === String(p.material_id),
+          );
+          if (mat && mat.type === "STICKER" && mat.sticker_info) {
+            currentStickerInfo = mat.sticker_info;
+            break;
+          }
+        }
+      }
+
+      // 精準比對營養標籤是否有實質變動
       const currentAllergensStr = aggregatedAllergens;
       const currentIngredientsStr = ingredientsText;
 
-      const needNewSnapshot =
-        !isEditMode ||
-        !initialSnapshotData ||
-        initialSnapshotData.allergens !== currentAllergensStr ||
-        initialSnapshotData.ingredients !== currentIngredientsStr;
+      const currentLabelInfo = {
+        spec: packFormData.spec || "",
+        manufacturer: currentStickerInfo?.manufacturer || "",
+        tel: currentStickerInfo?.tel || "",
+        fax: currentStickerInfo?.fax || "",
+        address: currentStickerInfo?.address || "",
+      };
+
+      const isDuplicateSnapshot = existingSnapshots.some((snap) => {
+        const snapLabel = snap.label_info || {};
+
+        return (
+          (snap.allergen_info || "") === currentAllergensStr &&
+          (snap.ingredients_text || "") === currentIngredientsStr &&
+          (snapLabel.spec || "") === currentLabelInfo.spec &&
+          (snapLabel.manufacturer || "") === currentLabelInfo.manufacturer &&
+          (snapLabel.tel || "") === currentLabelInfo.tel &&
+          (snapLabel.fax || "") === currentLabelInfo.fax &&
+          (snapLabel.address || "") === currentLabelInfo.address
+        );
+      });
+
+      // 如果不是編輯模式 (代表是新建配方)，或是找不到重複的快照，才需要建立新的 Snapshot
+      const needNewSnapshot = !isEditMode || !isDuplicateSnapshot;
 
       if (needNewSnapshot) {
         const snapshotPayload = {
@@ -2341,6 +2597,7 @@ export default function BOMCreatePage() {
           nutrition_fact: calculatedNutrition,
           allergen_info: aggregatedAllergens,
           ingredients_text: ingredientsText,
+          label_info: currentLabelInfo,
           status: "PENDING",
           is_active: true,
         };
@@ -2893,7 +3150,7 @@ export default function BOMCreatePage() {
             ) : (
               <div className="min-w-[1000px] flex flex-col w-full overflow-visible">
                 <div className="flex items-center gap-2 px-4 py-2 bg-slate-100/50 border-b border-slate-200 text-[10px] font-black text-slate-500 uppercase tracking-widest sticky top-0 z-10">
-                  <div className="w-[88px] text-center shrink-0">序號</div>
+                  <div className="w-[88px] text-center shrink-0">投料順序</div>
                   <div className="w-16 text-center shrink-0">類型</div>
                   <div className="flex-1 min-w-[280px] shrink-0">物料</div>
                   <div className="w-24 shrink-0">備註</div>
@@ -3432,7 +3689,7 @@ export default function BOMCreatePage() {
             <Camera size={16} className="text-purple-500" strokeWidth={2.5} />
             營養價值預覽
           </h3>
-          <div className="grid grid-cols-1 lg:grid-cols-[1fr_auto] gap-10 items-start">
+          <div className="grid grid-cols-1 xl:grid-cols-[1fr_560px] gap-8 items-start">
             <div className="flex flex-col gap-6">
               <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
                 <span className="text-[10px] uppercase font-bold text-slate-400 mb-2 block">
@@ -3472,11 +3729,49 @@ export default function BOMCreatePage() {
                 審核通過後，生產單即可於出貨標籤時選擇此版本製作出貨標籤。
               </div>
             </div>
-            <div className="flex flex-col items-center justify-center bg-slate-100 p-8 rounded-3xl border border-slate-200/60 shadow-inner w-full lg:w-[320px]">
+            <div className="flex flex-col items-center justify-center bg-slate-100 p-6 md:p-8 rounded-3xl border border-slate-200/60 shadow-inner w-full overflow-hidden">
               <div className="text-sm uppercase font-black text-slate-900 tracking-widest mb-4">
                 標籤預覽
               </div>
-              <NutritionLabel nutritionData={calculatedNutrition} />
+              <div className="w-full flex justify-center origin-top transform scale-[0.85] sm:scale-100">
+                {formData.type === "PRODUCT" ? (
+                  (() => {
+                    let currentStickerInfo = null;
+                    for (const p of packFormData.additional_packs) {
+                      const mat = packMaterials.find(
+                        (m) => String(m.id) === String(p.material_id),
+                      );
+                      console.log("mat", mat);
+                      if (mat && mat.type === "STICKER" && mat.sticker_info) {
+                        currentStickerInfo = mat.sticker_info;
+                        break;
+                      }
+                    }
+
+                    const productMat = materials.find(
+                      (m) => m.code === formData.code,
+                    );
+                    const storageLife = productMat?.storage_life || "12個月";
+                    const storageMethod =
+                      productMat?.storage_method || "ROOM_TEMP";
+
+                    return (
+                      <ProductLabelTemplate
+                        name={formData.name}
+                        ingredientsText={ingredientsText}
+                        allergenInfo={aggregatedAllergens}
+                        nutritionFact={calculatedNutrition}
+                        spec={packFormData.spec}
+                        stickerInfo={currentStickerInfo}
+                        storageLife={storageLife}
+                        storageMethod={storageMethod}
+                      />
+                    );
+                  })()
+                ) : (
+                  <NutritionLabel nutritionData={calculatedNutrition} />
+                )}
+              </div>
             </div>
           </div>
         </div>

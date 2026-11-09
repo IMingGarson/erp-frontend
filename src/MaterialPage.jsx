@@ -16,6 +16,7 @@ import {
   SlidersHorizontal,
   AlignLeft,
   ClipboardCheck,
+  Calendar,
 } from "lucide-react";
 import CustomDialog from "./components/customDialog";
 import { fetchWithAuth } from "./utils/fetchWithAuth";
@@ -91,6 +92,198 @@ const getIngredientsOnlyAllergens = (ingredientsArray = [], bomsArray = []) => {
   });
 
   return Array.from(merged);
+};
+
+// 🌟 貼上：標籤專用常數與計算函式
+const ALLERGEN_MAP = {
+  CRUSTACEAN: "甲殼類",
+  MANGO: "芒果",
+  PEANUT: "花生",
+  MILK: "奶類",
+  EGG: "蛋",
+  NUT: "堅果類",
+  SESAME: "芝麻",
+  GLUTEN: "含麩質之穀物",
+  SOY: "大豆",
+  FISH: "魚類",
+  SULFITE: "二氧化硫",
+};
+
+const calculateExpDateForLabel = (mfgDateObj, storageLifeStr) => {
+  if (!mfgDateObj || isNaN(mfgDateObj.getTime())) return "詳見包裝標示";
+  const d = new Date(mfgDateObj);
+
+  let monthsToAdd = 0;
+  if (storageLifeStr) {
+    const monthMatch = storageLifeStr.match(/(\d+)\s*個月/);
+    const yearMatch = storageLifeStr.match(/(\d+)\s*年/);
+    const dayMatch = storageLifeStr.match(/(\d+)\s*天/);
+
+    if (monthMatch) monthsToAdd += parseInt(monthMatch[1], 10);
+    if (yearMatch) monthsToAdd += parseInt(yearMatch[1], 10) * 12;
+
+    if (monthsToAdd > 0) {
+      d.setMonth(d.getMonth() + monthsToAdd);
+      d.setDate(d.getDate() - 1);
+    } else if (dayMatch) {
+      d.setDate(d.getDate() + parseInt(dayMatch[1], 10) - 1);
+    }
+  }
+  return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, "0")}.${String(d.getDate()).padStart(2, "0")}`;
+};
+
+// 🌟 貼上：完整標籤樣板元件
+const ProductLabelTemplate = ({
+  name,
+  ingredientsText,
+  allergenInfo,
+  nutritionFact,
+  spec,
+  stickerInfo,
+  storageLife,
+  storageMethod = "ROOM_TEMP",
+}) => {
+  const today = new Date();
+  const mfgDateDisplay = `${today.getFullYear()}.${String(today.getMonth() + 1).padStart(2, "0")}.${String(today.getDate()).padStart(2, "0")}`;
+  const expDateDisplay = calculateExpDateForLabel(today, storageLife);
+
+  // 過敏原格式化
+  const rawAllergens = allergenInfo ? allergenInfo.split(",") : [];
+  const activeAllergens = rawAllergens
+    .map((a) => ALLERGEN_MAP[a.trim()] || a.trim())
+    .filter(Boolean);
+  const allergenStr =
+    activeAllergens.length > 0 ? `本品含有${activeAllergens.join("、")}` : "";
+
+  // 營養素格式化
+  const nut100 = nutritionFact || emptyNutrition;
+  const format100g = (val) => parseFloat(val || 0).toFixed(1);
+  const calcPerServing = (val) =>
+    ((parseFloat(val || 0) / 100) * 10).toFixed(1); // 預設每份10g供預覽
+
+  const NutRow = ({ label, indent, valKey, unit }) => (
+    <tr>
+      <td className={`text-left py-[3px] ${indent ? "pl-3 text-[11px]" : ""}`}>
+        {label}
+      </td>
+      <td className="py-[3px]">
+        <div className="flex justify-end gap-2 w-full pr-1">
+          <span>{calcPerServing(nut100[valKey])}</span>
+          <span className="w-[28px] text-left">{unit}</span>
+        </div>
+      </td>
+      <td className="py-[3px]">
+        <div className="flex justify-end gap-2 w-full">
+          <span>{format100g(nut100[valKey])}</span>
+          <span className="w-[28px] text-left">{unit}</span>
+        </div>
+      </td>
+    </tr>
+  );
+
+  let storageStr =
+    "常溫保存，貯存於乾燥陰涼處，避免陽光直射，開封後請儘速使用。";
+  if (storageMethod === "REFRIGERATED") {
+    storageStr =
+      "請冷藏保存於 7°C 以下，離開冷藏請勿超過半小時，開封後請儘速使用完畢。";
+  } else if (storageMethod === "FROZEN") {
+    storageStr =
+      "請冷凍保存於 -18°C 以下，請勿反覆解凍，開封後請儘速使用完畢。";
+  }
+
+  const manufacturer = stickerInfo?.manufacturer || "";
+  const tel = stickerInfo?.tel || "";
+  const fax = stickerInfo?.fax || "";
+  const address = stickerInfo?.address || "";
+
+  return (
+    <div className="w-[130mm] min-w-[130mm] shrink-0 bg-white p-4 font-sans text-black border-[3px] border-black mx-auto box-border overflow-hidden">
+      <div className="text-center font-black text-2xl tracking-widest mb-3 border-b-[3px] border-black pb-2">
+        {name || "產品名稱"}
+      </div>
+
+      <div className="flex gap-4 text-[11px] leading-tight">
+        <div className="w-[55%] flex flex-col gap-1.5 justify-between text-[11px]">
+          <div>
+            <span className="font-bold">成份：</span>
+            {ingredientsText || "無"}
+          </div>
+          <div className="font-bold text-justify leading-relaxed">
+            本產品生產製程廠房，其設備或生產管線有處理甲殼類、芒果、花生、奶類、蛋、堅果類、芝麻、含麩質之穀物、大豆、魚類及二氧化硫
+          </div>
+          {allergenStr && <div className="font-bold">{allergenStr}</div>}
+
+          <div className="mt-1 flex flex-col gap-1 text-[12px]">
+            <div>製造日期：{mfgDateDisplay}</div>
+            <div>有效期限：{expDateDisplay}</div>
+            <div>包裝規格：{spec || "-"}</div>
+            <div>原產地：台灣</div>
+            <div>製造商：{manufacturer}</div>
+            <div>
+              TEL: {tel} {fax ? `FAX: ${fax}` : ""}
+            </div>
+            <div>{address}</div>
+          </div>
+          <div className="mt-1 font-bold text-[12px]">{storageStr}</div>
+        </div>
+
+        <div className="w-[60%] flex flex-col">
+          <div className="border-[2px] border-black p-1.5 flex-1">
+            <div className="text-center font-bold text-[15px] border-b-[2px] border-black pb-1 mb-1.5 tracking-widest">
+              營養標示
+            </div>
+            <div className="flex justify-between border-b border-black pb-1 text-[12px]">
+              <span>每一份量</span>
+              <div className="flex justify-end gap-2 pr-1">
+                <span>10</span>
+                <span className="w-[28px] text-left">公克</span>
+              </div>
+            </div>
+            <div className="flex justify-between border-b-[2px] border-black pb-1 mb-1 text-[12px]">
+              <span>本包裝含</span>
+              <div className="flex justify-end gap-2 pr-1">
+                <span>100</span>
+                <span className="w-[28px] text-left">份</span>
+              </div>
+            </div>
+            <table className="w-full text-right mt-1 text-[12px] border-collapse">
+              <thead>
+                <tr className="border-b border-black">
+                  <th className="text-left font-normal pb-1"></th>
+                  <th className="font-normal pb-1 text-right pr-[16px]">
+                    每份
+                  </th>
+                  <th className="font-normal pb-1 text-right pr-[12px]">
+                    每100公克
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                <NutRow label="熱量" valKey="energy_kcal" unit="大卡" />
+                <NutRow label="蛋白質" valKey="protein" unit="公克" />
+                <NutRow label="脂肪" valKey="fat" unit="公克" />
+                <NutRow
+                  label="飽和脂肪"
+                  indent
+                  valKey="saturated_fat"
+                  unit="公克"
+                />
+                <NutRow
+                  label="反式脂肪"
+                  indent
+                  valKey="trans_fat"
+                  unit="公克"
+                />
+                <NutRow label="碳水化合物" valKey="carbs" unit="公克" />
+                <NutRow label="糖" indent valKey="sugar" unit="公克" />
+                <NutRow label="鈉" valKey="sodium" unit="毫克" />
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 };
 
 // 🌟 遞迴抽取 BOM 底下的所有成分 (支援展開無成分的 RAW 原料)
@@ -693,6 +886,12 @@ export default function MaterialPage() {
     product_registration_no: "",
     origin: "",
     nutrition_snapshots: [],
+    sticker_info: {
+      manufacturer: "",
+      tel: "",
+      fax: "",
+      address: "",
+    },
   };
   const [formData, setFormData] = useState(initialFormData);
 
@@ -725,6 +924,64 @@ export default function MaterialPage() {
   const [viewingMaterial, setViewingMaterial] = useState(null);
 
   const [activeSnapshotId, setActiveSnapshotId] = useState(null);
+
+  const [validityModalOpen, setValidityModalOpen] = useState(false);
+  const [validityTargetId, setValidityTargetId] = useState(null);
+  const [validityForm, setValidityForm] = useState({
+    valid_from: "",
+    valid_until: "",
+  });
+
+  const submitValidity = async () => {
+    if (!validityTargetId) return;
+    try {
+      const res = await fetchWithAuth(
+        `/api/nutrition_snapshots/${validityTargetId}/validity`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(validityForm),
+        },
+      );
+
+      if (!res.ok) {
+        const errJson = await res.json();
+        throw new Error(errJson.detail || "設定失敗");
+      }
+
+      setValidityModalOpen(false);
+      setValidityTargetId(null);
+
+      showAlert("成功", `已成功設定標籤使用區間。`, "success");
+      fetchMaterials();
+
+      const updateSnapshots = (snapshots) =>
+        snapshots.map((s) =>
+          s.id === validityTargetId
+            ? {
+                ...s,
+                valid_from: validityForm.valid_from,
+                valid_until: validityForm.valid_until,
+              }
+            : s,
+        );
+
+      setFormData((prev) => ({
+        ...prev,
+        nutrition_snapshots: updateSnapshots(prev.nutrition_snapshots),
+      }));
+
+      if (viewingMaterial) {
+        setViewingMaterial((prev) => ({
+          ...prev,
+          nutrition_snapshots: updateSnapshots(prev.nutrition_snapshots),
+        }));
+      }
+    } catch (err) {
+      setValidityModalOpen(false);
+      showAlert("發生錯誤", err.message, "error");
+    }
+  };
 
   const [dialog, setDialog] = useState({
     isOpen: false,
@@ -1278,6 +1535,12 @@ export default function MaterialPage() {
       qc_standards: editQC,
       storage_life: material.storage_life || "",
       nutrition_snapshots: material.nutrition_snapshots || [],
+      sticker_info: material.sticker_info || {
+        manufacturer: "",
+        tel: "",
+        fax: "",
+        address: "",
+      },
     });
 
     if (
@@ -1358,6 +1621,8 @@ export default function MaterialPage() {
           pack_capacity:
             formData.type === "PACK" ? formData.pack_capacity : null,
           qc_standards: cleanQC,
+          sticker_info:
+            formData.type === "STICKER" ? formData.sticker_info : null,
         };
 
         const url = isEditing
@@ -1435,6 +1700,17 @@ export default function MaterialPage() {
             : s,
         ),
       }));
+
+      if (viewingMaterial) {
+        setViewingMaterial((prev) => ({
+          ...prev,
+          nutrition_snapshots: prev.nutrition_snapshots.map((s) =>
+            s.id === pendingRejectSnapshotId
+              ? { ...s, status: "REJECTED", review_note: rejectNote.trim() }
+              : s,
+          ),
+        }));
+      }
 
       setRejectModalOpen(false);
       setPendingRejectSnapshotId(null);
@@ -1769,15 +2045,8 @@ export default function MaterialPage() {
             </div>
 
             <div className="p-6 md:p-8 pb-16 overflow-y-auto flex-1 custom-scrollbar">
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-                {/* 🌟 左側：基本資訊與品管 */}
-                <div
-                  className={
-                    ["PRODUCT", "SEMI", "RAW"].includes(viewingMaterial.type)
-                      ? "lg:col-span-8 space-y-6"
-                      : "lg:col-span-12 space-y-6"
-                  }
-                >
+              <div className="flex flex-col gap-8">
+                <div className="w-full space-y-6">
                   <div className="bg-white p-6 rounded-3xl border border-slate-200/60 shadow-[0_2px_10px_-4px_rgba(0,0,0,0.05)]">
                     <h4 className="text-[11px] font-black text-blue-500 uppercase tracking-widest mb-4 border-b border-slate-100 pb-2">
                       基本資訊
@@ -1874,6 +2143,49 @@ export default function MaterialPage() {
                         )}
                     </div>
                   </div>
+                  {/* STICKER 標籤廠商資訊展示區塊 */}
+                  {viewingMaterial.type === "STICKER" &&
+                    viewingMaterial.sticker_info && (
+                      <div className="bg-white p-6 rounded-3xl border border-slate-200/60 shadow-[0_2px_10px_-4px_rgba(0,0,0,0.05)]">
+                        <h4 className="text-[11px] font-black text-blue-500 uppercase tracking-widest mb-4 border-b border-slate-100 pb-2">
+                          標籤顯示資訊
+                        </h4>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                          <div>
+                            <span className="text-[10px] uppercase font-bold text-slate-400/80 mb-1 block">
+                              製造商
+                            </span>
+                            <span className="text-sm font-bold text-slate-800">
+                              {viewingMaterial.sticker_info.manufacturer || "-"}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-[10px] uppercase font-bold text-slate-400/80 mb-1 block">
+                              電話
+                            </span>
+                            <span className="text-sm font-bold text-slate-800 font-mono">
+                              {viewingMaterial.sticker_info.tel || "-"}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-[10px] uppercase font-bold text-slate-400/80 mb-1 block">
+                              傳真
+                            </span>
+                            <span className="text-sm font-bold text-slate-800 font-mono">
+                              {viewingMaterial.sticker_info.fax || "-"}
+                            </span>
+                          </div>
+                          <div className="sm:col-span-2">
+                            <span className="text-[10px] uppercase font-bold text-slate-400/80 mb-1 block">
+                              地址
+                            </span>
+                            <span className="text-sm font-bold text-slate-800">
+                              {viewingMaterial.sticker_info.address || "-"}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
 
                   <HistoricalPriceChart
                     materialId={viewingMaterial.id}
@@ -2041,17 +2353,17 @@ export default function MaterialPage() {
                   </div>
                 </div>
 
-                {/* 🌟 右側：Snapshot 切換與預覽面板 (移除列表) */}
+                {/* 下半部：Snapshot 切換與標籤預覽面板 */}
                 {["PRODUCT", "SEMI", "RAW"].includes(viewingMaterial.type) && (
-                  <div className="lg:col-span-4 space-y-6">
+                  <div className="w-full space-y-6">
                     {viewingMaterial.nutrition_snapshots &&
                       viewingMaterial.nutrition_snapshots.length > 0 && (
                         <div className="bg-white p-6 rounded-3xl border border-slate-200/60 shadow-[0_2px_10px_-4px_rgba(0,0,0,0.05)] relative flex flex-col items-center">
-                          <h4 className="text-[11px] font-black text-purple-600 uppercase tracking-widest mb-4 border-b border-slate-100 pb-2 w-full">
-                            營養價值履歷
+                          <h4 className="text-[11px] font-black text-purple-600 uppercase tracking-widest mb-6 border-b border-slate-100 pb-2 w-full text-center">
+                            營養價值履歷與標籤預覽
                           </h4>
 
-                          <div className="w-full mb-6 relative">
+                          <div className="w-full max-w-2xl mb-6 relative">
                             <CustomSelect
                               options={viewingMaterial.nutrition_snapshots.map(
                                 (snap) => ({
@@ -2069,14 +2381,14 @@ export default function MaterialPage() {
                               )}
                               value={activeSnapshotId}
                               onChange={(val) => setActiveSnapshotId(val)}
-                              placeholder="選擇營養價值"
+                              placeholder="選擇營養價值版本"
                               className="w-full border-purple-200 text-purple-700 font-mono"
                               menuClassName="w-full font-mono text-sm"
                             />
                           </div>
 
                           {activeSnapshotData && (
-                            <div className="w-full text-center text-xs font-bold text-slate-400 mb-3">
+                            <div className="w-full text-center text-xs font-bold text-slate-400 mb-6">
                               {activeSnapshotData.version_num} 建立時間：
                               {new Date(
                                 activeSnapshotData.created_at,
@@ -2084,36 +2396,88 @@ export default function MaterialPage() {
                             </div>
                           )}
 
-                          <NutritionLabel
-                            nutritionData={
-                              activeSnapshotData
-                                ? activeSnapshotData.nutrition_fact
-                                : viewingMaterial.display_nutrition
-                            }
-                          />
+                          {/* 🌟 渲染詳細標籤：因為已經移到下方 100% 寬度區塊，所以有充足的空間顯示 */}
+                          <div className="w-full flex justify-center mt-2">
+                            {["PRODUCT", "SEMI"].includes(
+                              viewingMaterial.type,
+                            ) ? (
+                              <ProductLabelTemplate
+                                name={viewingMaterial.name}
+                                ingredientsText={
+                                  activeSnapshotData?.ingredients_text || ""
+                                }
+                                allergenInfo={
+                                  activeSnapshotData?.allergen_info ||
+                                  viewingMaterial.allergen_info
+                                }
+                                nutritionFact={
+                                  activeSnapshotData
+                                    ? activeSnapshotData.nutrition_fact
+                                    : viewingMaterial.display_nutrition
+                                }
+                                spec={
+                                  activeSnapshotData?.label_info?.spec || ""
+                                }
+                                stickerInfo={
+                                  activeSnapshotData?.label_info ||
+                                  viewingMaterial.sticker_info
+                                }
+                                storageLife={viewingMaterial.storage_life}
+                                storageMethod={viewingMaterial.storage_method}
+                              />
+                            ) : (
+                              <NutritionLabel
+                                nutritionData={
+                                  activeSnapshotData
+                                    ? activeSnapshotData.nutrition_fact
+                                    : viewingMaterial.display_nutrition
+                                }
+                              />
+                            )}
+                          </div>
 
                           {/* 顯示預計展開成分清單 (來自快照) */}
                           {activeSnapshotData && (
-                            <div className="w-full mt-6 bg-slate-50 p-4 rounded-xl border border-slate-200 shadow-sm text-left">
-                              <span className="text-[10px] uppercase font-bold text-slate-400 mb-1 block">
-                                成分細節
+                            <div className="w-full mt-8 bg-slate-50 p-5 rounded-xl border border-slate-200 shadow-sm text-left">
+                              <span className="text-[10px] uppercase font-bold text-slate-400 mb-2 block">
+                                成分細節 (快照存檔紀錄)
                               </span>
-                              <span className="text-xs font-bold text-slate-700 leading-relaxed">
+                              <span className="text-sm font-bold text-slate-700 leading-relaxed">
                                 {activeSnapshotData.ingredients_text || "無"}
                               </span>
                             </div>
                           )}
                         </div>
                       )}
+
                     {(!viewingMaterial.nutrition_snapshots ||
                       viewingMaterial.nutrition_snapshots.length === 0) && (
                       <div className="bg-slate-100 p-6 md:p-8 rounded-3xl border border-slate-200/60 shadow-inner flex flex-col items-center relative">
                         <h4 className="text-[11px] font-black text-slate-500 uppercase tracking-widest mb-6 w-full text-center border-b border-slate-200 pb-2 pt-2">
                           營養標示預覽
                         </h4>
-                        <NutritionLabel
-                          nutritionData={viewingMaterial.display_nutrition}
-                        />
+                        <div className="w-full flex justify-center mt-2">
+                          {["PRODUCT"].includes(viewingMaterial.type) ? (
+                            <ProductLabelTemplate
+                              name={viewingMaterial.name}
+                              ingredientsText={
+                                viewingMaterial.display_ingredients
+                                  ?.map((i) => i.name)
+                                  .join("、") || ""
+                              }
+                              allergenInfo={viewingMaterial.allergen_info}
+                              nutritionFact={viewingMaterial.display_nutrition}
+                              spec={viewingMaterial.sticker_info?.spec || ""}
+                              stickerInfo={viewingMaterial.sticker_info}
+                              storageLife={viewingMaterial.storage_life}
+                              storageMethod={viewingMaterial.storage_method}
+                            />
+                          ) : (
+                            <NutritionLabel
+                              nutritionData={viewingMaterial.display_nutrition}
+                            />
+                          )}
+                        </div>
                       </div>
                     )}
                   </div>
@@ -2306,6 +2670,97 @@ export default function MaterialPage() {
                     )}
                   </div>
                 </div>
+                {/* STICKER 標籤廠商資訊輸入區塊 */}
+                {formData.type === "STICKER" && (
+                  <div className="bg-white p-6 rounded-3xl border border-slate-200/60 shadow-[0_2px_10px_-4px_rgba(0,0,0,0.05)] animate-in fade-in">
+                    <h4 className="text-[11px] font-black text-rose-500 uppercase tracking-widest mb-4 border-b border-slate-100 pb-2">
+                      標籤顯示資訊
+                    </h4>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-500 mb-1.5 uppercase">
+                          製造商 <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={formData.sticker_info?.manufacturer || ""}
+                          onChange={(e) =>
+                            setFormData((prev) => ({
+                              ...prev,
+                              sticker_info: {
+                                ...prev.sticker_info,
+                                manufacturer: e.target.value,
+                              },
+                            }))
+                          }
+                          required={formData.type === "STICKER"}
+                          className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-4 focus:ring-rose-500/10 focus:border-rose-500 outline-none text-sm font-bold text-slate-800 transition-all shadow-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-500 mb-1.5 uppercase">
+                          電話 <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={formData.sticker_info?.tel || ""}
+                          onChange={(e) =>
+                            setFormData((prev) => ({
+                              ...prev,
+                              sticker_info: {
+                                ...prev.sticker_info,
+                                tel: e.target.value,
+                              },
+                            }))
+                          }
+                          required={formData.type === "STICKER"}
+                          className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-4 focus:ring-rose-500/10 focus:border-rose-500 outline-none text-sm font-bold text-slate-800 transition-all shadow-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-500 mb-1.5 uppercase">
+                          傳真
+                        </label>
+                        <input
+                          type="text"
+                          value={formData.sticker_info?.fax || ""}
+                          onChange={(e) =>
+                            setFormData((prev) => ({
+                              ...prev,
+                              sticker_info: {
+                                ...prev.sticker_info,
+                                fax: e.target.value,
+                              },
+                            }))
+                          }
+                          className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-4 focus:ring-rose-500/10 focus:border-rose-500 outline-none text-sm font-bold text-slate-800 transition-all shadow-sm"
+                          placeholder=""
+                        />
+                      </div>
+                      <div className="sm:col-span-2 lg:col-span-3">
+                        <label className="block text-[11px] font-bold text-slate-500 mb-1.5 uppercase">
+                          地址 <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={formData.sticker_info?.address || ""}
+                          onChange={(e) =>
+                            setFormData((prev) => ({
+                              ...prev,
+                              sticker_info: {
+                                ...prev.sticker_info,
+                                address: e.target.value,
+                              },
+                            }))
+                          }
+                          required={formData.type === "STICKER"}
+                          className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-4 focus:ring-rose-500/10 focus:border-rose-500 outline-none text-sm font-bold text-slate-800 transition-all shadow-sm"
+                          placeholder=""
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* 🌟 根據 type 決定成分展開清單為 ReadOnly 或可編輯 */}
                 {["RAW", "SEMI", "PRODUCT"].includes(formData.type) && (
@@ -2797,38 +3252,97 @@ export default function MaterialPage() {
                                       )
                                     </div>
                                   )}
+                                  {snap.valid_from || snap.valid_until ? (
+                                    <div className="text-indigo-600 font-bold mt-1">
+                                      使用區間: {snap.valid_from || "未指定"} ~{" "}
+                                      {snap.valid_until || "永久有效"}
+                                    </div>
+                                  ) : (
+                                    isApproved && (
+                                      <div className="text-slate-400 mt-1 font-bold">
+                                        尚未設定使用區間
+                                      </div>
+                                    )
+                                  )}
                                 </div>
                               </div>
 
                               {/* 🌟 渲染完整營養標籤 */}
-                              <div className="flex-1 flex justify-center bg-white py-4 rounded-xl border border-slate-200">
-                                <div className="scale-90 origin-top">
-                                  <NutritionLabel
-                                    nutritionData={snap.nutrition_fact}
-                                  />
+                              {/* 🌟 渲染完整營養標籤 */}
+                              <div className="flex-1 flex justify-center bg-slate-100 py-4 rounded-xl border border-slate-200 overflow-hidden">
+                                <div className="scale-[0.85] origin-top flex justify-center">
+                                  {["PRODUCT"].includes(formData.type) ? (
+                                    <ProductLabelTemplate
+                                      name={formData.name}
+                                      ingredientsText={
+                                        snap.ingredients_text || ""
+                                      }
+                                      allergenInfo={
+                                        snap.allergen_info ||
+                                        formData.allergen_info.join(",")
+                                      }
+                                      nutritionFact={snap.nutrition_fact}
+                                      spec={snap.label_info?.spec || ""}
+                                      stickerInfo={
+                                        snap.label_info || formData.sticker_info
+                                      }
+                                      storageLife={formData.storage_life}
+                                      storageMethod={formData.storage_method}
+                                    />
+                                  ) : (
+                                    <NutritionLabel
+                                      nutritionData={snap.nutrition_fact}
+                                    />
+                                  )}
                                 </div>
                               </div>
 
-                              {isPending && isRD && (
+                              {(isPending || isApproved) && isRD && (
                                 <div className="mt-auto pt-3 border-t border-slate-200 flex gap-2">
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      handleReviewSnapshot(snap.id, "approve")
-                                    }
-                                    className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold py-2 rounded-lg flex items-center justify-center gap-1.5 transition-colors"
-                                  >
-                                    <ClipboardCheck size={14} /> 核准
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      handleReviewSnapshot(snap.id, "reject")
-                                    }
-                                    className="flex-1 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 text-xs font-bold py-2 rounded-lg flex items-center justify-center gap-1.5 transition-colors"
-                                  >
-                                    退回
-                                  </button>
+                                  {isPending && (
+                                    <>
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          handleReviewSnapshot(
+                                            snap.id,
+                                            "approve",
+                                          )
+                                        }
+                                        className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold py-2 rounded-lg flex items-center justify-center gap-1.5 transition-colors"
+                                      >
+                                        <ClipboardCheck size={14} /> 核准
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          handleReviewSnapshot(
+                                            snap.id,
+                                            "reject",
+                                          )
+                                        }
+                                        className="flex-1 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 text-xs font-bold py-2 rounded-lg flex items-center justify-center gap-1.5 transition-colors"
+                                      >
+                                        退回
+                                      </button>
+                                    </>
+                                  )}
+                                  {isApproved && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setValidityTargetId(snap.id);
+                                        setValidityForm({
+                                          valid_from: snap.valid_from || "",
+                                          valid_until: snap.valid_until || "",
+                                        });
+                                        setValidityModalOpen(true);
+                                      }}
+                                      className="flex-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 border border-indigo-200 text-xs font-bold py-2 rounded-lg flex items-center justify-center gap-1.5 transition-colors"
+                                    >
+                                      設定使用區間
+                                    </button>
+                                  )}
                                 </div>
                               )}
                               {snap.review_note && (
@@ -2907,6 +3421,73 @@ export default function MaterialPage() {
                 className="px-5 py-2 text-white bg-rose-500 hover:bg-rose-600 text-sm font-bold rounded-xl shadow-md transition-colors"
               >
                 確認退回
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* ========================================================= */}
+      {/* 🌟 設定效期 Modal */}
+      {/* ========================================================= */}
+      {validityModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[70] p-4">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="p-6 pb-4">
+              <h3 className="text-lg font-black text-indigo-600 flex items-center gap-2 mb-4">
+                <Calendar size={20} /> 設定標籤使用區間
+              </h3>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1.5">
+                    生效起始日
+                  </label>
+                  <input
+                    type="date"
+                    value={validityForm.valid_from}
+                    onChange={(e) =>
+                      setValidityForm({
+                        ...validityForm,
+                        valid_from: e.target.value,
+                      })
+                    }
+                    className="w-full px-4 py-2 border border-slate-300 rounded-xl focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none text-sm font-medium text-slate-800 transition-all"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1.5">
+                    生效結束日 (未填寫則表示永久有效)
+                  </label>
+                  <input
+                    type="date"
+                    value={validityForm.valid_until}
+                    onChange={(e) =>
+                      setValidityForm({
+                        ...validityForm,
+                        valid_until: e.target.value,
+                      })
+                    }
+                    className="w-full px-4 py-2 border border-slate-300 rounded-xl focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none text-sm font-medium text-slate-800 transition-all"
+                  />
+                </div>
+              </div>
+            </div>
+            <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setValidityModalOpen(false);
+                  setValidityTargetId(null);
+                }}
+                className="px-4 py-2 text-slate-600 hover:bg-slate-200 bg-slate-100 text-sm font-bold rounded-xl transition-colors"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={submitValidity}
+                className="px-5 py-2 text-white bg-indigo-500 hover:bg-indigo-600 text-sm font-bold rounded-xl shadow-md transition-colors"
+              >
+                儲存設定
               </button>
             </div>
           </div>

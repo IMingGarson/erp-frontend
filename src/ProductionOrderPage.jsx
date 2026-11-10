@@ -11,6 +11,7 @@ import {
   Tag,
   ChevronDown,
   CheckCircle2,
+  AlertCircle,
 } from "lucide-react";
 import { fetchWithAuth } from "./utils/fetchWithAuth";
 import { useNavigate } from "react-router-dom";
@@ -638,87 +639,26 @@ const ProductLabelTemplate = ({
   servingSize,
   servingsPerContainer,
   calculatedNut100,
-  fullMatData,
-  manufacturer = "基香食品有限公司",
-  tel = "03-4988228",
-  fax = "03-4988159",
-  address = "桃園市觀音區崙坪里1鄰1之10號",
+  manufacturer = "",
+  tel = "",
+  fax = "",
+  address = "",
+  ingredientsText,
+  allergenInfo,
 }) => {
   if (!order || !order.product_profile) return null;
   const p = order.product_profile;
 
-  let rawIngredients = "";
+  // 🌟 1. 核心邏輯：直接取用由外部 (Snapshot 或 BOMCreatePage 同級演算法) 傳入的成分與過敏原字串
+  // 我們不再於列印元件內做複雜的 BOM 遞迴運算，以確保「所見即所印」
+  let rawIngredients = ingredientsText || "";
 
-  if (fullMatData) {
-    const ingredientMap = new Map();
-
-    let baseQuantity = 1;
-    const validBom = (fullMatData.boms || []).find(
-      (b) => b.is_active !== false,
-    );
-    if (validBom && parseFloat(validBom.base_quantity) > 0) {
-      baseQuantity = parseFloat(validBom.base_quantity);
-    }
-
-    if (fullMatData.ingredients) {
-      fullMatData.ingredients.forEach((item) => {
-        if (!item.is_active || !item.ingredient_detail) return;
-        const ing = item.ingredient_detail;
-        const percent =
-          ing.is_additive && ing.legal_limit_percent
-            ? parseFloat(ing.legal_limit_percent)
-            : 2;
-
-        const estimatedWeight = baseQuantity * (percent / 100);
-        ingredientMap.set(
-          ing.name,
-          (ingredientMap.get(ing.name) || 0) + estimatedWeight,
-        );
-      });
-    }
-
-    if (fullMatData.boms) {
-      fullMatData.boms.forEach((bom, bomIdx) => {
-        if (bom.is_active === false) return;
-        if (
-          bom.child_type === "PACK" ||
-          bom.child_type === "OTHER" ||
-          bom.child_type === "SEMI"
-        )
-          return;
-
-        const currentWeight = parseFloat(bom.quantity_required) || 0;
-        const childIngs = bom.child_ingredients || [];
-
-        if (childIngs.length > 0) {
-          childIngs.forEach((item, childIdx) => {
-            if (!item.is_active || !item.ingredient_detail) return;
-            const ingName = item.ingredient_detail.name;
-            const stableWeight =
-              currentWeight - childIdx * 0.000001 - bomIdx * 0.0000001;
-            ingredientMap.set(
-              ingName,
-              (ingredientMap.get(ingName) || 0) + stableWeight,
-            );
-          });
-        } else {
-          const fallbackName = bom.child_name;
-          ingredientMap.set(
-            fallbackName,
-            (ingredientMap.get(fallbackName) || 0) + currentWeight,
-          );
-        }
-      });
-    }
-
-    rawIngredients = Array.from(ingredientMap.entries())
-      .sort((a, b) => b[1] - a[1])
-      .map((entry) => entry[0])
-      .join("、");
-  } else {
+  // 如果真的連外部字串都沒有 (例如極早期的舊訂單且無快照)，才用極簡防呆墊檔
+  if (!rawIngredients) {
     rawIngredients = (order.materials_info || [])
       .filter(
-        (m) => m.type !== "PACK" && m.type !== "OTHER" && m.type !== "SEMI",
+        (m) =>
+          m.type !== "PACK" && m.type !== "OTHER" && m.type !== "PACKAGING",
       )
       .sort((a, b) => parseFloat(b.requiredQty) - parseFloat(a.requiredQty))
       .map((m) => m.materialName)
@@ -731,7 +671,7 @@ const ProductLabelTemplate = ({
   const format100g = (val) => parseFloat(val || 0).toFixed(1);
   const calcPerServing = (val) => {
     const num = parseFloat(val || 0);
-    // 🌟 核心修正：當手動設定份量為 100g 時，直接回傳以消滅任何浮點數運算的進位誤差
+    // 防呆：如果剛好一份就是 100g，直接輸出避免浮點數換算誤差
     if (Number(servingSize) === 100) {
       return num.toFixed(1);
     }
@@ -759,7 +699,13 @@ const ProductLabelTemplate = ({
     </tr>
   );
 
-  const rawAllergens = p.allergen_info ? p.allergen_info.split(",") : [];
+  // 🌟 3. 處理過敏原
+  const rawAllergens = allergenInfo
+    ? allergenInfo.split(",")
+    : p.allergen_info
+      ? p.allergen_info.split(",")
+      : [];
+
   const activeAllergens = rawAllergens
     .map((a) => ALLERGEN_MAP[a.trim()] || a.trim())
     .filter(Boolean);
@@ -797,11 +743,12 @@ const ProductLabelTemplate = ({
       </div>
 
       <div className="flex gap-4 text-[11px] leading-tight">
-        {/* 🌟 調整左半邊的寬度佔比 */}
+        {/* 左側資訊區塊 */}
         <div className="w-[55%] flex flex-col gap-1.5 justify-between text-[11px]">
           <div>
             <span className="font-bold">成份：</span>
-            {rawIngredients}
+            {/* 🌟 在這裡正確顯示了成分字串 */}
+            {rawIngredients || "無"}
           </div>
           <div className="font-bold text-justify leading-relaxed">
             本產品生產製程廠房，其設備或生產管線有處理甲殼類、芒果、花生、奶類、蛋、堅果類、芝麻、含麩質之穀物、大豆、魚類及二氧化硫
@@ -815,14 +762,14 @@ const ProductLabelTemplate = ({
             <div>原產地：{p.origin || "台灣"}</div>
             <div>製造商：{manufacturer}</div>
             <div>
-              TEL: {tel} FAX: {fax}
+              TEL: {tel} {fax ? `FAX: ${fax}` : ""}
             </div>
             <div>{address}</div>
           </div>
           <div className="mt-1 font-bold text-[12px]">{storageStr}</div>
         </div>
 
-        {/* 🌟 右側營養標示區塊加寬，並全面套用精準對齊 */}
+        {/* 右側營養標示區塊 */}
         <div className="w-[60%] flex flex-col">
           <div className="border-[2px] border-black p-1.5 flex-1">
             <div className="text-center font-bold text-[15px] border-b-[2px] border-black pb-1 mb-1.5 tracking-widest">
@@ -1917,6 +1864,8 @@ const ProductionOrderPrintTemplate = ({ data, type, sortBySequence }) => {
               tel={info.tel}
               fax={info.fax}
               address={info.address}
+              ingredientsText={info.ingredientsText}
+              allergenInfo={info.allergenInfo}
             />
           </div>
         ))}
@@ -2178,44 +2127,15 @@ export default function ProductionOrderPage() {
       }
     }
 
-    let calculatedNut100 = orderToPrint.product_profile?.nutrition_fact || {};
-    let fullMatData = null;
-    let initialSnapshotId = "";
-    let fetchedSnapshots = []; // 🌟 準備存放撈回來的快照
+    // 🌟 1. 直接取用後端 API 算好的生效快照，徹底免除前端 fetch 與比對邏輯
+    const activeSnap = orderToPrint.active_nutrition_snapshot;
 
-    try {
-      // 🌟 同時抓取精簡版物料清單 與 獨立的快照清單
-      const [matRes, snapRes] = await Promise.all([
-        fetchWithAuth(`/api/materials/${orderToPrint.product_id}?lite=true`),
-        fetchWithAuth(
-          `/api/nutrition_snapshots?material=${orderToPrint.product_id}`,
-        ),
-      ]);
-
-      if (matRes.ok) {
-        const matJson = await matRes.json();
-        fullMatData = matJson.data || matJson;
-      }
-
-      if (snapRes.ok) {
-        const snapJson = await snapRes.json();
-        fetchedSnapshots = snapJson.data || snapJson.results || snapJson || [];
-
-        // 如果有快照，預設選中第一筆(最新)，否則依賴 BOM 重算
-        if (fetchedSnapshots.length > 0) {
-          initialSnapshotId = fetchedSnapshots[0].id;
-          calculatedNut100 = fetchedSnapshots[0].nutrition_fact;
-        } else if (fullMatData) {
-          calculatedNut100 = calculateNutritionFromBOMsAndIngredients(
-            fullMatData.boms,
-            fullMatData.ingredients,
-            fullMatData.unit,
-          );
-        }
-      }
-    } catch (err) {
-      console.error("Failed to fetch material BOMs or snapshots", err);
-    }
+    let calculatedNut100 = activeSnap?.nutrition_fact || {};
+    let autoLabelInfo = activeSnap?.label_info || {};
+    let autoIngredientsText = activeSnap?.ingredients_text || "";
+    let autoAllergens = activeSnap?.allergen_info || "";
+    let initialSnapshotId = activeSnap?.id || "";
+    let versionNum = activeSnap?.version_num || "";
 
     const p = orderToPrint.product_profile;
     const baseCapacity = p?.inner_pack_capacity || p?.outer_pack_capacity || 1;
@@ -2228,16 +2148,21 @@ export default function ProductionOrderPage() {
       isOpen: true,
       order: orderToPrint,
       mfgDate: orderToPrint.manufacture_date || getDaysAgoStr(0),
-      servingSize: defaultServingSize,
-      servingsPerContainer: defaultTotalServings,
+
+      servingSize: autoLabelInfo.servingSize || defaultServingSize,
+      servingsPerContainer:
+        autoLabelInfo.servingsPerContainer || defaultTotalServings,
+      manufacturer: autoLabelInfo.manufacturer || "基香食品有限公司",
+      tel: autoLabelInfo.tel || "03-4988228",
+      fax: autoLabelInfo.fax || "03-4988159",
+      address: autoLabelInfo.address || "桃園市觀音區崙坪里1鄰1之10號",
+
       calculatedNut100,
-      fullMatData,
+      ingredientsText: autoIngredientsText, // 🌟 傳入成分
+      allergenInfo: autoAllergens, // 🌟 傳入過敏原
+
       selectedSnapshotId: initialSnapshotId,
-      snapshots: fetchedSnapshots,
-      manufacturer: "基香食品有限公司",
-      tel: "03-4988228",
-      fax: "03-4988159",
-      address: "桃園市觀音區崙坪里1鄰1之10號",
+      versionNum: versionNum, // 🌟 傳入版號供 UI 顯示
     });
   };
 
@@ -2253,6 +2178,8 @@ export default function ProductionOrderPage() {
       tel,
       fax,
       address,
+      ingredientsText, // 🌟 新增
+      allergenInfo, // 🌟 新增
     } = labelModal;
 
     try {
@@ -2282,6 +2209,8 @@ export default function ProductionOrderPage() {
         tel,
         fax,
         address,
+        ingredientsText, // 🌟 往下傳遞給 PrintTemplate
+        allergenInfo, // 🌟 往下傳遞給 PrintTemplate
       },
     ]);
     setLabelModal((prev) => ({ ...prev, isOpen: false }));
@@ -2733,14 +2662,14 @@ export default function ProductionOrderPage() {
         </div>
 
         {/* ========================================================= */}
-        {/* 🌟 WYSIWYG 標籤設定與預覽 Modal */}
+        {/* 🌟 產品標籤列印預覽 Modal */}
         {/* ========================================================= */}
         {labelModal.isOpen && labelModal.order && (
           <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
-            <div className="bg-slate-50 rounded-3xl shadow-2xl w-full max-w-6xl h-[95vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 border border-slate-200/50">
+            <div className="bg-slate-50 rounded-3xl shadow-2xl w-full max-w-4xl flex flex-col overflow-hidden animate-in fade-in zoom-in-95 border border-slate-200/50">
               <div className="p-5 border-b border-slate-200/60 flex justify-between items-center bg-white/90 backdrop-blur-md shrink-0">
                 <h3 className="text-xl font-black text-slate-800 flex items-center gap-2">
-                  <Tag className="text-amber-500" size={24} /> 產品標籤列印設定
+                  <Tag className="text-amber-500" size={24} /> 產品標籤預覽
                 </h3>
                 <button
                   onClick={() =>
@@ -2752,139 +2681,32 @@ export default function ProductionOrderPage() {
                 </button>
               </div>
 
-              <div className="flex flex-col lg:flex-row flex-1 overflow-hidden">
-                {/* 左側：設定控制面板 */}
-                <div className="w-full lg:w-[350px] bg-white border-r border-slate-200/60 p-6 flex flex-col gap-6 overflow-y-auto custom-scrollbar">
-                  {/* 🌟 1. & 2. 營養價值快照選擇與即時運算面板 */}
-                  <div className="bg-purple-50/50 p-4 rounded-2xl border border-purple-100 flex flex-col gap-3">
-                    <label className="block text-[11px] font-bold text-purple-700 uppercase flex items-center gap-1.5">
-                      <Tag size={14} /> 選擇營養價值版本
-                    </label>
-                    <SnapshotSelectDropdown
-                      snapshots={labelModal.snapshots}
-                      selectedId={labelModal.selectedSnapshotId}
-                      onChange={(snapId) => {
-                        const snap = labelModal.snapshots.find(
-                          (s) => String(s.id) === String(snapId),
-                        );
-                        setLabelModal((prev) => ({
-                          ...prev,
-                          selectedSnapshotId: snapId,
-                          calculatedNut100: snap
-                            ? snap.nutrition_fact
-                            : prev.calculatedNut100,
-                        }));
-                      }}
-                    />
-                  </div>
-                  <div className="text-[12px] text-slate-600 leading-relaxed font-bold flex items-center gap-1.5">
-                    <Calendar size={14} className="text-amber-600" />
-                    此物料保存期限：
-                    <span className="text-amber-600">
-                      {labelModal.order?.product_profile?.storage_life ||
-                        labelModal.fullMatData?.storage_life ||
-                        "未設定"}
-                    </span>
-                  </div>
-
-                  <div className="bg-amber-50/50 p-4 rounded-2xl border border-amber-100 flex flex-col gap-4">
-                    <div>
-                      <label className="block text-[11px] font-bold text-amber-700 mb-1.5 uppercase">
-                        每一份量 (公克)
-                      </label>
-                      <input
-                        type="number"
-                        value={labelModal.servingSize}
-                        onChange={(e) =>
-                          setLabelModal({
-                            ...labelModal,
-                            servingSize: e.target.value,
-                          })
-                        }
-                        className="w-full px-4 py-2 bg-white border border-amber-200 rounded-lg text-sm font-bold focus:ring-2 focus:ring-amber-500/20 focus:border-amber-400 outline-none transition-all"
-                      />
+              <div className="flex flex-col flex-1 overflow-y-auto custom-scrollbar p-8 items-center bg-slate-100 shadow-inner relative">
+                <div className="mb-6 w-full max-w-[600px] text-center">
+                  {labelModal.selectedSnapshotId ? (
+                    <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 px-4 py-3 rounded-xl shadow-sm">
+                      <span className="font-bold flex items-center justify-center gap-2 mb-1">
+                        <CheckCircle2 size={16} className="text-emerald-600" />
+                        已載入生效區間內的核准標籤資料
+                      </span>
+                      <span className="text-xs font-medium opacity-80">
+                        版本：{labelModal.versionNum}
+                      </span>
                     </div>
-                    <div>
-                      <label className="block text-[11px] font-bold text-amber-700 mb-1.5 uppercase">
-                        本包裝總份數
-                      </label>
-                      <input
-                        type="number"
-                        value={labelModal.servingsPerContainer}
-                        onChange={(e) =>
-                          setLabelModal({
-                            ...labelModal,
-                            servingsPerContainer: e.target.value,
-                          })
-                        }
-                        className="w-full px-4 py-2 bg-white border border-amber-200 rounded-lg text-sm font-bold focus:ring-2 focus:ring-amber-500/20 focus:border-amber-400 outline-none transition-all"
-                      />
+                  ) : (
+                    <div className="bg-amber-50 border border-amber-200 text-amber-800 px-4 py-3 rounded-xl shadow-sm">
+                      <span className="font-bold flex items-center justify-center gap-2 mb-1">
+                        <AlertCircle size={16} className="text-amber-600" />
+                        無生效中的快照版本
+                      </span>
+                      <span className="text-xs font-medium opacity-80">
+                        此產品目前沒有在效期內且已核准的標籤資料，無法列印出貨標籤。
+                      </span>
                     </div>
-                  </div>
-
-                  {/* 🌟 3. 廠商客製化設定面板 */}
-                  <div className="bg-blue-50/50 p-4 rounded-2xl border border-blue-100 flex flex-col gap-3">
-                    <label className="block text-[11px] font-bold text-blue-700 uppercase">
-                      標籤廠商聯絡資訊
-                    </label>
-                    <div>
-                      <input
-                        type="text"
-                        placeholder="製造商名稱"
-                        value={labelModal.manufacturer}
-                        onChange={(e) =>
-                          setLabelModal({
-                            ...labelModal,
-                            manufacturer: e.target.value,
-                          })
-                        }
-                        className="w-full px-3 py-1.5 bg-white border border-blue-200 rounded-lg text-sm font-bold focus:ring-2 focus:border-blue-400 outline-none transition-all shadow-sm"
-                      />
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <input
-                        type="text"
-                        placeholder="TEL"
-                        value={labelModal.tel}
-                        onChange={(e) =>
-                          setLabelModal({ ...labelModal, tel: e.target.value })
-                        }
-                        className="w-full px-3 py-1.5 bg-white border border-blue-200 rounded-lg text-sm font-bold focus:ring-2 focus:border-blue-400 outline-none transition-all shadow-sm"
-                      />
-                      <input
-                        type="text"
-                        placeholder="FAX"
-                        value={labelModal.fax}
-                        onChange={(e) =>
-                          setLabelModal({ ...labelModal, fax: e.target.value })
-                        }
-                        className="w-full px-3 py-1.5 bg-white border border-blue-200 rounded-lg text-sm font-bold focus:ring-2 focus:border-blue-400 outline-none transition-all shadow-sm"
-                      />
-                    </div>
-                    <div>
-                      <input
-                        type="text"
-                        placeholder="地址"
-                        value={labelModal.address}
-                        onChange={(e) =>
-                          setLabelModal({
-                            ...labelModal,
-                            address: e.target.value,
-                          })
-                        }
-                        className="w-full px-3 py-1.5 bg-white border border-blue-200 rounded-lg text-sm font-bold focus:ring-2 focus:border-blue-400 outline-none transition-all shadow-sm"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="text-[11px] text-slate-400 leading-relaxed font-bold">
-                    💡
-                    提示：右側為法規標籤預覽。當您點擊「儲存並列印」時，所選的製造日期將被寫入資料庫保存。
-                  </div>
+                  )}
                 </div>
 
-                {/* 右側：擬真預覽區域 */}
-                <div className="flex-1 bg-slate-100 p-8 flex items-center justify-center overflow-auto relative shadow-inner">
+                {labelModal.selectedSnapshotId ? (
                   <div className="shadow-[0_10px_40px_-10px_rgba(0,0,0,0.15)] ring-1 ring-black/5 transform origin-top transition-transform">
                     <ProductLabelTemplate
                       order={labelModal.order}
@@ -2893,38 +2715,122 @@ export default function ProductionOrderPage() {
                       servingsPerContainer={labelModal.servingsPerContainer}
                       calculatedNut100={labelModal.calculatedNut100}
                       fullMatData={labelModal.fullMatData}
-                      // 🌟 將輸入框的值丟入預覽模組
+                      ingredientsText={labelModal.ingredientsText}
+                      allergenInfo={labelModal.allergenInfo}
                       manufacturer={labelModal.manufacturer}
                       tel={labelModal.tel}
                       fax={labelModal.fax}
                       address={labelModal.address}
                     />
                   </div>
-                </div>
-              </div>
-
-              <div className="p-5 border-t border-slate-200/60 bg-white shrink-0 flex justify-end gap-3 z-10">
-                <button
-                  type="button"
-                  onClick={() =>
-                    setLabelModal({ ...labelModal, isOpen: false })
-                  }
-                  className="px-6 py-2.5 text-slate-600 bg-white border border-slate-300 hover:bg-slate-50 text-sm font-bold rounded-xl transition-colors"
-                >
-                  取消
-                </button>
-                <button
-                  type="button"
-                  onClick={handleConfirmAndPrintLabel}
-                  className="px-8 py-2.5 text-white bg-amber-500 hover:bg-amber-600 text-sm font-bold rounded-xl shadow-md transition-all flex items-center gap-2 hover:-translate-y-0.5"
-                >
-                  <Printer size={16} /> 儲存並列印標籤
-                </button>
+                ) : (
+                  <div className="w-[130mm] min-h-[250px] bg-slate-200/50 border-2 border-dashed border-slate-300 rounded-2xl flex flex-col items-center justify-center text-slate-400">
+                    <Tag size={48} className="mb-4 opacity-30" />
+                    <span className="text-lg font-black text-slate-500 tracking-widest">
+                      無審核標籤資料
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
           </div>
         )}
+        {/* ========================================================= */}
+        {/* 🌟 產品標籤列印預覽 Modal */}
+        {/* ========================================================= */}
+        {labelModal.isOpen && labelModal.order && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
+            <div className="bg-slate-50 rounded-3xl shadow-2xl w-full max-w-4xl flex flex-col overflow-hidden animate-in fade-in zoom-in-95 border border-slate-200/50">
+              <div className="p-5 border-b border-slate-200/60 flex justify-between items-center bg-white/90 backdrop-blur-md shrink-0">
+                <h3 className="text-xl font-black text-slate-800 flex items-center gap-2">
+                  <Tag className="text-amber-500" size={24} /> 產品標籤預覽
+                </h3>
+                <button
+                  onClick={() =>
+                    setLabelModal({ ...labelModal, isOpen: false })
+                  }
+                  className="text-slate-400 hover:text-slate-700 text-3xl leading-none outline-none transition-colors"
+                >
+                  ×
+                </button>
+              </div>
 
+              <div className="flex flex-col flex-1 overflow-y-auto custom-scrollbar p-8 items-center bg-slate-100 shadow-inner relative">
+                <div className="mb-6 w-full max-w-[600px] text-center">
+                  {labelModal.selectedSnapshotId ? (
+                    <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 px-4 py-3 rounded-xl shadow-sm">
+                      <span className="font-bold flex items-center justify-center gap-2 mb-1">
+                        <CheckCircle2 size={16} className="text-emerald-600" />
+                        已載入生效區間內的核准標籤資料
+                      </span>
+                      <span className="text-xs font-medium opacity-80">
+                        版本：{labelModal.versionNum}
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="bg-amber-50 border border-amber-200 text-amber-800 px-4 py-3 rounded-xl shadow-sm">
+                      <span className="font-bold flex items-center justify-center gap-2 mb-1">
+                        <AlertCircle size={16} className="text-amber-600" />
+                        無生效中的快照版本
+                      </span>
+                      <span className="text-xs font-medium opacity-80">
+                        此產品目前沒有在效期內且已核准的標籤資料，無法列印出貨標籤。
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                {labelModal.selectedSnapshotId ? (
+                  <div className="shadow-[0_10px_40px_-10px_rgba(0,0,0,0.15)] ring-1 ring-black/5 transform origin-top transition-transform mb-4">
+                    <ProductLabelTemplate
+                      order={labelModal.order}
+                      mfgDate={labelModal.mfgDate}
+                      servingSize={labelModal.servingSize}
+                      servingsPerContainer={labelModal.servingsPerContainer}
+                      calculatedNut100={labelModal.calculatedNut100}
+                      fullMatData={labelModal.fullMatData}
+                      ingredientsText={labelModal.ingredientsText}
+                      allergenInfo={labelModal.allergenInfo}
+                      manufacturer={labelModal.manufacturer}
+                      tel={labelModal.tel}
+                      fax={labelModal.fax}
+                      address={labelModal.address}
+                    />
+                  </div>
+                ) : (
+                  <div className="w-[130mm] min-h-[250px] bg-slate-200/50 border-2 border-dashed border-slate-300 rounded-2xl flex flex-col items-center justify-center text-slate-400">
+                    <Tag size={48} className="mb-4 opacity-30" />
+                    <span className="text-lg font-black text-slate-500 tracking-widest">
+                      無審核標籤資料
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              <div className="p-5 border-t border-slate-200/60 bg-white shrink-0 flex justify-between items-center z-10">
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setLabelModal({ ...labelModal, isOpen: false })
+                    }
+                    className="px-6 py-2.5 text-slate-600 bg-white border border-slate-300 hover:bg-slate-50 text-sm font-bold rounded-xl transition-colors"
+                  >
+                    取消
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleConfirmAndPrintLabel}
+                    disabled={!labelModal.selectedSnapshotId}
+                    className="px-8 py-2.5 text-white bg-amber-500 hover:bg-amber-600 text-sm font-bold rounded-xl shadow-md transition-all flex items-center gap-2 hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:shadow-none"
+                  >
+                    <Printer size={16} /> 儲存並列印標籤
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
         <CustomDialog
           isOpen={dialog.isOpen}
           type={dialog.type}

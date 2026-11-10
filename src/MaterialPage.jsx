@@ -142,6 +142,8 @@ const ProductLabelTemplate = ({
   stickerInfo,
   storageLife,
   storageMethod = "ROOM_TEMP",
+  servingSize = 10,
+  servingsPerContainer = 100,
 }) => {
   const today = new Date();
   const mfgDateDisplay = `${today.getFullYear()}.${String(today.getMonth() + 1).padStart(2, "0")}.${String(today.getDate()).padStart(2, "0")}`;
@@ -158,8 +160,11 @@ const ProductLabelTemplate = ({
   // 營養素格式化
   const nut100 = nutritionFact || emptyNutrition;
   const format100g = (val) => parseFloat(val || 0).toFixed(1);
-  const calcPerServing = (val) =>
-    ((parseFloat(val || 0) / 100) * 10).toFixed(1); // 預設每份10g供預覽
+  const calcPerServing = (val) => {
+    const num = parseFloat(val || 0);
+    if (Number(servingSize) === 100) return num.toFixed(1);
+    return ((num / 100) * Number(servingSize)).toFixed(1);
+  };
 
   const NutRow = ({ label, indent, valKey, unit }) => (
     <tr>
@@ -235,14 +240,14 @@ const ProductLabelTemplate = ({
             <div className="flex justify-between border-b border-black pb-1 text-[12px]">
               <span>每一份量</span>
               <div className="flex justify-end gap-2 pr-1">
-                <span>10</span>
+                <span>{servingSize}</span>
                 <span className="w-[28px] text-left">公克</span>
               </div>
             </div>
             <div className="flex justify-between border-b-[2px] border-black pb-1 mb-1 text-[12px]">
               <span>本包裝含</span>
               <div className="flex justify-end gap-2 pr-1">
-                <span>100</span>
+                <span>{servingsPerContainer}</span>
                 <span className="w-[28px] text-left">份</span>
               </div>
             </div>
@@ -847,6 +852,7 @@ const QCCardView = ({ qc }) => {
 
 export default function MaterialPage() {
   const isRD = useAuthStore((state) => state.isRD());
+  const me = useAuthStore((state) => state.me());
   const navigate = useNavigate();
 
   const [materials, setMaterials] = useState([]);
@@ -1060,14 +1066,6 @@ export default function MaterialPage() {
     setFormData((prev) => ({
       ...prev,
       [name]: type === "checkbox" ? checked : value,
-    }));
-  };
-
-  const handleNutritionChange = (e) => {
-    const { name, value } = e.target;
-    setFormData((prev) => ({
-      ...prev,
-      nutrition_fact: { ...prev.nutrition_fact, [name]: value },
     }));
   };
 
@@ -1692,23 +1690,28 @@ export default function MaterialPage() {
       showAlert("退回成功", `已成功退回該快照版本。`, "success");
       fetchMaterials();
 
+      const now = new Date().toISOString();
+
+      const updateSnapshot = (s) =>
+        s.id === pendingRejectSnapshotId
+          ? {
+              ...s,
+              status: "REJECTED",
+              review_note: rejectNote.trim(),
+              reviewed_at: now,
+              reviewer_name: me.full_name,
+            }
+          : s;
+
       setFormData((prev) => ({
         ...prev,
-        nutrition_snapshots: prev.nutrition_snapshots.map((s) =>
-          s.id === pendingRejectSnapshotId
-            ? { ...s, status: "REJECTED", review_note: rejectNote.trim() }
-            : s,
-        ),
+        nutrition_snapshots: prev.nutrition_snapshots.map(updateSnapshot),
       }));
 
       if (viewingMaterial) {
         setViewingMaterial((prev) => ({
           ...prev,
-          nutrition_snapshots: prev.nutrition_snapshots.map((s) =>
-            s.id === pendingRejectSnapshotId
-              ? { ...s, status: "REJECTED", review_note: rejectNote.trim() }
-              : s,
-          ),
+          nutrition_snapshots: prev.nutrition_snapshots.map(updateSnapshot),
         }));
       }
 
@@ -1720,7 +1723,6 @@ export default function MaterialPage() {
     }
   };
 
-  // 🌟 修改：移除 prompt，改由 Modal 處理 reject，並確保核准時同步更新 Viewing UI
   const handleReviewSnapshot = async (snapshotId, actionType) => {
     if (actionType === "reject") {
       setPendingRejectSnapshotId(snapshotId);
@@ -1729,17 +1731,13 @@ export default function MaterialPage() {
       return;
     }
 
-    // 核准流程 (不帶備註)
     try {
       const res = await fetchWithAuth(
         `/api/nutrition_snapshots/${snapshotId}/review`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            action: "approve",
-            review_note: "",
-          }),
+          body: JSON.stringify({ action: "approve", review_note: "" }),
         },
       );
 
@@ -1751,21 +1749,27 @@ export default function MaterialPage() {
       showAlert("審核成功", `已成功核准該快照版本。`, "success");
       fetchMaterials();
 
-      // 🌟 更新編輯模式下的資料狀態
+      const now = new Date().toISOString();
+
+      const updateSnapshot = (s) =>
+        s.id === snapshotId
+          ? {
+              ...s,
+              status: "APPROVED",
+              reviewed_at: now,
+              reviewer_name: me.full_name,
+            }
+          : s;
+
       setFormData((prev) => ({
         ...prev,
-        nutrition_snapshots: prev.nutrition_snapshots.map((s) =>
-          s.id === snapshotId ? { ...s, status: "APPROVED" } : s,
-        ),
+        nutrition_snapshots: prev.nutrition_snapshots.map(updateSnapshot),
       }));
 
-      // 🌟 新增：同時更新詳情模式下的資料狀態，讓 UI 即時反應
       if (viewingMaterial) {
         setViewingMaterial((prev) => ({
           ...prev,
-          nutrition_snapshots: prev.nutrition_snapshots.map((s) =>
-            s.id === snapshotId ? { ...s, status: "APPROVED" } : s,
-          ),
+          nutrition_snapshots: prev.nutrition_snapshots.map(updateSnapshot),
         }));
       }
     } catch (err) {
@@ -2353,130 +2357,156 @@ export default function MaterialPage() {
                   </div>
                 </div>
 
-                {/* 下半部：Snapshot 切換與標籤預覽面板 */}
-                {["PRODUCT", "SEMI", "RAW"].includes(viewingMaterial.type) && (
+                {/* 下半部：Snapshot 標籤預覽面板 (水平滑動) */}
+                {["PRODUCT"].includes(viewingMaterial.type) && (
                   <div className="w-full space-y-6">
                     {viewingMaterial.nutrition_snapshots &&
                       viewingMaterial.nutrition_snapshots.length > 0 && (
-                        <div className="bg-white p-6 rounded-3xl border border-slate-200/60 shadow-[0_2px_10px_-4px_rgba(0,0,0,0.05)] relative flex flex-col items-center">
+                        <div className="bg-white p-6 rounded-3xl border border-slate-200/60 shadow-[0_2px_10px_-4px_rgba(0,0,0,0.05)] relative flex flex-col items-start overflow-hidden">
                           <h4 className="text-[11px] font-black text-purple-600 uppercase tracking-widest mb-6 border-b border-slate-100 pb-2 w-full text-center">
                             營養價值履歷與標籤預覽
                           </h4>
 
-                          <div className="w-full max-w-2xl mb-6 relative">
-                            <CustomSelect
-                              options={viewingMaterial.nutrition_snapshots.map(
-                                (snap) => ({
-                                  value: snap.id,
-                                  label: `${snap.version_num} (狀態: ${
-                                    snap.status === "PENDING"
-                                      ? "待審核"
-                                      : snap.status === "APPROVED"
-                                        ? "已核准"
-                                        : snap.status === "REJECTED"
-                                          ? "已退回"
-                                          : "已封存"
-                                  })`,
-                                }),
-                              )}
-                              value={activeSnapshotId}
-                              onChange={(val) => setActiveSnapshotId(val)}
-                              placeholder="選擇營養價值版本"
-                              className="w-full border-purple-200 text-purple-700 font-mono"
-                              menuClassName="w-full font-mono text-sm"
-                            />
+                          <div className="flex overflow-x-auto w-full gap-6 pb-4 snap-x custom-scrollbar items-stretch">
+                            {viewingMaterial.nutrition_snapshots.map((snap) => {
+                              const isPending = snap.status === "PENDING";
+                              const isApproved = snap.status === "APPROVED";
+                              const isRejected = snap.status === "REJECTED";
+
+                              return (
+                                <div
+                                  key={snap.id}
+                                  className="shrink-0 w-[560px] snap-center p-4 rounded-xl border border-slate-200 bg-slate-50 flex flex-col gap-4 relative"
+                                >
+                                  <div>
+                                    <div className="flex flex-row justify-between items-start mb-2">
+                                      <div className="flex items-center font-mono font-bold text-lg text-slate-800">
+                                        <div className="flex">
+                                          {snap.version_num}
+                                        </div>
+                                        <div className="flex ml-1 text-sm">
+                                          {snap.valid_from ||
+                                          snap.valid_until ? (
+                                            <div className="text-indigo-600 font-bold">
+                                              使用區間:{" "}
+                                              {snap.valid_from || "未指定"}{" "}
+                                              {snap.valid_until
+                                                ? `~ ${snap.valid_until}`
+                                                : "(永久有效)"}
+                                            </div>
+                                          ) : (
+                                            isApproved && (
+                                              <div className="text-slate-400 font-bold">
+                                                尚未設定使用區間
+                                              </div>
+                                            )
+                                          )}
+                                        </div>
+                                      </div>
+                                      <span
+                                        className={`text-[10px] font-black px-2 py-0.5 rounded ${isPending ? "bg-amber-100 text-amber-700" : isApproved ? "bg-emerald-100 text-emerald-700" : isRejected ? "bg-rose-100 text-rose-700" : "bg-slate-100 text-slate-500"}`}
+                                      >
+                                        {isPending
+                                          ? "待審核"
+                                          : isApproved
+                                            ? "已核准"
+                                            : isRejected
+                                              ? "已退回"
+                                              : "已封存"}
+                                      </span>
+                                    </div>
+                                    <div className="text-[11px] text-slate-500 space-y-0.5">
+                                      <div>
+                                        建立者: {snap.creator_name} (
+                                        {new Date(
+                                          snap.created_at,
+                                        ).toLocaleDateString()}
+                                        )
+                                      </div>
+                                      {snap.reviewed_by && (
+                                        <div>
+                                          審核者: {snap.reviewer_name} (
+                                          {new Date(
+                                            snap.reviewed_at,
+                                          ).toLocaleDateString()}
+                                          )
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  {/* 🌟 渲染詳細標籤 */}
+                                  <div className="flex-1 flex justify-center bg-slate-100 py-4 rounded-xl border border-slate-200 overflow-hidden">
+                                    <div className="origin-top flex justify-center">
+                                      {["PRODUCT", "SEMI"].includes(
+                                        viewingMaterial.type,
+                                      ) ? (
+                                        <ProductLabelTemplate
+                                          name={viewingMaterial.name}
+                                          ingredientsText={
+                                            snap.ingredients_text || ""
+                                          }
+                                          allergenInfo={
+                                            snap.allergen_info ||
+                                            viewingMaterial.allergen_info
+                                          }
+                                          nutritionFact={snap.nutrition_fact}
+                                          spec={snap.label_info?.spec || ""}
+                                          stickerInfo={
+                                            snap.label_info ||
+                                            viewingMaterial.sticker_info
+                                          }
+                                          storageLife={
+                                            viewingMaterial.storage_life
+                                          }
+                                          storageMethod={
+                                            viewingMaterial.storage_method
+                                          }
+                                          servingSize={
+                                            snap.label_info?.servingSize ||
+                                            viewingMaterial.sticker_info
+                                              ?.servingSize ||
+                                            10
+                                          }
+                                          servingsPerContainer={
+                                            snap.label_info
+                                              ?.servingsPerContainer ||
+                                            viewingMaterial.sticker_info
+                                              ?.servingsPerContainer ||
+                                            100
+                                          }
+                                        />
+                                      ) : (
+                                        <NutritionLabel
+                                          nutritionData={snap.nutrition_fact}
+                                        />
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  {snap.review_note && (
+                                    <div className="mt-2 text-[11px] text-slate-600 bg-white p-2 rounded border border-slate-200">
+                                      備註: {snap.review_note}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
                           </div>
-
-                          {activeSnapshotData && (
-                            <div className="w-full text-center text-xs font-bold text-slate-400 mb-6">
-                              {activeSnapshotData.version_num} 建立時間：
-                              {new Date(
-                                activeSnapshotData.created_at,
-                              ).toLocaleDateString()}
-                            </div>
-                          )}
-
-                          {/* 🌟 渲染詳細標籤：因為已經移到下方 100% 寬度區塊，所以有充足的空間顯示 */}
-                          <div className="w-full flex justify-center mt-2">
-                            {["PRODUCT", "SEMI"].includes(
-                              viewingMaterial.type,
-                            ) ? (
-                              <ProductLabelTemplate
-                                name={viewingMaterial.name}
-                                ingredientsText={
-                                  activeSnapshotData?.ingredients_text || ""
-                                }
-                                allergenInfo={
-                                  activeSnapshotData?.allergen_info ||
-                                  viewingMaterial.allergen_info
-                                }
-                                nutritionFact={
-                                  activeSnapshotData
-                                    ? activeSnapshotData.nutrition_fact
-                                    : viewingMaterial.display_nutrition
-                                }
-                                spec={
-                                  activeSnapshotData?.label_info?.spec || ""
-                                }
-                                stickerInfo={
-                                  activeSnapshotData?.label_info ||
-                                  viewingMaterial.sticker_info
-                                }
-                                storageLife={viewingMaterial.storage_life}
-                                storageMethod={viewingMaterial.storage_method}
-                              />
-                            ) : (
-                              <NutritionLabel
-                                nutritionData={
-                                  activeSnapshotData
-                                    ? activeSnapshotData.nutrition_fact
-                                    : viewingMaterial.display_nutrition
-                                }
-                              />
-                            )}
-                          </div>
-
-                          {/* 顯示預計展開成分清單 (來自快照) */}
-                          {activeSnapshotData && (
-                            <div className="w-full mt-8 bg-slate-50 p-5 rounded-xl border border-slate-200 shadow-sm text-left">
-                              <span className="text-[10px] uppercase font-bold text-slate-400 mb-2 block">
-                                成分細節 (快照存檔紀錄)
-                              </span>
-                              <span className="text-sm font-bold text-slate-700 leading-relaxed">
-                                {activeSnapshotData.ingredients_text || "無"}
-                              </span>
-                            </div>
-                          )}
                         </div>
                       )}
 
                     {(!viewingMaterial.nutrition_snapshots ||
                       viewingMaterial.nutrition_snapshots.length === 0) && (
-                      <div className="bg-slate-100 p-6 md:p-8 rounded-3xl border border-slate-200/60 shadow-inner flex flex-col items-center relative">
-                        <h4 className="text-[11px] font-black text-slate-500 uppercase tracking-widest mb-6 w-full text-center border-b border-slate-200 pb-2 pt-2">
-                          營養標示預覽
-                        </h4>
-                        <div className="w-full flex justify-center mt-2">
-                          {["PRODUCT"].includes(viewingMaterial.type) ? (
-                            <ProductLabelTemplate
-                              name={viewingMaterial.name}
-                              ingredientsText={
-                                viewingMaterial.display_ingredients
-                                  ?.map((i) => i.name)
-                                  .join("、") || ""
-                              }
-                              allergenInfo={viewingMaterial.allergen_info}
-                              nutritionFact={viewingMaterial.display_nutrition}
-                              spec={viewingMaterial.sticker_info?.spec || ""}
-                              stickerInfo={viewingMaterial.sticker_info}
-                              storageLife={viewingMaterial.storage_life}
-                              storageMethod={viewingMaterial.storage_method}
-                            />
-                          ) : (
-                            <NutritionLabel
-                              nutritionData={viewingMaterial.display_nutrition}
-                            />
-                          )}
+                      <div className="bg-slate-100 p-6 md:p-8 rounded-3xl border border-slate-200/60 shadow-inner flex flex-col items-center justify-center min-h-[300px] relative">
+                        <div className="text-center">
+                          <FlaskConical
+                            size={48}
+                            className="text-slate-300 mx-auto mb-4"
+                          />
+                          <div className="text-lg font-bold text-slate-600 mb-2">
+                            尚無標籤資料
+                          </div>
                         </div>
                       </div>
                     )}
@@ -2761,7 +2791,6 @@ export default function MaterialPage() {
                     </div>
                   </div>
                 )}
-
                 {/* 🌟 根據 type 決定成分展開清單為 ReadOnly 或可編輯 */}
                 {["RAW", "SEMI", "PRODUCT"].includes(formData.type) && (
                   <>
@@ -3198,16 +3227,15 @@ export default function MaterialPage() {
                   />
                 </div>
 
-                {/* 🌟 移到成分清單正下方，並渲染完整的營養標籤 */}
-                {["PRODUCT", "SEMI"].includes(formData.type) && (
-                  <div className="bg-white p-6 rounded-3xl border border-slate-200/60 shadow-[0_2px_10px_-4px_rgba(0,0,0,0.05)]">
+                {["PRODUCT"].includes(formData.type) && (
+                  <div className="bg-white p-6 rounded-3xl border border-slate-200/60 shadow-[0_2px_10px_-4px_rgba(0,0,0,0.05)] overflow-hidden">
                     <h4 className="text-[11px] font-black text-purple-600 uppercase tracking-widest mb-4 border-b border-slate-100 pb-2 flex items-center gap-2">
-                      營養價值履歷
+                      營養價值履歷與標籤預覽
                     </h4>
 
                     {formData.nutrition_snapshots &&
                     formData.nutrition_snapshots.length > 0 ? (
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="flex overflow-x-auto w-full gap-6 pb-4 snap-x custom-scrollbar items-stretch">
                         {formData.nutrition_snapshots.map((snap) => {
                           const isPending = snap.status === "PENDING";
                           const isApproved = snap.status === "APPROVED";
@@ -3216,13 +3244,30 @@ export default function MaterialPage() {
                           return (
                             <div
                               key={snap.id}
-                              className="p-4 rounded-xl border border-slate-200 bg-slate-50 flex flex-col gap-4 relative"
+                              className="shrink-0 w-[560px] snap-center p-4 rounded-xl border border-slate-200 bg-slate-50 flex flex-col gap-4 relative"
                             >
                               <div>
-                                <div className="flex justify-between items-start mb-2">
-                                  <span className="font-mono font-bold text-sm text-slate-800">
-                                    {snap.version_num}
-                                  </span>
+                                <div className="flex flex-row justify-between items-start mb-2">
+                                  <div className="flex items-center font-mono font-bold text-lg text-slate-800">
+                                    <div className="flex">
+                                      {snap.version_num}
+                                    </div>
+                                    <div className="flex ml-1 text-sm">
+                                      {snap.valid_from || snap.valid_until ? (
+                                        <div className="text-indigo-600 font-bold">
+                                          使用區間:{" "}
+                                          {snap.valid_from || "未指定"} ~{" "}
+                                          {snap.valid_until || "永久有效"}
+                                        </div>
+                                      ) : (
+                                        isApproved && (
+                                          <div className="text-slate-400 font-bold">
+                                            尚未設定使用區間
+                                          </div>
+                                        )
+                                      )}
+                                    </div>
+                                  </div>
                                   <span
                                     className={`text-[10px] font-black px-2 py-0.5 rounded ${isPending ? "bg-amber-100 text-amber-700" : isApproved ? "bg-emerald-100 text-emerald-700" : isRejected ? "bg-rose-100 text-rose-700" : "bg-slate-100 text-slate-500"}`}
                                   >
@@ -3252,26 +3297,15 @@ export default function MaterialPage() {
                                       )
                                     </div>
                                   )}
-                                  {snap.valid_from || snap.valid_until ? (
-                                    <div className="text-indigo-600 font-bold mt-1">
-                                      使用區間: {snap.valid_from || "未指定"} ~{" "}
-                                      {snap.valid_until || "永久有效"}
-                                    </div>
-                                  ) : (
-                                    isApproved && (
-                                      <div className="text-slate-400 mt-1 font-bold">
-                                        尚未設定使用區間
-                                      </div>
-                                    )
-                                  )}
                                 </div>
                               </div>
 
                               {/* 🌟 渲染完整營養標籤 */}
-                              {/* 🌟 渲染完整營養標籤 */}
                               <div className="flex-1 flex justify-center bg-slate-100 py-4 rounded-xl border border-slate-200 overflow-hidden">
-                                <div className="scale-[0.85] origin-top flex justify-center">
-                                  {["PRODUCT"].includes(formData.type) ? (
+                                <div className="origin-top flex justify-center">
+                                  {["PRODUCT", "SEMI"].includes(
+                                    formData.type,
+                                  ) ? (
                                     <ProductLabelTemplate
                                       name={formData.name}
                                       ingredientsText={
@@ -3288,6 +3322,17 @@ export default function MaterialPage() {
                                       }
                                       storageLife={formData.storage_life}
                                       storageMethod={formData.storage_method}
+                                      servingSize={
+                                        snap.label_info?.servingSize ||
+                                        formData.sticker_info?.servingSize ||
+                                        10
+                                      }
+                                      servingsPerContainer={
+                                        snap.label_info?.servingsPerContainer ||
+                                        formData.sticker_info
+                                          ?.servingsPerContainer ||
+                                        100
+                                      }
                                     />
                                   ) : (
                                     <NutritionLabel
@@ -3355,8 +3400,14 @@ export default function MaterialPage() {
                         })}
                       </div>
                     ) : (
-                      <div className="text-sm font-bold text-slate-400 py-6 text-center border-2 border-dashed border-slate-100 rounded-2xl bg-slate-50/50">
-                        尚無任何營養標籤紀錄
+                      <div className="text-center">
+                        <FlaskConical
+                          size={48}
+                          className="text-slate-300 mx-auto mb-4"
+                        />
+                        <div className="text-lg font-bold text-slate-600 mb-2">
+                          尚無標籤資料
+                        </div>
                       </div>
                     )}
                   </div>

@@ -305,6 +305,8 @@ const ProductLabelTemplate = ({
   stickerInfo,
   storageLife,
   storageMethod = "ROOM_TEMP",
+  servingSize = 10,
+  servingsPerContainer = 100,
 }) => {
   const today = new Date();
   const mfgDateDisplay = `${today.getFullYear()}.${String(today.getMonth() + 1).padStart(2, "0")}.${String(today.getDate()).padStart(2, "0")}`;
@@ -321,8 +323,11 @@ const ProductLabelTemplate = ({
   // 營養素格式化
   const nut100 = nutritionFact || emptyNutrition;
   const format100g = (val) => parseFloat(val || 0).toFixed(1);
-  const calcPerServing = (val) =>
-    ((parseFloat(val || 0) / 100) * 10).toFixed(1); // 預設每份10g供預覽
+  const calcPerServing = (val) => {
+    const num = parseFloat(val || 0);
+    if (Number(servingSize) === 100) return num.toFixed(1);
+    return ((num / 100) * Number(servingSize)).toFixed(1);
+  };
 
   const NutRow = ({ label, indent, valKey, unit }) => (
     <tr>
@@ -397,14 +402,14 @@ const ProductLabelTemplate = ({
             <div className="flex justify-between border-b border-black pb-1 text-[12px]">
               <span>每一份量</span>
               <div className="flex justify-end gap-2 pr-1">
-                <span>10</span>
+                <span>{servingSize}</span>
                 <span className="w-[28px] text-left">公克</span>
               </div>
             </div>
             <div className="flex justify-between border-b-[2px] border-black pb-1 mb-1 text-[12px]">
               <span>本包裝含</span>
               <div className="flex justify-end gap-2 pr-1">
-                <span>100</span>
+                <span>{servingsPerContainer}</span>
                 <span className="w-[28px] text-left">份</span>
               </div>
             </div>
@@ -761,6 +766,11 @@ export default function BOMCreatePage() {
   const [initialSnapshotData, setInitialSnapshotData] = useState(null);
   const [existingSnapshots, setExistingSnapshots] = useState([]);
 
+  const [servingInfo, setServingInfo] = useState({
+    servingSize: 10,
+    servingsPerContainer: 100,
+  });
+
   // 🌟 包材選擇用資料
   const [packMaterials, setPackMaterials] = useState([]);
   const [packageOrdersList, setPackageOrdersList] = useState([]);
@@ -957,6 +967,13 @@ export default function BOMCreatePage() {
             ingredients: latestSnapshot.ingredients_text || "",
             labelInfo: latestSnapshot.label_info || {},
           });
+          if (latestSnapshot.label_info?.servingSize) {
+            setServingInfo({
+              servingSize: latestSnapshot.label_info.servingSize,
+              servingsPerContainer:
+                latestSnapshot.label_info.servingsPerContainer || 1,
+            });
+          }
         } else {
           setInitialSnapshotData(null);
         }
@@ -2572,10 +2589,13 @@ export default function BOMCreatePage() {
         tel: currentStickerInfo?.tel || "",
         fax: currentStickerInfo?.fax || "",
         address: currentStickerInfo?.address || "",
+        servingSize: servingInfo.servingSize,
+        servingsPerContainer: servingInfo.servingsPerContainer,
       };
-
+      console.log("currentLabelInfo", currentLabelInfo);
       const isDuplicateSnapshot = existingSnapshots.some((snap) => {
         const snapLabel = snap.label_info || {};
+        console.log("snapLabel", snapLabel);
 
         return (
           (snap.allergen_info || "") === currentAllergensStr &&
@@ -2584,7 +2604,11 @@ export default function BOMCreatePage() {
           (snapLabel.manufacturer || "") === currentLabelInfo.manufacturer &&
           (snapLabel.tel || "") === currentLabelInfo.tel &&
           (snapLabel.fax || "") === currentLabelInfo.fax &&
-          (snapLabel.address || "") === currentLabelInfo.address
+          (snapLabel.address || "") === currentLabelInfo.address &&
+          String(snapLabel.servingSize) ===
+            String(currentLabelInfo.servingSize) &&
+          String(snapLabel.servingsPerContainer) ===
+            String(currentLabelInfo.servingsPerContainer)
         );
       });
 
@@ -3691,6 +3715,40 @@ export default function BOMCreatePage() {
           </h3>
           <div className="grid grid-cols-1 xl:grid-cols-[1fr_560px] gap-8 items-start">
             <div className="flex flex-col gap-6">
+              <div className="bg-amber-50/50 p-5 rounded-xl border border-amber-200 shadow-sm flex flex-col sm:flex-row gap-4">
+                <div className="w-full">
+                  <label className="block text-[11px] font-bold text-amber-700 mb-1.5 uppercase">
+                    每一份量 (公克)
+                  </label>
+                  <input
+                    type="number"
+                    value={servingInfo.servingSize}
+                    onChange={(e) =>
+                      setServingInfo((prev) => ({
+                        ...prev,
+                        servingSize: e.target.value,
+                      }))
+                    }
+                    className="w-full px-4 py-2 bg-white border border-amber-200 rounded-lg text-sm font-bold focus:ring-2 focus:ring-amber-500/20 focus:border-amber-400 outline-none transition-all"
+                  />
+                </div>
+                <div className="w-full">
+                  <label className="block text-[11px] font-bold text-amber-700 mb-1.5 uppercase">
+                    本包裝總份數
+                  </label>
+                  <input
+                    type="number"
+                    value={servingInfo.servingsPerContainer}
+                    onChange={(e) =>
+                      setServingInfo((prev) => ({
+                        ...prev,
+                        servingsPerContainer: e.target.value,
+                      }))
+                    }
+                    className="w-full px-4 py-2 bg-white border border-amber-200 rounded-lg text-sm font-bold focus:ring-2 focus:ring-amber-500/20 focus:border-amber-400 outline-none transition-all"
+                  />
+                </div>
+              </div>
               <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
                 <span className="text-[10px] uppercase font-bold text-slate-400 mb-2 block">
                   預計展開成分清單
@@ -3741,7 +3799,6 @@ export default function BOMCreatePage() {
                       const mat = packMaterials.find(
                         (m) => String(m.id) === String(p.material_id),
                       );
-                      console.log("mat", mat);
                       if (mat && mat.type === "STICKER" && mat.sticker_info) {
                         currentStickerInfo = mat.sticker_info;
                         break;
@@ -3765,6 +3822,8 @@ export default function BOMCreatePage() {
                         stickerInfo={currentStickerInfo}
                         storageLife={storageLife}
                         storageMethod={storageMethod}
+                        servingSize={servingInfo.servingSize}
+                        servingsPerContainer={servingInfo.servingsPerContainer}
                       />
                     );
                   })()

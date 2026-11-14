@@ -23,6 +23,7 @@ const VendorPage = () => {
     name: "",
     tax_id: "",
     contact_person: "",
+    should_impose_tax: true,
     phone: "",
     address: "",
   });
@@ -107,6 +108,7 @@ const VendorPage = () => {
         code: vendor.code || "",
         name: vendor.name || "",
         tax_id: vendor.tax_id || "",
+        should_impose_tax: vendor.should_impose_tax,
         contact_person: vendor.contact_person || "",
         phone: vendor.phone || "",
         address: vendor.address || "",
@@ -117,6 +119,7 @@ const VendorPage = () => {
         code: "",
         name: "",
         tax_id: "",
+        should_impose_tax: true,
         contact_person: "",
         phone: "",
         address: "",
@@ -131,8 +134,11 @@ const VendorPage = () => {
   };
 
   const handleFormChange = (e) => {
-    const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
+    const { name, type, value, checked } = e.target;
+    setFormData((prev) => ({
+      ...prev,
+      [name]: type === "checkbox" ? checked : value,
+    }));
   };
 
   const handleSubmit = (e) => {
@@ -426,6 +432,14 @@ const VendorPage = () => {
                               </p>
                               <p>{vendor.address || "-"}</p>
                             </div>
+                            <div>
+                              <div>
+                                <p className="font-bold text-slate-400 uppercase text-xs mb-1">
+                                  是否課營業稅
+                                </p>
+                                <p>{vendor.should_impose_tax ? "是" : "否"}</p>
+                              </div>
+                            </div>
                           </div>
                         </td>
                       </tr>
@@ -463,9 +477,21 @@ const VendorPage = () => {
             <form onSubmit={handleSubmit} className="p-6">
               <div className="space-y-4">
                 <div>
-                  <label className="block text-sm font-bold text-slate-700 mb-1">
-                    客戶代碼
-                  </label>
+                  <div className="flex justify-between items-center mb-1">
+                    <label className="block text-sm font-bold text-slate-700">
+                      客戶代碼
+                    </label>
+                    <label className="flex items-center gap-2 text-sm font-medium text-slate-700 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        name="should_impose_tax"
+                        checked={formData.should_impose_tax}
+                        onChange={handleFormChange}
+                        className="w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-blue-500 cursor-pointer"
+                      />
+                      是否課營業稅
+                    </label>
+                  </div>
                   <input
                     type="text"
                     name="code"
@@ -534,7 +560,6 @@ const VendorPage = () => {
                     placeholder="例如：02-2345-6789"
                   />
                 </div>
-
                 <div>
                   <label className="block text-sm font-bold text-slate-700 mb-1">
                     地址

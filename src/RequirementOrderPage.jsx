@@ -924,6 +924,7 @@ const RequirementOrderPage = () => {
     contact: "",
     shippingDate: "",
     logisticsProvider: "",
+    shouldImposeTax: true,
     notes: "",
   });
 
@@ -949,13 +950,6 @@ const RequirementOrderPage = () => {
   const [formItems, setFormItems] = useState([createEmptyRow()]);
   const [documentNote, setDocumentNote] = useState("");
 
-  const packMaterials = useMemo(() => {
-    return [
-      { id: "", name: "無" },
-      ...materials.filter((m) => ["PACK", "OTHER", "STICKER"].includes(m.type)),
-    ];
-  }, [materials]);
-
   const calculatedTotals = useMemo(() => {
     let total = 0;
     formItems.forEach((item) => {
@@ -963,7 +957,7 @@ const RequirementOrderPage = () => {
       const p = Number(item.unit_price) || 0;
       total += Math.round(q * p);
     });
-    const tax = Math.round(total * 0.05);
+    const tax = vendorData.shouldImposeTax ? Math.round(total * 0.05) : 0;
     return { total_amount: total, tax_amount: tax, grand_total: total + tax };
   }, [formItems]);
 
@@ -1136,7 +1130,6 @@ const RequirementOrderPage = () => {
         poRes.json(),
         relRes.json(), // 🌟 新增
       ]);
-
       const loadedMaterials = matJson.data || matJson.results || matJson || [];
       setMaterials(loadedMaterials);
       setBoms(bomJson.data || bomJson.results || bomJson || []);
@@ -1259,6 +1252,7 @@ const RequirementOrderPage = () => {
       fax: v.fax || "",
       address: v.address || "",
       contact: v.contact_person || "",
+      shouldImposeTax: v.should_impose_tax,
       shippingDate: vendorData.shippingDate,
       logisticsProvider: vendorData.logisticsProvider,
       notes: vendorData.notes,
@@ -1996,6 +1990,7 @@ const RequirementOrderPage = () => {
           name: vendorData.name,
           code: vendorData.code,
           tax_id: vendorData.tax_id,
+          should_impose_tax: vendorData.shouldImposeTax,
           phone: vendorData.phone,
           fax: vendorData.fax,
           address: vendorData.address,
@@ -2006,7 +2001,9 @@ const RequirementOrderPage = () => {
           notes: vendorData.notes,
         },
       };
-
+      const tax = vendorData.shouldImposeTax
+        ? Math.round(mainItem.subtotal * 0.05)
+        : 0;
       sheets.push({
         ...baseSheetInfo,
         isPackaging: false,
@@ -2014,8 +2011,8 @@ const RequirementOrderPage = () => {
         items: [mainItem],
         totals: {
           total_amount: mainItem.subtotal,
-          tax_amount: Math.round(mainItem.subtotal * 0.05),
-          grand_total: mainItem.subtotal + Math.round(mainItem.subtotal * 0.05),
+          tax_amount: tax,
+          grand_total: mainItem.subtotal + tax,
           document_note: documentNote,
         },
       });
@@ -2044,31 +2041,31 @@ const RequirementOrderPage = () => {
     setIsPreviewModalOpen(false);
     setIsSubmitting(true);
     try {
-      for (const item of formItems) {
-        if (item.profile_id === "custom") {
-          try {
-            await fetchWithAuth("/api/product_profiles", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                vendor: vendorData.id,
-                product: item.product_id,
-                material: item.product_id,
-                spec: getGeneratedSpec(item),
-                sales_unit: item.unit,
-                sales_pack_unit: item.sales_pack_unit,
-                sales_unit_quantity: item.sales_unit_quantity,
-                sales_pack_quantity: item.sales_pack_quantity,
-                sales_price: item.unit_price ? Number(item.unit_price) : 0,
-                outer_pack: item.outer_pack_id,
-                inner_pack: item.inner_pack_id,
-              }),
-            });
-          } catch (e) {
-            console.warn("自製規格同步建立失敗", e);
-          }
-        }
-      }
+      // for (const item of formItems) {
+      //   if (item.profile_id === "custom") {
+      //     try {
+      //       await fetchWithAuth("/api/product_profiles", {
+      //         method: "POST",
+      //         headers: { "Content-Type": "application/json" },
+      //         body: JSON.stringify({
+      //           vendor: vendorData.id,
+      //           product: item.product_id,
+      //           material: item.product_id,
+      //           spec: getGeneratedSpec(item),
+      //           sales_unit: item.unit,
+      //           sales_pack_unit: item.sales_pack_unit,
+      //           sales_unit_quantity: item.sales_unit_quantity,
+      //           sales_pack_quantity: item.sales_pack_quantity,
+      //           sales_price: item.unit_price ? Number(item.unit_price) : 0,
+      //           outer_pack: item.outer_pack_id,
+      //           inner_pack: item.inner_pack_id,
+      //         }),
+      //       });
+      //     } catch (e) {
+      //       console.warn("自製規格同步建立失敗", e);
+      //     }
+      //   }
+      // }
 
       const itemMap = {};
       orderItems.forEach((item) => {
@@ -2209,6 +2206,8 @@ const RequirementOrderPage = () => {
             name: vendorData.name,
             code: vendorData.code,
             tax_id: vendorData.tax_id,
+            should_impose_tax: vendorData.should_impose_tax,
+
             phone: vendorData.phone,
             fax: vendorData.fax,
             address: vendorData.address,
@@ -2253,11 +2252,13 @@ const RequirementOrderPage = () => {
         id: "",
         name: "",
         tax_id: "",
+        shouldImposeTax: true,
         phone: "",
         fax: "",
         address: "",
         shippingDate: "",
         logisticsProvider: "",
+        should_impose_tax: true,
         notes: "",
       });
       setActiveTabIds({});

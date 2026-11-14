@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   ArrowLeft,
@@ -8,10 +9,15 @@ import {
   ChevronDown,
   Check,
   PackageOpen,
-  AlertTriangle,
 } from "lucide-react";
 import { fetchWithAuth } from "./utils/fetchWithAuth";
 import CustomDialog from "./components/customDialog";
+
+const cleanFloat = (val, decimals = 3) => {
+  const num = parseFloat(val);
+  if (isNaN(num)) return "0";
+  return parseFloat(num.toFixed(decimals)).toString();
+};
 
 const formatNum = (num, type) => {
   if (num === null || num === undefined || isNaN(num) || num === "") return "0";
@@ -93,13 +99,38 @@ const CustomAdjustmentSelect = ({ value, onChange }) => {
   );
 };
 
-const OverlaySelect = ({ value, onChange, options, placeholder }) => {
+const OverlaySelect = ({
+  value,
+  onChange,
+  options,
+  placeholder,
+  disabledBatchIds = [],
+}) => {
   const [isOpen, setIsOpen] = useState(false);
-  const selectRef = useRef(null);
+  const [coords, setCoords] = useState({ top: 0, left: 0, width: 0 });
+  const buttonRef = useRef(null);
+  const dropdownRef = useRef(null);
+
+  const handleToggle = () => {
+    if (!isOpen && buttonRef.current) {
+      const rect = buttonRef.current.getBoundingClientRect();
+      setCoords({
+        top: rect.bottom + window.scrollY + 4,
+        left: rect.left + window.scrollX,
+        width: rect.width,
+      });
+    }
+    setIsOpen(!isOpen);
+  };
 
   useEffect(() => {
     const handleClickOutside = (e) => {
-      if (selectRef.current && !selectRef.current.contains(e.target)) {
+      if (
+        buttonRef.current &&
+        !buttonRef.current.contains(e.target) &&
+        dropdownRef.current &&
+        !dropdownRef.current.contains(e.target)
+      ) {
         setIsOpen(false);
       }
     };
@@ -110,10 +141,11 @@ const OverlaySelect = ({ value, onChange, options, placeholder }) => {
   const selectedOpt = options.find((o) => String(o.id) === String(value));
 
   return (
-    <div className="relative w-full" ref={selectRef}>
+    <div className="relative w-full">
       <button
+        ref={buttonRef}
         type="button"
-        onClick={() => setIsOpen(!isOpen)}
+        onClick={handleToggle}
         className={`w-full h-11 px-4 flex justify-between items-center bg-white border rounded-xl text-sm font-medium transition-all duration-200 shadow-sm ${
           isOpen
             ? "border-blue-400 ring-2 ring-blue-500/10"
@@ -126,7 +158,7 @@ const OverlaySelect = ({ value, onChange, options, placeholder }) => {
               {selectedOpt.batch_number}
             </span>
             <span className="text-[12px] font-medium text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-100">
-              餘: {selectedOpt.remaining_qty}
+              餘: {cleanFloat(selectedOpt.remaining_qty)}
             </span>
           </div>
         ) : (
@@ -141,55 +173,73 @@ const OverlaySelect = ({ value, onChange, options, placeholder }) => {
         />
       </button>
 
-      {isOpen && (
-        <div className="absolute top-[calc(100%+8px)] left-0 w-full z-[999] bg-white/95 backdrop-blur-xl border border-slate-200 rounded-2xl shadow-xl flex flex-col max-h-60 overflow-y-auto animate-in fade-in slide-in-from-top-2 duration-200 custom-scrollbar">
-          <div className="p-2">
-            {options.length > 0 ? (
-              options.map((opt) => {
-                const isSelected = String(value) === String(opt.id);
-                return (
-                  <div
-                    key={opt.id}
-                    onClick={() => {
-                      onChange(opt.id);
-                      setIsOpen(false);
-                    }}
-                    className={`flex items-center justify-between px-4 py-3 rounded-xl cursor-pointer transition-all mb-1 border ${
-                      isSelected
-                        ? "bg-blue-50/80 border border-blue-100"
-                        : "bg-white border border-transparent hover:bg-slate-50"
-                    }`}
-                  >
-                    <div className="flex justify-between items-center w-full pr-3">
-                      <span
-                        className={`font-mono text-[14px] ${isSelected ? "font-semibold text-blue-700" : "font-medium text-slate-600"}`}
-                      >
-                        {opt.batch_number}
-                      </span>
-                      <span
-                        className={`text-[12px] font-medium px-2 py-0.5 rounded-md border ${isSelected ? "text-blue-600 bg-white border-blue-200" : "text-slate-500 bg-slate-50 border-slate-200"}`}
-                      >
-                        餘: {opt.remaining_qty}
-                      </span>
+      {isOpen &&
+        createPortal(
+          <div
+            ref={dropdownRef}
+            style={{
+              top: `${coords.top}px`,
+              left: `${coords.left}px`,
+              width: `${coords.width}px`,
+            }}
+            className="fixed z-[99999] bg-white/95 backdrop-blur-xl border border-slate-200 rounded-2xl shadow-2xl flex flex-col max-h-60 overflow-y-auto animate-in fade-in duration-200 custom-scrollbar"
+          >
+            <div className="p-2">
+              {options.length > 0 ? (
+                options.map((opt) => {
+                  const isSelected = String(value) === String(opt.id);
+                  const isDisabled =
+                    disabledBatchIds.includes(String(opt.id)) && !isSelected;
+
+                  return (
+                    <div
+                      key={opt.id}
+                      onClick={() => {
+                        if (!isDisabled) {
+                          onChange(opt.id);
+                          setIsOpen(false);
+                        }
+                      }}
+                      className={`flex items-center justify-between px-4 py-3 rounded-xl transition-all mb-1 border ${
+                        isDisabled
+                          ? "bg-slate-100/60 border-transparent opacity-40 cursor-not-allowed"
+                          : isSelected
+                            ? "bg-blue-50/80 border border-blue-100 cursor-pointer"
+                            : "bg-white border border-transparent hover:bg-slate-50 cursor-pointer"
+                      }`}
+                    >
+                      <div className="flex justify-between items-center w-full pr-3">
+                        <span
+                          className={`font-mono text-[14px] ${isSelected ? "font-semibold text-blue-700" : "font-medium text-slate-600"}`}
+                        >
+                          {opt.batch_number}
+                        </span>
+                        <span
+                          className={`text-[12px] font-medium px-2 py-0.5 rounded-md border ${isSelected ? "text-blue-600 bg-white border-blue-200" : "text-slate-500 bg-slate-50 border-slate-200"}`}
+                        >
+                          餘: {cleanFloat(opt.remaining_qty)}
+                        </span>
+                      </div>
+                      {isSelected && (
+                        <Check
+                          size={16}
+                          strokeWidth={2.5}
+                          className="text-blue-600 shrink-0"
+                        />
+                      )}
                     </div>
-                    {isSelected && (
-                      <Check
-                        size={16}
-                        strokeWidth={2.5}
-                        className="text-blue-600 shrink-0"
-                      />
-                    )}
-                  </div>
-                );
-              })
-            ) : (
-              <div className="p-6 text-center text-slate-400 text-[13px] font-medium flex flex-col items-center gap-2">
-                <PackageOpen size={28} className="opacity-30" /> 無其他可用庫存
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+                  );
+                })
+              ) : (
+                <div className="p-6 text-center text-slate-400 text-[13px] font-medium flex flex-col items-center gap-2">
+                  <PackageOpen size={28} className="opacity-30" />{" "}
+                  無其他可用庫存
+                </div>
+              )}
+            </div>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 };
@@ -224,8 +274,7 @@ export default function ProductionOrderEditPage() {
     requiredQty: 0,
     currentTotalAllocated: 0,
     batches: [],
-    selectedBatchId: "",
-    newUsedQty: "",
+    items: [],
     loading: false,
     submitting: false,
   });
@@ -461,6 +510,7 @@ export default function ProductionOrderEditPage() {
     requiredQty,
     currentTotalAllocated,
   ) => {
+    const defaultOldUsed = parseFloat(oldUsed) || 0;
     setReplaceModal({
       isOpen: true,
       loading: true,
@@ -469,12 +519,13 @@ export default function ProductionOrderEditPage() {
       materialCode: matCode,
       materialName: matName,
       oldBatchNumber: oldBatchNum,
-      oldUsedQty: parseFloat(oldUsed) || 0,
-      newUsedQty: parseFloat(oldUsed) || 0,
+      oldUsedQty: defaultOldUsed,
       requiredQty: parseFloat(requiredQty) || 0,
       currentTotalAllocated: parseFloat(currentTotalAllocated) || 0,
       batches: [],
-      selectedBatchId: "",
+      items: [
+        { id: Date.now(), batchId: "", usedQty: defaultOldUsed.toString() },
+      ],
     });
 
     try {
@@ -507,27 +558,59 @@ export default function ProductionOrderEditPage() {
     }
   };
 
+  const handleAddReplaceItem = () => {
+    setReplaceModal((prev) => ({
+      ...prev,
+      items: [
+        ...prev.items,
+        { id: Date.now(), batchId: "", description: "", usedQty: "" },
+      ],
+    }));
+  };
+
+  const handleRemoveReplaceItem = (id) => {
+    if (replaceModal.items.length <= 1) return;
+    setReplaceModal((prev) => ({
+      ...prev,
+      items: prev.items.filter((item) => item.id !== id),
+    }));
+  };
+
+  const handleReplaceItemChange = (id, field, value) => {
+    setReplaceModal((prev) => ({
+      ...prev,
+      items: prev.items.map((item) =>
+        item.id === id ? { ...item, [field]: value } : item,
+      ),
+    }));
+  };
+
   const executeReplaceBatch = async () => {
-    if (!replaceModal.selectedBatchId)
-      return showAlert("錯誤", "請選擇新批號", "warning");
+    for (const item of replaceModal.items) {
+      if (!item.batchId)
+        return showAlert("錯誤", "請為所有項目選擇新批號", "warning");
+      const q = parseFloat(item.usedQty);
+      if (isNaN(q) || q <= 0)
+        return showAlert("錯誤", "請輸入有效的新使用量", "warning");
+    }
 
-    const newBatch = replaceModal.batches.find(
-      (b) => String(b.id) === String(replaceModal.selectedBatchId),
-    );
-    if (!newBatch) return;
-
-    const newQty = parseFloat(replaceModal.newUsedQty);
-    if (isNaN(newQty) || newQty <= 0)
-      return showAlert("錯誤", "請輸入有效的新使用量", "warning");
+    if (hasDuplicateBatch)
+      return showAlert("錯誤", "不能重複選擇相同的替換批號", "warning");
+    if (isLessThanOriginal)
+      return showAlert("錯誤", "替換的批號總用量不可少於原本的用量", "warning");
 
     setReplaceModal((prev) => ({ ...prev, submitting: true }));
     try {
       const payload = {
         material_code: replaceModal.materialCode,
         old_batch_number: replaceModal.oldBatchNumber,
-        new_batch_number: newBatch.batch_number,
         old_used_qty: replaceModal.oldUsedQty,
-        new_used_qty: newQty,
+        replacements: replaceModal.items.map((item) => ({
+          batch_number: replaceModal.batches.find(
+            (b) => String(b.id) === String(item.batchId),
+          )?.batch_number,
+          used_qty: parseFloat(item.usedQty) || 0,
+        })),
       };
 
       const res = await fetchWithAuth(
@@ -542,7 +625,7 @@ export default function ProductionOrderEditPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "替換失敗");
 
-      showAlert("成功", "批號替換與庫存更新成功", "success");
+      showAlert("成功", "多筆批號替換與庫存更新成功", "success");
       setReplaceModal((prev) => ({ ...prev, isOpen: false }));
       fetchOrderDetails();
     } catch (err) {
@@ -555,6 +638,24 @@ export default function ProductionOrderEditPage() {
   // 🌟 動態計算驗證數值
   const reqQty = parseFloat(replaceModal.requiredQty) || 0;
   const oldQty = parseFloat(replaceModal.oldUsedQty) || 0;
+  const totalNewQty = replaceModal.items.reduce((sum, item) => {
+    const val = parseFloat(item.usedQty);
+    return sum + (isNaN(val) ? 0 : val);
+  }, 0);
+  const isLessThanOriginal = totalNewQty < oldQty - 0.0001;
+  const hasExceedingStock = replaceModal.items.some((item) => {
+    if (!item.batchId || item.usedQty === "") return false;
+    const bInfo = replaceModal.batches.find(
+      (b) => String(b.id) === String(item.batchId),
+    );
+    const maxQ = bInfo ? parseFloat(bInfo.remaining_qty) || 0 : 0;
+    return parseFloat(item.usedQty) > maxQ;
+  });
+  const batchIdsSelected = replaceModal.items
+    .map((i) => i.batchId)
+    .filter(Boolean);
+  const hasDuplicateBatch =
+    new Set(batchIdsSelected).size !== batchIdsSelected.length;
   const newQty = parseFloat(replaceModal.newUsedQty) || 0;
   const currTotal = parseFloat(replaceModal.currentTotalAllocated) || 0;
 
@@ -900,7 +1001,7 @@ export default function ProductionOrderEditPage() {
         </div>
       )}
 
-      {/* 🌟 批號替換 Modal (無邊界 Overlay 設計，輕量化字體) */}
+      {/* 🌟 批號替換 Modal */}
       {replaceModal.isOpen && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
           <div className="bg-white rounded-3xl shadow-[0_10px_40px_-10px_rgba(0,0,0,0.2)] w-full max-w-[420px] flex flex-col relative animate-in fade-in zoom-in-95 duration-200">
@@ -919,11 +1020,12 @@ export default function ProductionOrderEditPage() {
                 }
                 className="w-8 h-8 flex items-center justify-center bg-slate-50 hover:bg-slate-100 text-slate-400 hover:text-slate-600 rounded-full transition-colors"
               >
-                &times;
+                ×
               </button>
             </div>
 
-            <div className="p-6 space-y-6 relative z-10 bg-white">
+            {/* 🌟 加上 pb-64 確保下拉式選單展開時不會被 Footer 或是卡片底部切掉 */}
+            <div className="p-6 space-y-6 relative z-10 bg-white max-h-[65vh] overflow-y-auto overflow-x-visible pb-64 custom-scrollbar">
               {replaceModal.loading ? (
                 <div className="flex flex-col justify-center items-center py-8 text-slate-400 font-medium gap-3">
                   <Loader2 className="w-6 h-6 animate-spin text-blue-500" />
@@ -954,114 +1056,138 @@ export default function ProductionOrderEditPage() {
                     </div>
                     <div className="flex justify-between items-center">
                       <span className="text-slate-500 font-medium">
-                        原本用量
+                        原本用量 (最低門檻)
                       </span>
                       <span className="text-blue-600 font-mono font-bold text-[14px]">
-                        {replaceModal.oldUsedQty}
+                        {cleanFloat(replaceModal.oldUsedQty)}
                       </span>
                     </div>
                   </div>
 
-                  <div className="relative z-50">
-                    <label className="block text-[12px] font-bold text-slate-500 mb-2 uppercase tracking-wide">
-                      1. 選擇新批號 <span className="text-red-500">*</span>
-                    </label>
-                    <OverlaySelect
-                      value={replaceModal.selectedBatchId}
-                      onChange={(id) =>
-                        setReplaceModal((prev) => ({
-                          ...prev,
-                          selectedBatchId: id,
-                        }))
-                      }
-                      options={replaceModal.batches.map((b) => ({
-                        id: b.id,
-                        batch_number: b.batch_number,
-                        remaining_qty: parseFloat(b.remaining_qty),
-                      }))}
-                      placeholder="請下拉選擇可用批號..."
-                    />
+                  <div className="space-y-4">
+                    <div className="flex justify-between items-center">
+                      <label className="block text-[12px] font-bold text-slate-500 uppercase tracking-wide">
+                        選擇替換的新批號與用量{" "}
+                        <span className="text-red-500">*</span>
+                      </label>
+                      <button
+                        type="button"
+                        onClick={handleAddReplaceItem}
+                        className="text-xs font-bold text-blue-600 hover:text-blue-700 bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-100 transition-colors flex items-center gap-1"
+                      >
+                        + 增加一筆批號
+                      </button>
+                    </div>
+
+                    {replaceModal.items.map((item, index) => {
+                      const selectedB = replaceModal.batches.find(
+                        (b) => String(b.id) === String(item.batchId),
+                      );
+                      const maxQ = selectedB
+                        ? parseFloat(selectedB.remaining_qty) || 0
+                        : 0;
+                      const itemQ = parseFloat(item.usedQty) || 0;
+                      const isItemExceed = item.batchId && itemQ > maxQ;
+
+                      const otherSelectedBatchIds = replaceModal.items
+                        .filter((i) => i.id !== item.id)
+                        .map((i) => String(i.batchId))
+                        .filter(Boolean);
+
+                      return (
+                        <div
+                          key={item.id}
+                          className="p-4 bg-slate-50/70 border border-slate-200 rounded-2xl space-y-3 relative"
+                        >
+                          {replaceModal.items.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveReplaceItem(item.id)}
+                              className="absolute top-3 right-3 text-slate-400 hover:text-red-500 text-sm font-bold"
+                            >
+                              ×
+                            </button>
+                          )}
+                          <div>
+                            <span className="text-[11px] font-bold text-slate-400 block mb-1">
+                              新批號 #{index + 1}
+                            </span>
+                            <OverlaySelect
+                              value={item.batchId}
+                              onChange={(id) =>
+                                handleReplaceItemChange(item.id, "batchId", id)
+                              }
+                              options={replaceModal.batches.map((b) => ({
+                                id: b.id,
+                                batch_number: b.batch_number,
+                                remaining_qty: parseFloat(b.remaining_qty),
+                              }))}
+                              placeholder="請選擇可用批號..."
+                              disabledBatchIds={otherSelectedBatchIds}
+                            />
+                          </div>
+                          <div>
+                            <div className="flex justify-between items-center mb-1">
+                              <span className="text-[11px] font-bold text-slate-400">
+                                使用量
+                              </span>
+                              {selectedB && (
+                                <span className="text-[10px] text-blue-600 font-mono">
+                                  庫存上限: {cleanFloat(maxQ)}
+                                </span>
+                              )}
+                            </div>
+                            <input
+                              type="text"
+                              inputMode="decimal"
+                              value={item.usedQty}
+                              onChange={(e) =>
+                                handleReplaceItemChange(
+                                  item.id,
+                                  "usedQty",
+                                  e.target.value,
+                                )
+                              }
+                              placeholder="0"
+                              className="w-full h-10 px-3 bg-white border border-slate-200 rounded-xl font-mono text-sm focus:outline-none focus:border-blue-400"
+                            />
+                          </div>
+                          {isItemExceed && (
+                            <p className="text-[11px] text-red-600 font-medium">
+                              ⚠️ 輸入用量超過該批號剩餘庫存
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
 
-                  <div className="relative z-10">
-                    <label className="block text-[12px] font-bold text-slate-500 mb-2 uppercase tracking-wide flex justify-between items-end">
-                      <span>
-                        2. 設定新用量 <span className="text-red-500">*</span>
+                  {/* 🌟 總結驗算提示 (使用 cleanFloat 消除浮點數誤差) */}
+                  <div className="bg-blue-50/50 border border-blue-100 rounded-xl p-3 text-xs space-y-1 font-medium text-slate-600">
+                    <div className="flex justify-between">
+                      <span>原本用量：</span>
+                      <span className="font-mono font-bold text-slate-800">
+                        {cleanFloat(oldQty)}
                       </span>
-                      {replaceModal.selectedBatchId && (
-                        <span className="text-[11px] bg-blue-50 text-blue-700 px-2 py-0.5 rounded-md border border-blue-100 lowercase font-mono">
-                          庫存上限: {maxAvailable}
-                        </span>
-                      )}
-                    </label>
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      value={replaceModal.newUsedQty}
-                      onChange={(e) =>
-                        setReplaceModal((prev) => ({
-                          ...prev,
-                          newUsedQty: e.target.value,
-                        }))
-                      }
-                      className={`w-full h-11 px-4 bg-white border border-slate-200 rounded-xl text-[15px] font-mono font-medium focus:outline-none transition-all shadow-sm ${
-                        replaceModal.newUsedQty !== "" &&
-                        (isUnder || isExceedingStock)
-                          ? "text-red-600 focus:ring-2 focus:ring-red-500/10 focus:border-red-400"
-                          : "text-slate-800 focus:ring-2 focus:ring-blue-500/10 focus:border-blue-400"
-                      }`}
-                    />
-
-                    {replaceModal.newUsedQty !== "" && (
-                      <div className="mt-3 flex flex-col gap-2">
-                        {isExceedingStock && (
-                          <div className="text-[12px] font-medium text-red-600 bg-red-50 px-3 py-2.5 rounded-lg border border-red-100 flex items-start gap-2 shadow-sm leading-relaxed">
-                            <AlertTriangle
-                              size={16}
-                              strokeWidth={2}
-                              className="shrink-0 mt-0.5"
-                            />
-                            <div>
-                              庫存不足！輸入用量 ({formatNum(newQty)})
-                              已超過此批號的剩餘庫存 ({formatNum(maxAvailable)}
-                              )。
-                            </div>
-                          </div>
-                        )}
-                        {isUnder && (
-                          <div className="text-[12px] font-medium text-red-600 bg-red-50 px-3 py-2.5 rounded-lg border border-red-100 flex items-start gap-2 shadow-sm leading-relaxed">
-                            <AlertTriangle
-                              size={16}
-                              strokeWidth={2}
-                              className="shrink-0 mt-0.5"
-                            />
-                            <div>
-                              需求量有誤！總分配量 ({formatNum(newTotal)})
-                              低於配方需求 ({formatNum(reqQty)})。
-                              <br />
-                              此批號至少需投入{" "}
-                              <span className="font-mono font-bold underline underline-offset-2">
-                                {formatNum(minNeeded)}
-                              </span>
-                              。
-                            </div>
-                          </div>
-                        )}
-                        {!isUnder && isOver && !isExceedingStock && (
-                          <div className="text-[12px] font-medium text-amber-700 bg-amber-50 px-3 py-2.5 rounded-lg border border-amber-200 flex items-start gap-2 shadow-sm leading-relaxed">
-                            <AlertTriangle
-                              size={16}
-                              strokeWidth={2}
-                              className="shrink-0 mt-0.5"
-                            />
-                            <div>
-                              提醒：調整後總分配量 ({formatNum(newTotal)})
-                              已超過配方需求 ({formatNum(reqQty)}
-                              )，請確認是否為耗損超用 (仍可儲存)。
-                            </div>
-                          </div>
-                        )}
-                      </div>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>替換後總用量：</span>
+                      <span
+                        className={`font-mono font-bold ${isLessThanOriginal ? "text-red-600" : "text-blue-600"}`}
+                      >
+                        {cleanFloat(totalNewQty)}
+                      </span>
+                    </div>
+                    {isLessThanOriginal && (
+                      <p className="text-red-600 font-bold pt-1">
+                        ⚠️ 警告：替換後的總用量不可少於原本用量 (
+                        {cleanFloat(oldQty)})！
+                      </p>
+                    )}
+                    {hasDuplicateBatch && (
+                      <p className="text-red-600 font-bold pt-1">
+                        ⚠️ 警告：不可重複選擇相同的替換批號！
+                      </p>
                     )}
                   </div>
                 </>
@@ -1082,10 +1208,9 @@ export default function ProductionOrderEditPage() {
                 disabled={
                   replaceModal.loading ||
                   replaceModal.submitting ||
-                  !replaceModal.selectedBatchId ||
-                  isUnder ||
-                  newQty <= 0 ||
-                  isExceedingStock
+                  isLessThanOriginal ||
+                  hasExceedingStock ||
+                  hasDuplicateBatch
                 }
                 className="px-5 py-2 text-[13px] font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm flex items-center gap-2 disabled:opacity-50 disabled:shadow-none transition-all active:scale-95"
               >

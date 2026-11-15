@@ -17,6 +17,7 @@ import {
   Banknote,
   ArrowRightLeft,
   Printer,
+  RefreshCw,
 } from "lucide-react";
 import CustomDialog from "./components/customDialog";
 import { fetchWithAuth } from "./utils/fetchWithAuth";
@@ -150,7 +151,7 @@ const CustomSelect = ({
 };
 
 // ==========================================
-// 🌟 正式列印：單一客戶收款對帳單明細表 (對應截圖 1)
+// 🌟 正式列印：單一客戶收款對帳單明細表
 // ==========================================
 const SingleCustomerStatementPrintTemplate = ({
   customerRow,
@@ -168,11 +169,19 @@ const SingleCustomerStatementPrintTemplate = ({
     .replace(/\//g, "/");
 
   const notes = customerRow.delivery_notes || [];
-  const totalSales = customerRow.grand_total || 0;
+  const totalSales = customerRow.total_sales_amount || 0;
+  const totalTax = customerRow.total_tax_amount || 0;
   const totalPaid = customerRow.total_paid_amount || 0;
   const unpaid = customerRow.total_unpaid_amount || 0;
-  const priorDebt = debtMap[customerRow.customer_code] || 0;
+
+  // 🌟 修正：前期欠款計算公式 (總累積欠額扣除當期未清，避免重複計算)
+  const totalLifetimeDebt = debtMap[customerRow.customer_code] || 0;
+  const priorDebt = Math.max(0, totalLifetimeDebt - unpaid);
   const grandTotalUnpaid = priorDebt + unpaid;
+
+  const shouldImposeTax = customerRow.customer_should_impose_tax;
+  const finalTax = shouldImposeTax ? totalTax : 0;
+  const finalGrandTotal = shouldImposeTax ? totalSales + finalTax : totalSales;
 
   return (
     <div className="hidden print:block w-full bg-white text-black font-serif">
@@ -200,10 +209,7 @@ const SingleCustomerStatementPrintTemplate = ({
           </div>
           <div>統一編號：{customerRow.customer_tax_id}</div>
           <div>電 話：{customerRow.customer_phone}</div>
-          <div>
-            公司地址：
-            {customerRow.customer_address}
-          </div>
+          <div>公司地址：{customerRow.customer_address}</div>
           <div>
             結帳日期：{startDate.replace(/-/g, "/")} 到{" "}
             {endDate.replace(/-/g, "/")}
@@ -243,6 +249,15 @@ const SingleCustomerStatementPrintTemplate = ({
               </td>
               <td className="border border-black text-left px-2 font-bold">
                 {dn.product_name}
+                {dn.return_type && (
+                  <div className="text-[10px] text-red-600 font-normal">
+                    {dn.return_type === "RETURN" ? "[退貨]" : "[折讓]"}
+                    {" $"}
+                    {formatMoney(dn.return_amount)}
+                    {" 共 "}
+                    {formatMoney(dn.return_qty)} {dn.unit}
+                  </div>
+                )}
               </td>
               <td className="border border-black text-center">
                 {dn.spec || "-"}
@@ -264,7 +279,6 @@ const SingleCustomerStatementPrintTemplate = ({
         </tbody>
       </table>
 
-      {/* 底部結算彙總 (符合截圖格式的三組 stack layout) */}
       <div className="border-2 border-black p-3 text-xs space-y-1.5 font-bold">
         <div className="grid grid-cols-3 gap-4">
           <div>
@@ -272,18 +286,16 @@ const SingleCustomerStatementPrintTemplate = ({
             <span className="font-mono text-sm">{formatMoney(totalSales)}</span>
           </div>
           <div>
-            折讓金額：<span className="font-mono text-sm">0</span>
+            折讓金額： <span className="font-mono text-sm">0</span>
           </div>
           <div>
-            可沖銷金額：<span className="font-mono text-sm">0</span>
+            可沖銷金額： <span className="font-mono text-sm">0</span>
           </div>
         </div>
         <div className="grid grid-cols-3 gap-4 border-t border-black pt-1.5">
           <div>
             營業稅：
-            <span className="font-mono text-sm">
-              {formatMoney(totalSales * 0.05)}
-            </span>
+            <span className="font-mono text-sm">{formatMoney(finalTax)}</span>
           </div>
           <div>
             已收金額：
@@ -297,7 +309,7 @@ const SingleCustomerStatementPrintTemplate = ({
         <div className="grid grid-cols-3 gap-4 font-black text-sm border-t-2 border-black pt-1.5">
           <div>
             總計金額：
-            <span className="font-mono">{formatMoney(totalSales * 1.05)}</span>
+            <span className="font-mono">{formatMoney(finalGrandTotal)}</span>
           </div>
           <div>
             本期未清金額：
@@ -316,7 +328,7 @@ const SingleCustomerStatementPrintTemplate = ({
 };
 
 // ==========================================
-// 🌟 正式列印：應收帳款統計表全表 (對應截圖 2)
+// 🌟 正式列印：應收帳款統計表全表
 // ==========================================
 const AllCustomersSummaryPrintTemplate = ({
   arData,
@@ -351,7 +363,6 @@ const AllCustomersSummaryPrintTemplate = ({
         </h2>
       </div>
 
-      {/* 結帳日期與製表日期垂直堆疊 (stack) */}
       <div className="text-xs mb-3 border-b-2 border-black pb-2 space-y-0.5 font-bold">
         <div>
           結帳日期：{startDate.replace(/-/g, "/")} 到{" "}
@@ -392,7 +403,16 @@ const AllCustomersSummaryPrintTemplate = ({
         </thead>
         <tbody>
           {arData.map((row, idx) => {
-            const prior = debtMap[row.customer_code] || 0;
+            const totalLifetimeDebt = debtMap[row.customer_code] || 0;
+            const prior = Math.max(
+              0,
+              totalLifetimeDebt - (row.total_unpaid_amount || 0),
+            );
+            const shouldImposeTax = row.customer_should_impose_tax ?? true;
+            const taxAmt = shouldImposeTax ? row.total_tax_amount || 0 : 0;
+            const grandTotalAmt = shouldImposeTax
+              ? row.grand_total || 0
+              : row.total_sales_amount || 0;
             return (
               <tr key={idx} className="border-b border-black h-7">
                 <td className="border border-black font-mono">
@@ -402,13 +422,13 @@ const AllCustomersSummaryPrintTemplate = ({
                   {row.customer_name}
                 </td>
                 <td className="border border-black text-right font-mono px-2">
-                  {formatMoney(row.total_tax_amount)}
+                  {formatMoney(taxAmt)}
                 </td>
                 <td className="border border-black text-right font-mono px-2">
                   {formatMoney(row.total_sales_amount)}
                 </td>
                 <td className="border border-black text-right font-mono px-2 font-bold">
-                  {formatMoney(row.grand_total)}
+                  {formatMoney(grandTotalAmt)}
                 </td>
                 <td className="border border-black text-right font-mono px-2">
                   0
@@ -420,7 +440,7 @@ const AllCustomersSummaryPrintTemplate = ({
                   {formatMoney(prior)}
                 </td>
                 <td className="border border-black text-right font-mono px-2 font-bold">
-                  {formatMoney(prior + row.total_unpaid_amount)}
+                  {formatMoney(prior + (row.total_unpaid_amount || 0))}
                 </td>
               </tr>
             );
@@ -449,6 +469,30 @@ export default function AccountingPage() {
 
   const [printCustomerData, setPrintCustomerData] = useState(null);
   const [isPrintAllSummary, setIsPrintAllSummary] = useState(false);
+
+  // 🌟 貨品異動專用 Modal State
+  const [goodsMovementModal, setGoodsMovementModal] = useState({
+    isOpen: false,
+    deliveryNoteId: null,
+    noteNumber: "",
+    productionOrderNumber: "",
+    spec: "",
+    returnType: "RETURN", // 'RETURN' 或 'ALLOWANCE'
+    returnAmount: "",
+    returnQty: "",
+  });
+
+  // 🌟 獨立「貨品異動管理」Tab 的資料列表
+  const [allDeliveryNotes, setAllDeliveryNotes] = useState([]);
+
+  // 🌟 依據全局 startDate 與 endDate 過濾後的銷貨異動清單
+  const filteredDeliveryNotes = useMemo(() => {
+    const list = extractArrayData(allDeliveryNotes);
+    return list.filter((dn) => {
+      if (!dn.note_date) return true;
+      return dn.note_date >= startDate && dn.note_date <= endDate;
+    });
+  }, [allDeliveryNotes, startDate, endDate]);
 
   const [arData, setArData] = useState([]);
   const [apData, setApData] = useState([]);
@@ -604,6 +648,11 @@ export default function AccountingPage() {
           `/api/accounting_report/accumulated_debt`,
         );
         if (res.ok) setDebtData(extractArrayData(await res.json()));
+      } else if (reportSubTab === "RETURNS") {
+        const res = await fetchWithAuth(`/api/delivery_notes`);
+        if (res.ok) {
+          setAllDeliveryNotes(extractArrayData(await res.json()));
+        }
       }
     } catch (e) {
       showAlert("錯誤", "報表載入失敗", "error");
@@ -750,6 +799,55 @@ export default function AccountingPage() {
     arCustomerCode,
     arStatusFilter,
   ]);
+
+  // 🌟 處理貨品異動送出 (含金額與庫存量)
+  const handleSaveGoodsMovement = async (e) => {
+    e.preventDefault();
+    const { deliveryNoteId, returnType, returnAmount, returnQty } =
+      goodsMovementModal;
+
+    setGoodsMovementModal({
+      isOpen: false,
+      deliveryNoteId: null,
+      noteNumber: "",
+      productionOrderNumber: "",
+      spec: "",
+      returnType: "RETURN",
+      returnAmount: "",
+      returnQty: "",
+    });
+
+    if (!deliveryNoteId || returnAmount === "" || returnQty === "") {
+      showAlert("提示", "請完整填寫應退金額與退回庫存量", "warning");
+      return;
+    }
+
+    try {
+      const res = await fetchWithAuth(
+        `/api/delivery_notes/${deliveryNoteId}/goods_movement`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            return_type: returnType,
+            return_amount: returnAmount,
+            return_qty: returnQty,
+          }),
+        },
+      );
+      if (!res.ok) {
+        const errJson = await res.json();
+        throw new Error(
+          errJson.data?.error || errJson.error || "貨品異動更新失敗",
+        );
+      }
+      showAlert("成功", "貨品異動已成功更新，庫存與金額已同步調整", "success");
+
+      fetchReports();
+    } catch (err) {
+      showAlert("錯誤", err.message, "error");
+    }
+  };
 
   const poolSummary = useMemo(() => {
     const tAmt = parseFloat(transferAmount) || 0;
@@ -1035,10 +1133,10 @@ export default function AccountingPage() {
   const SubTabButton = ({ label, isActive, onClick }) => (
     <button
       onClick={onClick}
-      className={`px-5 py-2 rounded-xl text-sm font-bold transition-all whitespace-nowrap shrink-0 ${
+      className={`px-5 py-2.5 rounded-xl text-sm font-bold transition-all whitespace-nowrap shrink-0 ${
         isActive
-          ? "bg-slate-800 text-white shadow-sm"
-          : "bg-white text-slate-500 border border-slate-200 hover:bg-slate-50"
+          ? "bg-slate-900 text-white shadow-md shadow-slate-900/10"
+          : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-50 hover:text-slate-900"
       }`}
     >
       {label}
@@ -1046,7 +1144,7 @@ export default function AccountingPage() {
   );
 
   const DateFilter = () => (
-    <div className="flex items-center gap-2 bg-white border border-slate-300 rounded-xl p-1 shadow-sm h-[42px]">
+    <div className="flex items-center gap-2 bg-white border border-slate-300 rounded-xl p-1.5 shadow-sm h-[42px]">
       <div className="flex items-center gap-2 pl-3">
         <CalendarDays size={16} className="text-slate-400" />
         <input
@@ -1081,126 +1179,369 @@ export default function AccountingPage() {
   const renderReports = () => {
     return (
       <div className="space-y-6">
-        <div className="flex flex-col gap-4">
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div className="flex gap-2 p-1 bg-slate-200/50 rounded-2xl border border-slate-200/50 w-fit shrink-0 overflow-x-auto">
-              <SubTabButton
-                label="應收貨款 (客戶銷貨單對帳)"
-                isActive={reportSubTab === "AR"}
-                onClick={() => setReportSubTab("AR")}
-              />
-              <SubTabButton
-                label="應付貨款 (廠商對帳)"
-                isActive={reportSubTab === "AP"}
-                onClick={() => setReportSubTab("AP")}
-              />
-              <SubTabButton
-                label="客戶累積欠款總覽"
-                isActive={reportSubTab === "DEBT"}
-                onClick={() => setReportSubTab("DEBT")}
-              />
-            </div>
+        {/* 🌟 第一層：4個 SubTabs 獨立一組 */}
+        <div className="bg-white p-4 rounded-3xl border border-slate-200/80 shadow-sm flex items-center overflow-x-auto custom-scrollbar">
+          <div className="flex gap-2 p-1.5 bg-slate-100/80 rounded-2xl border border-slate-200/60 w-fit shrink-0">
+            <SubTabButton
+              label="應收貨款 (客戶銷貨單對帳)"
+              isActive={reportSubTab === "AR"}
+              onClick={() => setReportSubTab("AR")}
+            />
+            <SubTabButton
+              label="貨品異動管理 (退貨/折讓)"
+              isActive={reportSubTab === "RETURNS"}
+              onClick={() => setReportSubTab("RETURNS")}
+            />
+            <SubTabButton
+              label="應付貨款 (廠商對帳)"
+              isActive={reportSubTab === "AP"}
+              onClick={() => setReportSubTab("AP")}
+            />
+            <SubTabButton
+              label="客戶累積欠款總覽"
+              isActive={reportSubTab === "DEBT"}
+              onClick={() => setReportSubTab("DEBT")}
+            />
+          </div>
+        </div>
 
-            {reportSubTab !== "DEBT" && (
-              <div className="flex flex-wrap items-center gap-3">
-                {reportSubTab === "AR" && (
-                  <>
-                    <div className="w-52 shrink-0">
-                      <CustomSelect
-                        options={[
-                          { label: "所有客戶", value: "" },
-                          ...customers.map((c) => ({
-                            label: `[${c.code}] ${c.name}`,
-                            value: c.code,
-                          })),
-                        ]}
-                        value={arCustomerCode}
-                        onChange={(val) => setArCustomerCode(val)}
-                        placeholder="篩選單一客戶..."
-                      />
-                    </div>
-                    <div className="w-40 shrink-0">
-                      <CustomSelect
-                        options={[
-                          { label: "全部付款狀態", value: "" },
-                          { label: "未付款", value: "UNPAID" },
-                          { label: "仍欠款 (部分)", value: "PARTIAL" },
-                          { label: "已付款", value: "PAID" },
-                        ]}
-                        value={arStatusFilter}
-                        onChange={(val) => setArStatusFilter(val)}
-                        placeholder="付款狀態..."
-                      />
-                    </div>
-                  </>
-                )}
-                <DateFilter />
+        {/* 🌟 第二層：日期區間與對應篩選器 (垂直堆疊在 SubTabs 下方) */}
+        <div className="bg-white p-4 rounded-3xl border border-slate-200/80 shadow-sm flex flex-wrap items-center justify-between gap-4">
+          <div className="flex flex-wrap items-center gap-3">
+            {reportSubTab === "AR" && (
+              <>
+                <div className="w-52 shrink-0">
+                  <CustomSelect
+                    options={[
+                      { label: "所有客戶", value: "" },
+                      ...customers.map((c) => ({
+                        label: `[${c.code}] ${c.name}`,
+                        value: c.code,
+                      })),
+                    ]}
+                    value={arCustomerCode}
+                    onChange={(val) => setArCustomerCode(val)}
+                    placeholder="篩選單一客戶..."
+                  />
+                </div>
+                <div className="w-40 shrink-0">
+                  <CustomSelect
+                    options={[
+                      { label: "全部付款狀態", value: "" },
+                      { label: "未付款", value: "UNPAID" },
+                      { label: "仍欠款 (部分)", value: "PARTIAL" },
+                      { label: "已付款", value: "PAID" },
+                    ]}
+                    value={arStatusFilter}
+                    onChange={(val) => setArStatusFilter(val)}
+                    placeholder="付款狀態..."
+                  />
+                </div>
+              </>
+            )}
+          </div>
 
-                {reportSubTab === "AR" && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsPrintAllSummary(true);
-                      setTimeout(() => window.print(), 200);
-                    }}
-                    className="px-4 h-[42px] bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-bold shadow-sm transition-all flex items-center gap-1.5"
-                  >
-                    <Printer size={16} /> 應收帳款統計表
-                  </button>
-                )}
-              </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <DateFilter />
+            {reportSubTab === "AR" && (
+              <button
+                type="button"
+                onClick={() => {
+                  setIsPrintAllSummary(true);
+                  setTimeout(() => window.print(), 200);
+                }}
+                className="px-4 h-[42px] bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-bold shadow-sm transition-all flex items-center gap-1.5 whitespace-nowrap"
+              >
+                <Printer size={16} /> 應收帳款統計表
+              </button>
             )}
           </div>
         </div>
 
-        <div className="bg-white rounded-3xl shadow-sm border border-slate-200/80 overflow-hidden">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="bg-slate-50 border-b border-slate-200 text-[11px] uppercase tracking-widest text-slate-400 font-black">
-                <th className="p-5 w-[25%]">
-                  {reportSubTab === "AP" ? "廠商名稱" : "客戶名稱"}
-                </th>
-                {reportSubTab === "DEBT" ? (
-                  <>
-                    <th className="p-5 text-right">歷史總應收</th>
-                    <th className="p-5 text-right">歷史總已收</th>
-                    <th className="p-5 text-right text-rose-600">累積欠額</th>
-                  </>
-                ) : reportSubTab === "AR" ? (
-                  <>
-                    <th className="p-5 text-right">區間未稅總額</th>
-                    <th className="p-5 text-right">營業稅</th>
-                    <th className="p-5 text-right text-blue-600">
-                      區間含稅總額
-                    </th>
-                    <th className="p-5 text-right text-emerald-600">
-                      已收金額
-                    </th>
-                    <th className="p-5 text-right text-rose-600">尚欠金額</th>
-                    <th className="p-5 text-center w-[140px]">操作</th>
-                  </>
-                ) : (
-                  <>
-                    <th className="p-5 text-right">單據筆數</th>
-                    <th className="p-5 text-right text-emerald-700">
-                      區間應付總額
-                    </th>
-                  </>
-                )}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 text-sm">
-              {isLoading ? (
-                <tr>
-                  <td
-                    colSpan={reportSubTab === "AR" ? 7 : 4}
-                    className="p-16 text-center text-slate-400 font-bold"
-                  >
-                    資料載入中...
-                  </td>
+        {/* 🌟 根據 SubTab 渲染對應的畫面表格 */}
+        {reportSubTab === "RETURNS" ? (
+          <div className="bg-white rounded-3xl shadow-sm border border-slate-200/80 overflow-hidden">
+            <div className="p-5 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
+              <div>
+                <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider">
+                  銷貨單退貨與折讓異動紀錄
+                </h3>
+                <p className="text-xs text-slate-500 font-bold mt-0.5">
+                  顯示目前區間內所有銷貨單的貨品異動與庫存回補狀態
+                </p>
+              </div>
+              <span className="px-3 py-1 bg-blue-50 text-blue-700 rounded-xl text-xs font-mono font-bold border border-blue-200">
+                共 {filteredDeliveryNotes.length} 筆單據
+              </span>
+            </div>
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-slate-100/70 border-b border-slate-200 text-[11px] uppercase tracking-widest text-slate-500 font-black">
+                  <th className="py-4 px-5">銷貨單號</th>
+                  <th className="py-4 px-5">日期</th>
+                  <th className="py-4 px-5">客戶名稱</th>
+                  <th className="py-4 px-5">產品與規格</th>
+                  <th className="py-4 px-5 text-right">出貨數量</th>
+                  <th className="py-4 px-5 text-center">異動類型</th>
+                  <th className="py-4 px-5 text-right">應退金額</th>
+                  <th className="py-4 px-5 text-right">退回庫存量</th>
+                  <th className="py-4 px-5 text-center">操作</th>
                 </tr>
-              ) : reportSubTab === "AR" ? (
-                arData.length === 0 ? (
+              </thead>
+              <tbody className="divide-y divide-slate-100 text-sm">
+                {isLoading ? (
+                  <tr>
+                    <td
+                      colSpan="9"
+                      className="p-16 text-center text-slate-400 font-bold"
+                    >
+                      資料載入中...
+                    </td>
+                  </tr>
+                ) : filteredDeliveryNotes.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan="9"
+                      className="p-16 text-center text-slate-400 font-bold"
+                    >
+                      此時間區間無任何銷貨單異動紀錄
+                    </td>
+                  </tr>
+                ) : (
+                  filteredDeliveryNotes.map((dn) => {
+                    const custName = dn.customer_info?.name || "-";
+                    return (
+                      <tr
+                        key={dn.id}
+                        className="hover:bg-blue-50/30 transition-colors group"
+                      >
+                        <td className="py-4 px-5 font-mono font-bold text-slate-900">
+                          {dn.note_number}
+                        </td>
+                        <td className="py-4 px-5 font-mono text-slate-600 text-xs font-semibold">
+                          {dn.note_date}
+                        </td>
+                        <td className="py-4 px-5 font-bold text-slate-800">
+                          {custName}
+                        </td>
+                        <td className="py-4 px-5 text-slate-600 font-medium">
+                          {dn.production_order_detail?.product_profile?.name ||
+                            "-"}
+                          {dn.spec && (
+                            <span className="text-xs text-slate-400 ml-1.5 font-normal">
+                              ({dn.spec})
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-4 px-5 text-right font-mono font-bold text-slate-700">
+                          {formatMoney(dn.quantity)}{" "}
+                          <span className="text-xs text-slate-400 font-normal">
+                            {dn.unit}
+                          </span>
+                        </td>
+                        <td className="py-4 px-5 text-center">
+                          {dn.return_type ? (
+                            <span
+                              className={`px-3 py-1 rounded-xl text-xs font-black border inline-block ${
+                                dn.return_type === "RETURN"
+                                  ? "bg-amber-50 text-amber-700 border-amber-200 shadow-sm"
+                                  : "bg-blue-50 text-blue-700 border-blue-200 shadow-sm"
+                              }`}
+                            >
+                              {dn.return_type === "RETURN" ? "退貨" : "折讓"}
+                            </span>
+                          ) : (
+                            <span className="px-2.5 py-1 bg-slate-100 text-slate-500 rounded-xl text-xs font-bold inline-block">
+                              無異動
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-4 px-5 text-right font-mono font-bold text-slate-900">
+                          {dn.return_amount
+                            ? `$${formatMoney(dn.return_amount)}`
+                            : "$0"}
+                        </td>
+                        <td className="py-4 px-5 text-right font-mono font-bold text-slate-900">
+                          {dn.return_qty
+                            ? `${formatMoney(dn.return_qty)} ${dn.unit || ""}`
+                            : "0"}
+                        </td>
+                        <td className="py-4 px-5 text-center">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setGoodsMovementModal({
+                                isOpen: true,
+                                deliveryNoteId: dn.id,
+                                noteNumber: dn.note_number,
+                                productionOrderNumber:
+                                  dn.production_order_detail?.order_number ||
+                                  "-",
+                                spec:
+                                  dn.spec ||
+                                  dn.production_order_detail?.product_profile
+                                    ?.spec ||
+                                  "",
+                                returnType: dn.return_type || "RETURN",
+                                returnAmount: dn.return_amount || "",
+                                returnQty: dn.return_qty || "",
+                              })
+                            }
+                            className="px-2 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-sm hover:shadow transition-all inline-flex items-center gap-1.5"
+                          >
+                            異動
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        ) : reportSubTab === "AP" ? (
+          /* 🌟 應付貨款：僅顯示材料供應商應付總額 */
+          <div className="bg-white rounded-3xl shadow-sm border border-slate-200/80 overflow-hidden">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-slate-50 border-b border-slate-200 text-[11px] uppercase tracking-widest text-slate-400 font-black">
+                  <th className="p-5 w-[40%]">廠商名稱</th>
+                  <th className="p-5 text-right">入庫明細筆數</th>
+                  <th className="p-5 text-right text-emerald-700">
+                    應付貨款總額
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 text-sm">
+                {isLoading ? (
+                  <tr>
+                    <td
+                      colSpan="3"
+                      className="p-16 text-center text-slate-400 font-bold"
+                    >
+                      資料載入中...
+                    </td>
+                  </tr>
+                ) : apData.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan="3"
+                      className="p-16 text-center text-slate-400 font-bold"
+                    >
+                      此區間無應付紀錄
+                    </td>
+                  </tr>
+                ) : (
+                  apData.map((row) => (
+                    <tr
+                      key={row.provider_id}
+                      className="hover:bg-blue-50/30 transition-colors"
+                    >
+                      <td className="p-5 font-black text-slate-800">
+                        {row.provider_name}
+                      </td>
+                      <td className="p-5 text-right font-mono font-bold text-slate-500">
+                        {row.items?.length || 0} 筆
+                      </td>
+                      <td className="p-5 text-right font-mono font-black text-emerald-700 text-lg">
+                        ${formatMoney(row.grand_total)}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        ) : reportSubTab === "DEBT" ? (
+          /* 🌟 客戶累積欠款總覽：純金額加總的簡單 list（還原至前一版乾淨設計） */
+          <div className="bg-white rounded-3xl shadow-sm border border-slate-200/80 overflow-hidden">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-slate-50 border-b border-slate-200 text-[11px] uppercase tracking-widest text-slate-400 font-black">
+                  <th className="p-5 w-[25%]">客戶編號</th>
+                  <th className="p-5 w-[35%]">客戶名稱</th>
+                  <th className="p-5 text-right">歷史總應收</th>
+                  <th className="p-5 text-right">歷史總已收</th>
+                  <th className="p-5 text-right text-rose-600">累積欠額</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 text-sm">
+                {isLoading ? (
+                  <tr>
+                    <td
+                      colSpan="5"
+                      className="p-16 text-center text-slate-400 font-bold"
+                    >
+                      資料載入中...
+                    </td>
+                  </tr>
+                ) : debtData.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan="5"
+                      className="p-16 text-center text-slate-400 font-bold"
+                    >
+                      目前無客戶欠款
+                    </td>
+                  </tr>
+                ) : (
+                  debtData.map((row) => (
+                    <tr
+                      key={row.customer_id}
+                      className="hover:bg-rose-50/30 transition-colors"
+                    >
+                      <td className="p-5 font-mono font-bold text-slate-700">
+                        {row.customer_code}
+                      </td>
+                      <td className="p-5 font-black text-slate-800">
+                        {row.customer_name}
+                      </td>
+                      <td className="p-5 text-right font-mono font-bold text-slate-500">
+                        ${formatMoney(row.total_ar)}
+                      </td>
+                      <td className="p-5 text-right font-mono font-bold text-emerald-600">
+                        ${formatMoney(row.total_paid)}
+                      </td>
+                      <td className="p-5 text-right font-mono font-black text-rose-600 text-lg">
+                        <span className="flex items-center justify-end gap-2">
+                          {row.accumulated_debt > 0 && (
+                            <AlertCircle size={16} />
+                          )}
+                          ${formatMoney(row.accumulated_debt)}
+                        </span>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          /* 🌟 應收貨款 (AR) */
+          <div className="bg-white rounded-3xl shadow-sm border border-slate-200/80 overflow-hidden">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-slate-50 border-b border-slate-200 text-[11px] uppercase tracking-widest text-slate-400 font-black">
+                  <th className="p-5 w-[25%]">客戶名稱</th>
+                  <th className="p-5 text-right">區間未稅總額</th>
+                  <th className="p-5 text-right">營業稅</th>
+                  <th className="p-5 text-right text-blue-600">區間含稅總額</th>
+                  <th className="p-5 text-right text-emerald-600">已收金額</th>
+                  <th className="p-5 text-right text-rose-600">尚欠金額</th>
+                  <th className="p-5 text-center w-[140px]">操作</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 text-sm">
+                {isLoading ? (
+                  <tr>
+                    <td
+                      colSpan="7"
+                      className="p-16 text-center text-slate-400 font-bold"
+                    >
+                      資料載入中...
+                    </td>
+                  </tr>
+                ) : arData.length === 0 ? (
                   <tr>
                     <td
                       colSpan="7"
@@ -1245,10 +1586,18 @@ export default function AccountingPage() {
                             ${formatMoney(row.total_sales_amount)}
                           </td>
                           <td className="p-5 text-right font-mono font-bold text-slate-500">
-                            ${formatMoney(row.total_tax_amount)}
+                            {formatMoney(
+                              row.customer_should_impose_tax
+                                ? row.total_tax_amount
+                                : 0,
+                            )}
                           </td>
                           <td className="p-5 text-right font-mono font-black text-blue-700 text-base">
-                            ${formatMoney(row.grand_total)}
+                            {formatMoney(
+                              row.customer_should_impose_tax
+                                ? row.grand_total
+                                : row.total_sales_amount,
+                            )}
                           </td>
                           <td className="p-5 text-right font-mono font-bold text-emerald-600">
                             ${formatMoney(row.total_paid_amount)}
@@ -1256,7 +1605,6 @@ export default function AccountingPage() {
                           <td className="p-5 text-right font-mono font-black text-rose-600 text-base">
                             ${formatMoney(row.total_unpaid_amount)}
                           </td>
-                          {/* 產生對帳單按鈕放在每個 row 最右側 */}
                           <td
                             className="p-5 text-center"
                             onClick={(e) => e.stopPropagation()}
@@ -1277,14 +1625,15 @@ export default function AccountingPage() {
 
                         {isExpanded && (
                           <tr className="bg-slate-50/90">
-                            <td colSpan="7" className="p-4 md:px-10">
-                              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                            <td colSpan="7" className="p-4 md:px-6">
+                              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden w-full">
                                 <div className="px-4 py-3 bg-slate-100/70 border-b border-slate-200 flex justify-between items-center">
                                   <span className="text-xs font-black text-slate-600 uppercase tracking-wider">
                                     銷貨單明細 ({row.customer_name})
                                   </span>
                                   <span className="text-xs font-bold text-slate-500">
-                                    點擊「金流與票據」可進行收款沖銷
+                                    請至上方「貨品異動管理」Tab
+                                    進行退貨或折讓作業
                                   </span>
                                 </div>
                                 <table className="w-full text-left border-collapse text-xs">
@@ -1335,6 +1684,20 @@ export default function AccountingPage() {
                                                 ({dn.spec})
                                               </span>
                                             )}
+                                            {dn.return_type && (
+                                              <span className="ml-2 px-2 py-0.5 bg-amber-50 text-amber-700 border border-amber-200 rounded text-[10px] font-bold">
+                                                {dn.return_type === "RETURN"
+                                                  ? "[退貨]"
+                                                  : "[折讓]"}
+                                                {" $"}
+                                                {formatMoney(dn.return_amount)}
+                                                {" 共 "}
+                                                {formatMoney(
+                                                  dn.return_qty,
+                                                )}{" "}
+                                                {dn.unit}
+                                              </span>
+                                            )}
                                           </td>
                                           <td className="py-3 px-4 text-right font-mono font-bold text-slate-600">
                                             {dn.quantity} {dn.unit}
@@ -1367,71 +1730,11 @@ export default function AccountingPage() {
                       </React.Fragment>
                     );
                   })
-                )
-              ) : reportSubTab === "AP" ? (
-                apData.length === 0 ? (
-                  <tr>
-                    <td
-                      colSpan="3"
-                      className="p-16 text-center text-slate-400 font-bold"
-                    >
-                      此區間無應付紀錄
-                    </td>
-                  </tr>
-                ) : (
-                  apData.map((row) => (
-                    <tr
-                      key={row.provider_id}
-                      className="hover:bg-blue-50/30 transition-colors"
-                    >
-                      <td className="p-5 font-black text-slate-800">
-                        {row.provider_name}
-                      </td>
-                      <td className="p-5 text-right font-mono font-bold text-slate-500">
-                        {row.items?.length || 0} 筆入庫明細
-                      </td>
-                      <td className="p-5 text-right font-mono font-black text-emerald-700 text-lg">
-                        ${formatMoney(row.grand_total)}
-                      </td>
-                    </tr>
-                  ))
-                )
-              ) : debtData.length === 0 ? (
-                <tr>
-                  <td
-                    colSpan="4"
-                    className="p-16 text-center text-slate-400 font-bold"
-                  >
-                    目前無客戶欠款
-                  </td>
-                </tr>
-              ) : (
-                debtData.map((row) => (
-                  <tr
-                    key={row.customer_id}
-                    className="hover:bg-rose-50/30 transition-colors"
-                  >
-                    <td className="p-5 font-black text-slate-800">
-                      [{row.customer_code}] <br /> {row.customer_name}
-                    </td>
-                    <td className="p-5 text-right font-mono font-bold text-slate-500">
-                      ${formatMoney(row.total_ar)}
-                    </td>
-                    <td className="p-5 text-right font-mono font-bold text-emerald-600">
-                      ${formatMoney(row.total_paid)}
-                    </td>
-                    <td className="p-5 text-right font-mono font-black text-rose-600 text-lg">
-                      <span className="flex items-center justify-end gap-2">
-                        {row.accumulated_debt > 0 && <AlertCircle size={16} />}$
-                        {formatMoney(row.accumulated_debt)}
-                      </span>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     );
   };
@@ -1496,11 +1799,7 @@ export default function AccountingPage() {
                     </td>
                     <td className="p-4">
                       <span
-                        className={`px-2.5 py-1 rounded-md text-[10px] font-black border ${
-                          row.transaction_type === "INCOME"
-                            ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                            : "bg-rose-50 text-rose-700 border-rose-200"
-                        }`}
+                        className={`px-2.5 py-1 rounded-md text-[10px] font-black border ${row.transaction_type === "INCOME" ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-rose-50 text-rose-700 border-rose-200"}`}
                       >
                         {row.transaction_type === "INCOME"
                           ? "收入(入零用金)"
@@ -1518,11 +1817,7 @@ export default function AccountingPage() {
                       </div>
                     </td>
                     <td
-                      className={`p-4 text-right font-mono font-black text-base ${
-                        row.transaction_type === "INCOME"
-                          ? "text-emerald-600"
-                          : "text-slate-700"
-                      }`}
+                      className={`p-4 text-right font-mono font-black text-base ${row.transaction_type === "INCOME" ? "text-emerald-600" : "text-slate-700"}`}
                     >
                       {row.transaction_type === "EXPENSE" ? "-" : ""}$
                       {formatMoney(row.amount)}
@@ -1550,7 +1845,7 @@ export default function AccountingPage() {
                         </button>
                         <button
                           onClick={() => handleDeleteMisc(row.id)}
-                          className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                          className="p-1.5 text-rose-600 hover:bg-red-50 rounded-lg transition-colors"
                         >
                           <Trash2 size={16} />
                         </button>
@@ -1603,7 +1898,6 @@ export default function AccountingPage() {
                 <th className="p-5">對象</th>
                 <th className="p-5">收付方式</th>
                 <th className="p-5 text-right">收付總額</th>
-                {/* <th className="p-5 w-[30%]">沖銷單據與備註</th> */}
                 <th className="p-5 text-center">操作</th>
               </tr>
             </thead>
@@ -1702,14 +1996,6 @@ export default function AccountingPage() {
                         >
                           ${formatMoney(row.amount)}
                         </td>
-                        {/* <td className="p-4">
-                          <div
-                            className="text-xs font-bold text-slate-600 line-clamp-2 leading-relaxed"
-                            title={row.reference_notes}
-                          >
-                            {row.reference_notes || "-"}
-                          </div>
-                        </td> */}
                         <td className="p-4 text-center">
                           <div className="flex w-full justify-center gap-2">
                             {hasUnclearedChecks && (
@@ -1909,7 +2195,6 @@ export default function AccountingPage() {
 
   return (
     <div className="p-6 md:p-8 max-w-[1400px] mx-auto bg-slate-50 min-h-screen font-sans text-slate-800 w-full">
-      {/* 隱藏操作介面，確保列印時只有純列印樣板 */}
       <div className="print:hidden">
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-3xl font-extrabold text-slate-900 tracking-tight">
@@ -1942,6 +2227,171 @@ export default function AccountingPage() {
         {activeTab === "MISC" && renderMisc()}
         {activeTab === "PAYMENTS" && renderPayments()}
       </div>
+
+      {/* 🌟 貨品異動 (退貨/折讓) Modal */}
+      {goodsMovementModal.isOpen && (
+        <div className="fixed inset-0 z-[80] bg-slate-900/50 backdrop-blur-sm flex justify-center items-center p-4">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="p-6 pb-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+              <h3 className="text-lg font-black text-slate-800 flex items-center gap-2">
+                <RefreshCw className="text-blue-600" size={18} /> 銷貨單貨品異動
+              </h3>
+              <button
+                onClick={() =>
+                  setGoodsMovementModal({
+                    isOpen: false,
+                    deliveryNoteId: null,
+                    noteNumber: "",
+                    productionOrderNumber: "",
+                    spec: "",
+                    returnType: "RETURN",
+                    returnAmount: "",
+                    returnQty: "",
+                  })
+                }
+                className="text-slate-400 hover:text-slate-600 text-2xl"
+              >
+                ×
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveGoodsMovement} className="p-6 space-y-5">
+              <div className="grid grid-cols-2 gap-4 bg-slate-50 p-3.5 rounded-2xl border border-slate-100">
+                <div>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase">
+                    生產單號
+                  </span>
+                  <div className="text-sm font-mono font-black text-slate-800">
+                    {goodsMovementModal.productionOrderNumber}
+                  </div>
+                </div>
+                <div>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase">
+                    規格
+                  </span>
+                  <div className="text-sm font-bold text-slate-700 truncate">
+                    {goodsMovementModal.spec || "-"}
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-2 uppercase">
+                  異動類型 *
+                </label>
+                <div className="flex gap-4">
+                  <label className="flex items-center gap-2 cursor-pointer font-bold text-sm">
+                    <input
+                      type="radio"
+                      name="returnType"
+                      value="RETURN"
+                      checked={goodsMovementModal.returnType === "RETURN"}
+                      onChange={(e) =>
+                        setGoodsMovementModal({
+                          ...goodsMovementModal,
+                          returnType: e.target.value,
+                        })
+                      }
+                      className="w-4 h-4 text-blue-600 focus:ring-blue-500"
+                    />
+                    退貨
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer font-bold text-sm">
+                    <input
+                      type="radio"
+                      name="returnType"
+                      value="ALLOWANCE"
+                      checked={goodsMovementModal.returnType === "ALLOWANCE"}
+                      onChange={(e) =>
+                        setGoodsMovementModal({
+                          ...goodsMovementModal,
+                          returnType: e.target.value,
+                        })
+                      }
+                      className="w-4 h-4 text-blue-600 focus:ring-blue-500"
+                    />
+                    折讓
+                  </label>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase">
+                    應退金額 *
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold">
+                      $
+                    </span>
+                    <input
+                      type="number"
+                      step="any"
+                      required
+                      min="0"
+                      value={goodsMovementModal.returnAmount}
+                      onChange={(e) =>
+                        setGoodsMovementModal({
+                          ...goodsMovementModal,
+                          returnAmount: e.target.value,
+                        })
+                      }
+                      placeholder="0"
+                      className="w-full pl-7 pr-3 py-2.5 border border-slate-300 rounded-xl text-base font-mono font-black text-slate-800 outline-none focus:border-blue-500"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase">
+                    退回庫存量 *
+                  </label>
+                  <input
+                    type="number"
+                    step="any"
+                    required
+                    min="0"
+                    value={goodsMovementModal.returnQty}
+                    onChange={(e) =>
+                      setGoodsMovementModal({
+                        ...goodsMovementModal,
+                        returnQty: e.target.value,
+                      })
+                    }
+                    placeholder="0"
+                    className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-base font-mono font-black text-slate-800 outline-none focus:border-blue-500"
+                  />
+                </div>
+              </div>
+
+              <div className="pt-2 flex justify-end gap-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setGoodsMovementModal({
+                      isOpen: false,
+                      deliveryNoteId: null,
+                      noteNumber: "",
+                      spec: "",
+                      returnType: "RETURN",
+                      returnAmount: "",
+                      returnQty: "",
+                    })
+                  }
+                  className="px-5 py-2.5 text-slate-600 bg-slate-100 hover:bg-slate-200 text-sm font-bold rounded-xl transition-colors"
+                >
+                  取消
+                </button>
+                <button
+                  type="submit"
+                  className="px-6 py-2.5 text-white bg-blue-600 hover:bg-blue-700 text-sm font-bold rounded-xl shadow-sm transition-all"
+                >
+                  確認送出異動
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* 隱藏式列印樣板 */}
       {isPrintAllSummary ? (

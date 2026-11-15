@@ -134,6 +134,13 @@ const DeliveryNoteTemplate = ({ note }) => {
             </td>
             <td className="border border-black px-2 py-1 text-left">
               {profile?.name || ""}
+              {note.return_type && (
+                <div className="text-[11px] text-red-600 font-normal mt-0.5">
+                  【{note.return_type === "RETURN" ? "退貨" : "折讓"}】 金額: -$
+                  {formatDisplayNum(note.return_amount)} / 數量:{" "}
+                  {formatDisplayNum(note.return_qty)}
+                </div>
+              )}
             </td>
             <td className="border border-black px-2 py-1">{note.spec || ""}</td>
             <td className="border border-black px-2 py-1 text-right font-mono font-medium">
@@ -187,7 +194,7 @@ const DeliveryNoteTemplate = ({ note }) => {
             <td className="border-r border-b border-black px-3 py-1 align-top w-1/3 text-center">
               營業稅：
               <span className="font-mono">
-                {formatDisplayNum(note.tax_amount)}
+                {formatDisplayNum(note.tax_amount || 0)}
               </span>
             </td>
             <td className="border-b border-black px-3 py-1 align-top w-1/3 text-right">
@@ -247,8 +254,11 @@ const DeliveryNotePrintTemplate = ({ data }) => {
       <style>
         {`
           @media print {
-            @page { size: A4 landscape; margin: 15mm; }
-            body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            .page-break { page-break-before: always; }
+            @page { 
+              size: A4 landscape; 
+              margin: 8mm 10mm; 
+            }
           }
         `}
       </style>
@@ -260,10 +270,13 @@ const DeliveryNotePrintTemplate = ({ data }) => {
 const DeliveryNotePage = () => {
   const [deliveryNotes, setDeliveryNotes] = useState([]);
   const [productionOrders, setProductionOrders] = useState([]);
+  const [customers, setCustomers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [isFetchingPO, setIsFetchingPO] = useState(false);
   const [error, setError] = useState(null);
   const [searchTerm, setSearchTerm] = useState("");
+
+  const [selectedCustomerCode, setSelectedCustomerCode] = useState("");
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -276,6 +289,7 @@ const DeliveryNotePage = () => {
     production_order: "",
     note_date: new Date().toISOString().split("T")[0],
     customer_name: "",
+    customer_should_impose_tax: true,
     customer_tax_id: "",
     customer_code: "",
     contact: "",
@@ -284,7 +298,8 @@ const DeliveryNotePage = () => {
     product_name: "",
     product_code: "",
     spec: "",
-    quantity: "",
+    quantity: 0,
+    maxQuantity: 999999,
     unit: "箱",
     sales_unit: "箱",
     sales_pack_unit: "包",
@@ -323,6 +338,7 @@ const DeliveryNotePage = () => {
   useEffect(() => {
     fetchDeliveryNotes();
     fetchProductionOrders();
+    fetchCustomers();
   }, []);
 
   const fetchDeliveryNotes = async () => {
@@ -348,10 +364,22 @@ const DeliveryNotePage = () => {
     }
   };
 
+  const fetchCustomers = async () => {
+    try {
+      const res = await fetchWithAuth("/api/vendors");
+      const json = await res.json();
+      setCustomers(json.data);
+    } catch (err) {
+      console.error("無法載入客戶清單", err);
+    }
+  };
+
   const openModal = () => {
+    setSelectedCustomerCode("");
     setFormData({
       production_order: "",
       note_date: new Date().toISOString().split("T")[0],
+      customer_should_impose_tax: true,
       customer_name: "",
       customer_tax_id: "",
       customer_code: "",
@@ -361,7 +389,8 @@ const DeliveryNotePage = () => {
       product_name: "",
       product_code: "",
       spec: "",
-      quantity: "",
+      quantity: 0,
+      maxQuantity: 999999,
       unit: "箱",
       sales_unit: "箱",
       sales_pack_unit: "包",
@@ -380,6 +409,43 @@ const DeliveryNotePage = () => {
 
   const closeModal = () => setIsModalOpen(false);
 
+  // 🌟 步驟 1：選擇客戶後，自動帶入客戶基本資料，並清空已選的生產單
+  const handleCustomerChange = async (e) => {
+    const custCode = e.target.value;
+    setSelectedCustomerCode(custCode);
+
+    const foundCust = customers.find(
+      (c) => String(c.code) === String(custCode),
+    );
+    if (!foundCust) return;
+
+    setFormData((prev) => ({
+      ...prev,
+      production_order: "",
+      customer_code: foundCust.code || "",
+      customer_name: foundCust.name || "",
+      customer_tax_id: foundCust.tax_id || "",
+      customer_should_impose_tax: foundCust.should_impose_tax ?? true,
+      contact: foundCust.contact_person || "",
+      phone: foundCust.phone || "",
+      address: foundCust.address || "",
+      product_name: "",
+      product_code: "",
+      spec: "",
+      quantity: 0,
+    }));
+  };
+
+  // 🌟 步驟 2：依據所選客戶過濾出對應的生產單
+  const filteredProductionOrders = useMemo(() => {
+    if (!selectedCustomerCode) return [];
+    return productionOrders.filter((po) => {
+      const poCustomerCode = po.vendor_info?.code;
+      return String(poCustomerCode) === String(selectedCustomerCode);
+    });
+  }, [productionOrders, selectedCustomerCode]);
+
+  // 🌟 步驟 3：選擇生產單後帶出產品與規格明細
   const handleProductionOrderChange = async (e) => {
     const poId = e.target.value;
     setFormData((prev) => ({ ...prev, production_order: poId }));
@@ -392,26 +458,11 @@ const DeliveryNotePage = () => {
 
       const poJson = await res.json();
       const data = poJson.data || poJson;
-      const vendor = data.vendor_info || {};
       const profile = data.product_profile || {};
-
-      let vendor_detail = {};
-      if (vendor?.code) {
-        const vres = await fetchWithAuth(
-          `/api/vendors/search?q=${vendor.code}`,
-        );
-        vendor_detail = vres.ok ? (await vres.json()).data : {};
-      }
 
       setFormData((prev) => ({
         ...prev,
-        customer_name: vendor.name || vendor_detail.name || "",
-        customer_tax_id: vendor.tax_id || vendor_detail.tax_id || "",
-        customer_code: vendor?.code || vendor_detail.code || "",
         used_batch_number: data?.used_batch_number || "",
-        contact: vendor.contact_person || vendor_detail.contact_person || "",
-        phone: vendor.phone || vendor_detail.phone || "",
-        address: vendor.address || vendor_detail.address || "",
         product_name: profile.name || "",
         product_code: profile.code || "",
         spec: profile.spec || "",
@@ -421,8 +472,8 @@ const DeliveryNotePage = () => {
         sales_unit_quantity: parseFloat(profile.sales_unit_quantity) || 1,
         sales_pack_quantity: parseFloat(profile.sales_pack_quantity) || 1,
         sales_price: profile.sales_price || 0,
-        quantity:
-          data.remaining_qty > 0 ? formatDisplayNum(data.remaining_qty) : 1,
+        quantity: 0,
+        maxQuantity: parseFloat(data.remaining_qty) || 0,
       }));
     } catch (error) {
       console.error("載入生產單與客戶資料失敗", error);
@@ -433,6 +484,15 @@ const DeliveryNotePage = () => {
 
   const handleFormChange = (e) => {
     const { name, value } = e.target;
+    if (name === "quantity") {
+      const num = parseFloat(value);
+      if (
+        value !== "" &&
+        (isNaN(num) || num < 0 || num > formData.maxQuantity)
+      ) {
+        return;
+      }
+    }
     setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
@@ -441,7 +501,9 @@ const DeliveryNotePage = () => {
     const price = parseFloat(formData.sales_price) || 0;
     if (qty > 0 && price >= 0) {
       const total = Math.round(qty * price);
-      const tax = Math.round(total * 0.05);
+      const tax = formData.customer_should_impose_tax
+        ? Math.round(total * 0.05)
+        : 0;
       setFormData((prev) => ({
         ...prev,
         total_amount: total,
@@ -470,7 +532,7 @@ const DeliveryNotePage = () => {
     const totalPacks = q * (packQty / unitQty);
     return {
       estimatedModalWeight: totalPacks * wPerPack,
-      weightPerPack: wPerPack,
+      weightPerPack: wPerPack, // 🌟 補回 weightPerPack 供 Modal 介面顯示使用
     };
   }, [
     formData.quantity,
@@ -483,14 +545,24 @@ const DeliveryNotePage = () => {
     e.preventDefault();
     setIsSubmitting(true);
 
+    const q = parseFloat(formData.quantity) || 0;
+    const packQty = parseFloat(formData.sales_pack_quantity) || 1;
+    const unitQty = parseFloat(formData.sales_unit_quantity) || 1;
+
+    const specMatch = (formData.spec || "").match(/([\d.]+)\s*KG/i);
+    const weightPerPack = specMatch ? parseFloat(specMatch[1]) : 1;
+
+    const totalPacks = q * (packQty / unitQty);
+    const calculatedWeightKg = totalPacks * weightPerPack;
+
     const payload = {
       production_order: parseInt(formData.production_order, 10),
       note_date: formData.note_date,
-      quantity: formData.quantity,
-      unit: formData.unit,
+      quantity: calculatedWeightKg,
+      unit: "KG",
       spec: formData.spec,
       sales_price: formData.sales_price || null,
-      batch_number: formData.used_batch_number, // 把批號送出但隱藏於介面
+      batch_number: formData.used_batch_number,
       total_amount: formData.total_amount || null,
       tax_amount: formData.tax_amount || null,
       grand_total: formData.grand_total || null,
@@ -503,6 +575,7 @@ const DeliveryNotePage = () => {
         code: formData.customer_code,
         phone: formData.phone,
         address: formData.address,
+        should_impose_tax: formData.customer_should_impose_tax,
       },
     };
 
@@ -515,7 +588,7 @@ const DeliveryNotePage = () => {
       if (!res.ok) throw new Error("新增失敗");
       await fetchDeliveryNotes();
       closeModal();
-      showAlert("儲存成功", "已成功開立銷貨單。", "success");
+      showAlert("儲存成功", "已成功開立銷貨單並完成庫存扣除。", "success");
     } catch (error) {
       showAlert("發生錯誤", error.message, "error");
     } finally {
@@ -593,7 +666,6 @@ const DeliveryNotePage = () => {
       </div>
     );
   }
-
   return (
     <>
       <div className="print:hidden p-6 md:p-8 max-w-7xl mx-auto bg-slate-50 min-h-screen font-sans text-slate-900 w-full">
@@ -605,7 +677,7 @@ const DeliveryNotePage = () => {
           </div>
         </div>
 
-        {/* 系統功能說明 Banner（完全對齊 Template） */}
+        {/* 系統功能說明 Banner */}
         <div className="bg-blue-50/70 backdrop-blur-md text-blue-900 text-sm p-5 md:p-6 rounded-3xl mb-10 border border-blue-200/60 shadow-sm print:hidden">
           <p className="flex items-center gap-2 font-semibold mb-3 text-lg">
             <span className="text-xl">💡</span> 系統功能說明
@@ -668,6 +740,7 @@ const DeliveryNotePage = () => {
                   <th className="py-4 px-5">單據日期</th>
                   <th className="py-4 px-5">客戶名稱</th>
                   <th className="py-4 px-5 text-right">出貨量</th>
+                  <th className="py-4 px-5 text-center">異動狀態</th>
                   <th className="py-4 px-5 text-center">操作</th>
                 </tr>
               </thead>
@@ -699,6 +772,29 @@ const DeliveryNotePage = () => {
                               {note.unit}
                             </span>
                           </td>
+                          <td className="py-4 px-5 text-center">
+                            {note.return_type ? (
+                              <span
+                                className={`px-3 py-1 rounded-xl text-xs font-black border inline-block ${
+                                  note.return_type === "RETURN"
+                                    ? "bg-amber-50 text-amber-700 border-amber-200 shadow-sm"
+                                    : "bg-blue-50 text-blue-700 border-blue-200 shadow-sm"
+                                }`}
+                              >
+                                {note.return_type === "RETURN"
+                                  ? "[退貨]"
+                                  : "[折讓]"}
+                                {" $"}
+                                {formatDisplayNum(note.return_amount)}
+                                {" 共 "}
+                                {formatDisplayNum(note.return_qty)} {note.unit}
+                              </span>
+                            ) : (
+                              <span className="px-2.5 py-1 bg-slate-100 text-slate-400 rounded-xl text-xs font-medium inline-block">
+                                正常
+                              </span>
+                            )}
+                          </td>
                           <td
                             className="py-4 px-5 text-center whitespace-nowrap"
                             onClick={(e) => e.stopPropagation()}
@@ -724,7 +820,7 @@ const DeliveryNotePage = () => {
                         {isExpanded && (
                           <tr>
                             <td
-                              colSpan="6"
+                              colSpan="7"
                               className="p-0 bg-slate-50/50 shadow-[inset_0_4px_12px_-4px_rgba(0,0,0,0.05)] border-b border-slate-200"
                             >
                               <div className="p-6 md:p-8 overflow-x-auto flex flex-col">
@@ -741,7 +837,7 @@ const DeliveryNotePage = () => {
                 ) : (
                   <tr>
                     <td
-                      colSpan="6"
+                      colSpan="7"
                       className="py-16 text-center text-slate-400 font-medium"
                     >
                       找不到符合的銷貨單資料
@@ -769,7 +865,7 @@ const DeliveryNotePage = () => {
                   onClick={closeModal}
                   className="text-slate-400 hover:text-red-500 text-3xl leading-none transition-colors"
                 >
-                  &times;
+                  ×
                 </button>
               </div>
 
@@ -778,9 +874,34 @@ const DeliveryNotePage = () => {
                 onSubmit={handleSubmit}
                 className="overflow-y-auto p-6 md:p-8 flex-1 bg-slate-50/50 font-sans space-y-8"
               >
-                {/* 頂部：連動生產單與日期 */}
+                {/* 頂部：1. 選擇客戶 -> 2. 選擇該客戶的生產單 -> 3. 日期 */}
                 <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    {/* 1. 選擇客戶 */}
+                    <div>
+                      <label className="block text-sm font-medium text-slate-500 mb-2">
+                        選擇客戶 <span className="text-red-500">*</span>
+                      </label>
+                      <div className="relative">
+                        <select
+                          value={selectedCustomerCode}
+                          onChange={handleCustomerChange}
+                          required
+                          className="appearance-none w-full h-11 bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm font-medium focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all shadow-sm cursor-pointer text-slate-800"
+                        >
+                          <option value="" disabled>
+                            -- 請選擇客戶 --
+                          </option>
+                          {customers.map((cus) => (
+                            <option key={cus.id} value={cus.code}>
+                              [{cus.code}] {cus.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* 2. 選擇該客戶的生產單 */}
                     <div>
                       <label className="block text-sm font-medium text-slate-500 mb-2">
                         連動生產單 <span className="text-red-500">*</span>
@@ -791,12 +912,15 @@ const DeliveryNotePage = () => {
                           value={formData.production_order}
                           onChange={handleProductionOrderChange}
                           required
-                          className="appearance-none w-full h-11 bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm font-medium focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all shadow-sm cursor-pointer text-slate-800"
+                          disabled={!selectedCustomerCode}
+                          className="appearance-none w-full h-11 bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm font-medium focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all shadow-sm cursor-pointer text-slate-800 disabled:bg-slate-100 disabled:text-slate-400"
                         >
                           <option value="" disabled>
-                            -- 請下拉選擇生產單 --
+                            {selectedCustomerCode
+                              ? "-- 請選擇生產單 --"
+                              : "-- 請先選擇客戶 --"}
                           </option>
-                          {productionOrders.map((po) => (
+                          {filteredProductionOrders.map((po) => (
                             <option
                               key={po.id}
                               value={po.id}
@@ -815,6 +939,8 @@ const DeliveryNotePage = () => {
                         </span>
                       )}
                     </div>
+
+                    {/* 3. 單據日期 */}
                     <div>
                       <label className="block text-sm font-medium text-slate-500 mb-2">
                         單據日期 <span className="text-red-500">*</span>
@@ -831,7 +957,7 @@ const DeliveryNotePage = () => {
                   </div>
                 </div>
 
-                {/* 客戶資訊表單 */}
+                {/* 客戶資訊表單 (唯讀或帶入) */}
                 <div className="bg-white p-6 md:p-8 rounded-3xl border border-slate-200 shadow-sm space-y-6">
                   <h4 className="text-base font-semibold text-slate-700 tracking-wide border-b border-slate-100 pb-3">
                     客戶基本資料
@@ -948,8 +1074,10 @@ const DeliveryNotePage = () => {
                           </span>
                           <div className="flex items-center gap-2">
                             <input
-                              type="text"
+                              type="number"
                               name="quantity"
+                              min="0"
+                              max={formData.maxQuantity}
                               value={formData.quantity}
                               onChange={handleFormChange}
                               required

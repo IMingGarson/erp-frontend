@@ -233,6 +233,9 @@ export default function InventoryPage() {
   const [searchDateStart, setSearchDateStart] = useState("");
   const [searchDateEnd, setSearchDateEnd] = useState("");
 
+  // 🌟 快速篩選按鈕狀態：是否僅顯示包含未收貨完畢批號的物料
+  const [filterNotFullyReceived, setFilterNotFullyReceived] = useState(false);
+
   const [currentPage, setCurrentPage] = useState(1);
   const [expandedMaterials, setExpandedMaterials] = useState([]);
   const [expandedBatches, setExpandedBatches] = useState([]);
@@ -315,6 +318,16 @@ export default function InventoryPage() {
     return b.material || b.material_id || b.product || b.product_id || null;
   };
 
+  // 🌟 計算全系統中尚未收貨完畢的批號數量供按鈕提示使用
+  const notFullyReceivedCount = useMemo(() => {
+    if (!Array.isArray(batches)) return 0;
+    return batches.filter(
+      (b) =>
+        b.source_pr_item_detail &&
+        b.source_pr_item_detail.is_fully_received === false,
+    ).length;
+  }, [batches]);
+
   const groupedBatches = useMemo(() => {
     if (!materials || materials.length === 0) return [];
 
@@ -362,6 +375,19 @@ export default function InventoryPage() {
       (m) => (m.type?.toUpperCase() || "OTHER") === activeTab,
     );
 
+    // 🌟 篩選邏輯修正：當開啟過濾時，只保留「該物料底下至少有一個批號尚未收貨完畢」的物料，
+    // 但該物料底下的所有其他批號「不會被隱藏」，依然完整保留顯示。
+    if (filterNotFullyReceived) {
+      targetMaterials = targetMaterials.filter((m) => {
+        const matBatches = batchesByMatId[String(m.id)] || [];
+        return matBatches.some(
+          (b) =>
+            b.source_pr_item_detail &&
+            b.source_pr_item_detail.is_fully_received === false,
+        );
+      });
+    }
+
     if (searchMaterial) {
       const term = searchMaterial.toLowerCase();
       targetMaterials = targetMaterials.filter(
@@ -372,13 +398,20 @@ export default function InventoryPage() {
     }
 
     const hasBatchFilter = Boolean(
-      searchBatchNumber || searchDateStart || searchDateEnd,
+      searchBatchNumber ||
+      searchDateStart ||
+      searchDateEnd ||
+      filterNotFullyReceived,
     );
 
     const result = [];
     targetMaterials.forEach((m) => {
       const matBatches = batchesByMatId[String(m.id)] || [];
-      if (hasBatchFilter && matBatches.length === 0) {
+      if (
+        hasBatchFilter &&
+        matBatches.length === 0 &&
+        !filterNotFullyReceived
+      ) {
         return;
       }
 
@@ -393,7 +426,7 @@ export default function InventoryPage() {
         material_id: m.id,
         unit: m.unit || "KG",
         total_remaining: totalRemaining,
-        batches: matBatches,
+        batches: matBatches, // 保留該物料的所有批號
       });
     });
 
@@ -408,6 +441,7 @@ export default function InventoryPage() {
     searchBatchNumber,
     searchDateStart,
     searchDateEnd,
+    filterNotFullyReceived,
   ]);
 
   const totalPages = Math.ceil(groupedBatches.length / ITEMS_PER_PAGE) || 1;
@@ -426,6 +460,7 @@ export default function InventoryPage() {
     searchDateStart,
     searchDateEnd,
     activeTab,
+    filterNotFullyReceived,
   ]);
 
   const toggleMaterialExpand = (matName) => {
@@ -436,14 +471,6 @@ export default function InventoryPage() {
         return [...prev, matName];
       }
     });
-  };
-
-  const toggleBatchExpand = (batchId) => {
-    if (expandedBatches.includes(batchId)) {
-      setExpandedBatches((prev) => prev.filter((id) => id !== batchId));
-    } else {
-      setExpandedBatches((prev) => [...prev, batchId]);
-    }
   };
 
   const handleSaveBatch = async (e) => {
@@ -531,9 +558,46 @@ export default function InventoryPage() {
         )}
 
         <div className="bg-white p-6 md:p-8 rounded-3xl shadow-sm border border-slate-200 mb-8">
-          <div className="flex items-center gap-2 mb-4 border-b border-slate-100 pb-2 text-slate-800 font-bold">
-            <Filter size={18} className="text-blue-500" /> 搜尋條件
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6 pb-4 border-b border-slate-100">
+            <div className="flex items-center gap-2 text-slate-800 font-bold">
+              <Filter size={18} className="text-blue-500" /> 搜尋與快速過濾
+            </div>
+
+            {/* 🌟 快速篩選按鈕與即時筆數提示 */}
+            <button
+              type="button"
+              onClick={() => setFilterNotFullyReceived((prev) => !prev)}
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all inline-flex items-center gap-2 border shadow-2xs ${
+                filterNotFullyReceived
+                  ? "bg-amber-500 text-white border-amber-600 shadow-amber-500/20"
+                  : "bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100"
+              }`}
+            >
+              <AlertCircle
+                size={15}
+                className={
+                  filterNotFullyReceived ? "text-white" : "text-amber-600"
+                }
+              />
+              <span>
+                {filterNotFullyReceived
+                  ? "取消篩選（顯示全部）"
+                  : "篩選尚未收貨完畢物料"}
+              </span>
+              {notFullyReceivedCount > 0 && (
+                <span
+                  className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
+                    filterNotFullyReceived
+                      ? "bg-white text-amber-800"
+                      : "bg-amber-200 text-amber-900"
+                  }`}
+                >
+                  {notFullyReceivedCount} 筆未收齊
+                </span>
+              )}
+            </button>
           </div>
+
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             <div>
               <label className="block text-xs font-bold text-slate-500 mb-1.5">
@@ -603,6 +667,7 @@ export default function InventoryPage() {
                 setSearchBatchNumber("");
                 setSearchDateStart("");
                 setSearchDateEnd("");
+                setFilterNotFullyReceived(false);
               }}
               className="text-sm text-slate-400 hover:text-red-500 font-bold transition-colors"
             >

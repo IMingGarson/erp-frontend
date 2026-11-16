@@ -42,9 +42,6 @@ const StatusTag = ({ status }) => {
   );
 };
 
-// ==========================================
-// 輔助函數：數值格式化與去零
-// ==========================================
 const formatDisplayNum = (val) => {
   if (val === null || val === undefined || val === "") return "";
   const num = Number(val);
@@ -60,9 +57,6 @@ const formatCurrency = (val) => {
   });
 };
 
-// ==========================================
-// 核心：規格正則解析引擎
-// ==========================================
 const parseSpecString = (specStr, baseUnit = "KG") => {
   if (!specStr) return null;
   let str = specStr.toString().toUpperCase().replace(/\s+/g, "");
@@ -120,9 +114,6 @@ const parseSpecString = (specStr, baseUnit = "KG") => {
   return null;
 };
 
-// ==========================================
-// 🌟 Portal Searchable Dropdown (防截斷)
-// ==========================================
 const SearchableDropdown = ({ value, onChange, options, placeholder }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -266,7 +257,7 @@ const SearchableDropdown = ({ value, onChange, options, placeholder }) => {
 };
 
 // ==========================================
-// 列印 Template - C-53 (內部請購單)
+// 列印 Template - C-53 (內部請購單 - A4 直向)
 // ==========================================
 const PurchaseRequisitionPrintTemplate = ({ data }) => {
   if (!data) return null;
@@ -284,7 +275,7 @@ const PurchaseRequisitionPrintTemplate = ({ data }) => {
       <style>{`
         @media print {
           .page-break { page-break-before: always; }
-          @page { size: A4 portrait; margin: 0; }
+          @page { size: A4 portrait; margin: 10mm; }
         }
       `}</style>
       <div className="flex border-2 border-black">
@@ -376,12 +367,15 @@ const PurchaseRequisitionPrintTemplate = ({ data }) => {
 };
 
 // ==========================================
-// 🌟 列印 Template - C-34 (外部採購單)
+// 🌟 列印 Template - 進貨單 (C-34 格式 - A4 橫向 landscape, 用於當 status 變成 stocked 時)
 // ==========================================
-const PurchaseOrderPrintTemplate = ({ data, providers, materials }) => {
+const PurchaseStockedReceivingPrintTemplate = ({
+  data,
+  providers,
+  materials,
+}) => {
   if (!data || !data.items || data.items.length === 0) return null;
 
-  // 1. 將請購明細依照供應商 (material_provider_id) 進行分組
   const providerGroups = {};
   data.items.forEach((item) => {
     const pId = item.material_provider_id || "unknown";
@@ -393,17 +387,15 @@ const PurchaseOrderPrintTemplate = ({ data, providers, materials }) => {
     <div className="hidden print:block w-full bg-white text-black font-sans mx-auto">
       <style>{`
         @media print { 
-          @page { size: A4; margin-top: 5mm; margin-bottom: 5mm; margin-left: 10mm; } 
+          @page { size: A4 landscape; margin: 8mm 10mm; } 
           .page-break { page-break-after: always; }
           body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
         }
       `}</style>
 
       {Object.entries(providerGroups).map(([pId, items], index, arr) => {
-        // 查找對應的供應商詳細資訊
         const provider = providers.find((p) => p.id.toString() === pId) || {};
 
-        // 取得最早或共用的交貨日期
         const deliveryDates = items
           .map((i) => i.expected_delivery_date)
           .filter(Boolean)
@@ -411,7 +403,6 @@ const PurchaseOrderPrintTemplate = ({ data, providers, materials }) => {
         const deliveryDateStr =
           deliveryDates.length > 0 ? deliveryDates[0].replace(/-/g, "/") : "";
 
-        // 計算總計金額
         const totalSum = items.reduce((acc, curr) => {
           return (
             acc +
@@ -420,7 +411,329 @@ const PurchaseOrderPrintTemplate = ({ data, providers, materials }) => {
           );
         }, 0);
 
-        // 確保表格行數固定美觀
+        const printItems = [...items];
+        while (printItems.length < 10) printItems.push({});
+
+        return (
+          <div
+            key={pId}
+            className={`w-full ${index < arr.length - 1 ? "page-break" : ""}`}
+          >
+            {/* Header 表頭 */}
+            <div className="flex justify-between items-end mb-1 border-b border-black pb-2">
+              <div className="w-1/3 text-[11px] leading-tight font-bold">
+                桃園市觀音區崙坪里1鄰1-10號
+                <br />
+                電話: 03-4988228 <span className="ml-4">傳真: 03-4988159</span>
+              </div>
+              <div className="w-1/3 text-center">
+                <h1 className="text-2xl font-black tracking-[0.1em]">
+                  基香食品有限公司
+                </h1>
+                <h2 className="text-xl font-bold tracking-[0.5em] mt-1">
+                  進 貨 單
+                </h2>
+              </div>
+              <div className="w-1/3 text-[11px] text-right font-bold leading-tight">
+                版次: 04
+                <br />第 1 頁, 共 1 頁
+              </div>
+            </div>
+
+            {/* 廠商與訂單資訊區塊 */}
+            <div className="border border-black text-[12px] mb-1 flex flex-col font-bold">
+              <div className="flex border-b border-black">
+                <div className="w-[35%] border-r border-black p-1 truncate">
+                  廠商名稱: {provider.name || "未指定廠商"}
+                </div>
+                <div className="w-[35%] border-r border-black p-1 truncate">
+                  廠商編號: {provider.code || "-"}
+                </div>
+                <div className="w-[30%] p-1 truncate">
+                  單據日期:{" "}
+                  {data.request_date
+                    ? data.request_date.replace(/-/g, "/")
+                    : ""}
+                </div>
+              </div>
+              <div className="flex border-b border-black">
+                <div className="w-[35%] border-r border-black p-1 truncate">
+                  廠商統編: {provider.tax_id || "-"}
+                </div>
+                <div className="w-[35%] border-r border-black p-1 truncate">
+                  聯 絡 人: {provider.contact_person || "-"}
+                </div>
+                <div className="w-[30%] p-1 truncate">單據編號: {data.id}</div>
+              </div>
+              <div className="flex border-b border-black">
+                <div className="w-[35%] border-r border-black p-1 truncate">
+                  廠商電話: {provider.phone || "-"}
+                </div>
+                <div className="w-[35%] border-r border-black p-1 truncate">
+                  廠商傳真: {provider.fax || "-"}
+                </div>
+                <div className="w-[30%] p-1 truncate">
+                  發票號碼:{" "}
+                  {(data.invoices || [])
+                    .map(
+                      (inv) =>
+                        `${inv.invoice_number}${inv.period ? `(${inv.period})` : ""}`,
+                    )
+                    .join(", ") || "-"}
+                </div>
+              </div>
+              <div className="flex">
+                <div className="w-[70%] border-r border-black p-1 truncate">
+                  送貨地址: 桃園市觀音區崙坪里1鄰1-10號
+                </div>
+                <div className="w-[30%] p-1 flex justify-between">
+                  <span>交貨日期:</span>
+                  <span className="font-bold text-sm tracking-wider pr-2">
+                    {deliveryDateStr}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* 進貨明細表格 */}
+            <table className="w-full border-collapse border border-black text-center text-[11px] font-bold">
+              <thead>
+                <tr className="border-b border-black">
+                  <th className="border-r border-black p-1 font-normal w-8">
+                    序
+                  </th>
+                  <th className="border-r border-black p-1 font-normal w-32">
+                    批號編號
+                  </th>
+                  <th className="border-r border-black p-1 font-normal text-left px-2">
+                    品名
+                  </th>
+                  <th className="border-r border-black p-1 font-normal w-20">
+                    驗收數量
+                  </th>
+                  <th className="border-r border-black p-1 font-normal w-12">
+                    單位
+                  </th>
+                  <th className="border-r border-black p-1 font-normal w-20">
+                    單價
+                  </th>
+                  <th className="border-r border-black p-1 font-normal w-24">
+                    小計
+                  </th>
+                  <th className="border-r border-black p-1 font-normal w-28">
+                    附註
+                  </th>
+                  <th className="border-r border-black p-1 font-normal w-12">
+                    外觀
+                  </th>
+                  <th className="p-1 font-normal w-12">判定</th>
+                </tr>
+              </thead>
+              <tbody>
+                {printItems.map((item, idx) => {
+                  const batches = item.generated_batches || [];
+                  const batchNumStr = batches
+                    .map((b) => b.batch_number)
+                    .join(", ");
+
+                  return (
+                    <tr key={idx} className="border-b border-black h-7">
+                      <td className="border-r border-black">
+                        {item.material_id ? idx + 1 : ""}
+                      </td>
+                      <td className="border-r border-black font-mono text-[11px]">
+                        {batchNumStr || ""}
+                      </td>
+                      <td className="border-r border-black text-left px-2 text-[12px]">
+                        {item.material_name || ""}{" "}
+                        {item.in_stock_spec ? `(${item.in_stock_spec})` : ""}
+                      </td>
+                      <td className="border-r border-black text-right px-2 font-mono text-[12px]">
+                        {item.quantity ? formatDisplayNum(item.quantity) : ""}
+                      </td>
+                      <td className="border-r border-black">
+                        {item.unit || ""}
+                      </td>
+                      <td className="border-r border-black text-right px-2 font-mono">
+                        {item.purchased_price
+                          ? formatDisplayNum(item.purchased_price)
+                          : ""}
+                      </td>
+                      <td className="border-r border-black text-right px-2 font-mono text-[12px]">
+                        {item.quantity && item.purchased_price
+                          ? formatCurrency(item.quantity * item.purchased_price)
+                          : ""}
+                      </td>
+                      <td className="border-r border-black text-left px-1 truncate text-[10px]">
+                        {item.remark || ""}
+                      </td>
+                      <td className="border-r border-black"></td>
+                      <td></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot>
+                <tr className="border-t-2 border-black font-bold h-7 text-[11px]">
+                  <td
+                    colSpan="3"
+                    className="text-left p-1 border-r border-black"
+                  >
+                    合計金額：{" "}
+                    <span className="float-right pr-2">
+                      {formatCurrency(totalSum)}
+                    </span>
+                  </td>
+                  <td
+                    colSpan="2"
+                    className="text-left p-1 border-r border-black"
+                  >
+                    營業稅：
+                  </td>
+                  <td
+                    colSpan="3"
+                    className="text-left p-1 border-r border-black"
+                  >
+                    進貨總額：{" "}
+                    <span className="float-right pr-2">
+                      {formatCurrency(totalSum)}
+                    </span>
+                  </td>
+                  <td colSpan="2" className="text-left p-1">
+                    車輛清潔: V
+                  </td>
+                </tr>
+                <tr className="border-t border-black font-bold h-7 text-[11px]">
+                  <td
+                    colSpan="3"
+                    className="text-left p-1 border-r border-black"
+                  >
+                    折讓金額：
+                  </td>
+                  <td
+                    colSpan="2"
+                    className="text-left p-1 border-r border-black"
+                  >
+                    已付金額：
+                  </td>
+                  <td
+                    colSpan="3"
+                    className="text-left p-1 border-r border-black"
+                  >
+                    未清金額：{" "}
+                    <span className="float-right pr-2">
+                      {formatCurrency(totalSum)}
+                    </span>
+                  </td>
+                  <td colSpan="2" className="text-left p-1">
+                    車輛溫度: ＿°C
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+
+            {/* 驗收標準與備註 */}
+            <div className="border border-t-0 border-black p-1.5 text-[10px] leading-snug font-bold">
+              <div className="flex justify-between items-start">
+                <div className="w-[75%]">
+                  <div>
+                    單據備註：
+                    {(data.invoices || [])
+                      .map((inv) => inv.note)
+                      .filter(Boolean)
+                      .join(" | ")}
+                  </div>
+                  <div className="text-[9px] text-slate-700 mt-0.5">
+                    驗收標準：1.
+                    包裝外觀清潔無破損，包裝上註明「產品名稱」、「製造日期」、「有效期限」，並符合食品法規相關規定。2.
+                    入庫之貨品保存期限，應距有有效期1/3以上。3.
+                    內容物顏色組織正常，無潰爛。4.
+                    原料內容物無異味、雜質及滲出液。5.
+                    冷藏：凍結點～7°C，冷凍-12°C以下，常溫不紀錄。6.
+                    原料單次進貨僅准收2個批號，並填寫數量及批號編號。7.
+                    內包材類請填寫製造日期。8.
+                    驗收合格者標記"V"，不合格者標記為"X"。
+                  </div>
+                </div>
+                <div className="w-[24%] border-l border-black pl-2 text-[10px]">
+                  <div>單據備註：</div>
+                  <div>( 1 ) 11:40-13:00 休息時間不收貨。</div>
+                </div>
+              </div>
+            </div>
+
+            {/* 簽核欄位 */}
+            <div className="flex justify-between items-end mt-3 px-4 font-bold text-[12px]">
+              <div>
+                審 核：
+                <span className="w-16 inline-block border-b border-black"></span>
+              </div>
+              <div>
+                會 計：
+                <span className="w-16 inline-block border-b border-black"></span>
+              </div>
+              <div>
+                品 保：
+                <span className="w-16 inline-block border-b border-black"></span>
+              </div>
+              <div>
+                經 辦：
+                <span className="w-20 inline-block text-center border-b border-black leading-none pb-0.5">
+                  {data.applicant || "張安彤"}
+                </span>
+              </div>
+            </div>
+            <div className="text-right mt-1 pr-4 font-bold text-[10px]">
+              表號: C-34
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
+// ==========================================
+// 🌟 列印 Template - C-34 (外部採購單)
+// ==========================================
+const PurchaseOrderPrintTemplate = ({ data, providers, materials }) => {
+  if (!data || !data.items || data.items.length === 0) return null;
+
+  const providerGroups = {};
+  data.items.forEach((item) => {
+    const pId = item.material_provider_id || "unknown";
+    if (!providerGroups[pId]) providerGroups[pId] = [];
+    providerGroups[pId].push(item);
+  });
+
+  return (
+    <div className="hidden print:block w-full bg-white text-black font-sans mx-auto">
+      <style>{`
+        @media print { 
+          @page { size: A4 portrait; margin-top: 5mm; margin-bottom: 5mm; margin-left: 10mm; } 
+          .page-break { page-break-after: always; }
+          body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        }
+      `}</style>
+
+      {Object.entries(providerGroups).map(([pId, items], index, arr) => {
+        const provider = providers.find((p) => p.id.toString() === pId) || {};
+
+        const deliveryDates = items
+          .map((i) => i.expected_delivery_date)
+          .filter(Boolean)
+          .sort();
+        const deliveryDateStr =
+          deliveryDates.length > 0 ? deliveryDates[0].replace(/-/g, "/") : "";
+
+        const totalSum = items.reduce((acc, curr) => {
+          return (
+            acc +
+            parseFloat(curr.quantity || 0) *
+              parseFloat(curr.purchased_price || 0)
+          );
+        }, 0);
+
         const printItems = [...items];
         while (printItems.length < 15) printItems.push({});
 
@@ -429,7 +742,6 @@ const PurchaseOrderPrintTemplate = ({ data, providers, materials }) => {
             key={pId}
             className={`w-full ${index < arr.length - 1 ? "page-break" : ""}`}
           >
-            {/* Header 表頭 */}
             <div className="flex justify-between items-end mb-1 border-b border-black pb-2">
               <div className="w-1/3 text-[11px] leading-tight font-bold">
                 桃園市觀音區崙坪里1鄰1-10號
@@ -450,7 +762,6 @@ const PurchaseOrderPrintTemplate = ({ data, providers, materials }) => {
               </div>
             </div>
 
-            {/* 廠商與訂單資訊區塊 */}
             <div className="border border-black text-[12px] mb-1 flex flex-col font-bold">
               <div className="flex border-b border-black">
                 <div className="w-[35%] border-r border-black p-1 truncate">
@@ -497,7 +808,6 @@ const PurchaseOrderPrintTemplate = ({ data, providers, materials }) => {
               </div>
             </div>
 
-            {/* 採購明細表格 */}
             <table className="w-full border-collapse border border-black text-center text-[11px] font-bold">
               <thead>
                 <tr className="border-b border-black">
@@ -527,7 +837,6 @@ const PurchaseOrderPrintTemplate = ({ data, providers, materials }) => {
               </thead>
               <tbody>
                 {printItems.map((item, idx) => {
-                  // 從全域 materials 取得物料代號
                   const matchedMaterial = materials.find(
                     (m) => m.id === item.material_id,
                   );
@@ -594,7 +903,6 @@ const PurchaseOrderPrintTemplate = ({ data, providers, materials }) => {
               </tfoot>
             </table>
 
-            {/* 固定的法規聲明備註 */}
             <div className="border border-t-0 border-black p-2 text-[11px] leading-relaxed font-bold">
               <div className="mb-1">單據備註：</div>
               <div className="pl-6 space-y-0.5">
@@ -615,7 +923,6 @@ const PurchaseOrderPrintTemplate = ({ data, providers, materials }) => {
               </div>
             </div>
 
-            {/* 簽核欄位 */}
             <div className="flex justify-between items-end mt-4 px-4 font-bold text-[13px]">
               <div>
                 審 核：
@@ -650,9 +957,6 @@ const PurchaseOrderPrintTemplate = ({ data, providers, materials }) => {
   );
 };
 
-// ==========================================
-// 列表列 Component
-// ==========================================
 const RequisitionNode = ({
   req,
   isExpanded,
@@ -705,13 +1009,21 @@ const RequisitionNode = ({
             >
               <FileText size={14} /> 內部請購單
             </button>
-            {/* 🌟 新增：外部採購單列印按鈕 */}
             <button
               onClick={() => onPrint(req, "PO")}
               className="px-3 py-2 text-indigo-600 border border-indigo-200 bg-indigo-50 rounded-xl hover:bg-indigo-100 transition-colors text-xs font-bold shadow-sm inline-flex items-center gap-1.5"
             >
               <Printer size={14} /> 外部採購單
             </button>
+
+            {isStocked && (
+              <button
+                onClick={() => onPrint(req, "RECEIVING")}
+                className="px-3 py-2 text-emerald-700 border border-emerald-200 bg-emerald-50 rounded-xl hover:bg-emerald-100 transition-colors text-xs font-bold shadow-sm inline-flex items-center gap-1.5"
+              >
+                <Printer size={14} /> 列印進貨單
+              </button>
+            )}
 
             <button
               onClick={() => onEdit(req)}
@@ -734,6 +1046,7 @@ const RequisitionNode = ({
           {hasItems ? (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
               {req.items.map((item, idx) => {
+                const batches = item.generated_batches || [];
                 return (
                   <div
                     key={item.id || idx}
@@ -763,29 +1076,38 @@ const RequisitionNode = ({
                             {formatDisplayNum(item.quantity)} {item.unit}
                           </span>
                         </div>
-                        {isStocked && item.actual_package_qty && (
-                          <div className="flex items-center justify-between p-3.5 bg-emerald-50/70 border border-emerald-200/70 rounded-xl shadow-2xs">
-                            <div className="flex items-center gap-2.5 flex-wrap">
-                              <span className="text-[11px] font-bold text-emerald-800 bg-emerald-100 border border-emerald-200 px-2 py-0.5 rounded-md shadow-2xs">
-                                實際入庫
+
+                        {/* 分批入庫批號列表 */}
+                        {batches.length > 0 && (
+                          <div className="p-3.5 bg-emerald-50/70 border border-emerald-200/70 rounded-xl shadow-2xs space-y-2">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[11px] font-bold text-emerald-800 bg-emerald-100 border border-emerald-200 px-2 py-0.5 rounded-md">
+                                分批入庫紀錄 (已收:{" "}
+                                {formatDisplayNum(item.total_received_qty)} /{" "}
+                                {formatDisplayNum(item.quantity)} {item.unit})
                               </span>
-                              <span className="text-sm font-bold text-emerald-900">
-                                {formatDisplayNum(item.actual_package_qty)}{" "}
-                                {item.actual_aux_unit}{" "}
-                                {item.actual_in_stock_spec
-                                  ? `(${item.actual_in_stock_spec})`
-                                  : ""}
-                              </span>
-                              {item.batch_number && (
-                                <span className="font-mono text-[10px] bg-white text-emerald-700 px-2 py-0.5 rounded-md border border-emerald-200 font-bold shadow-2xs">
-                                  批號: {item.batch_number}
+                              {item.is_fully_received && (
+                                <span className="text-[10px] font-bold text-white bg-emerald-600 px-2 py-0.5 rounded-full">
+                                  已全數交貨
                                 </span>
                               )}
                             </div>
-                            <span className="font-mono text-sm font-extrabold text-emerald-900 bg-white px-2.5 py-1 rounded-lg border border-emerald-200 shadow-2xs">
-                              {formatDisplayNum(item.actual_quantity)}{" "}
-                              {item.unit}
-                            </span>
+                            <div className="space-y-1">
+                              {batches.map((b, bIdx) => (
+                                <div
+                                  key={bIdx}
+                                  className="flex justify-between items-center text-xs font-mono bg-white px-2 py-1 rounded border border-emerald-100"
+                                >
+                                  <span className="font-bold text-slate-800">
+                                    批號: {b.batch_number}
+                                  </span>
+                                  <span className="text-slate-600">
+                                    數量: {formatDisplayNum(b.original_qty)}{" "}
+                                    {item.unit} ({b.received_date})
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
                           </div>
                         )}
                       </div>
@@ -869,7 +1191,6 @@ export default function PurchaseRequisitionPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [expandedRows, setExpandedRows] = useState([]);
 
-  // 🌟 修改：將 printData 改為 printConfig 以區分列印類型 { type: 'PR' | 'PO', data: req }
   const [printConfig, setPrintConfig] = useState(null);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -879,6 +1200,7 @@ export default function PurchaseRequisitionPage() {
     applicant: "",
     status: "WAITING",
     items: [],
+    invoices_payload: [],
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [dialog, setDialog] = useState({
@@ -892,6 +1214,7 @@ export default function PurchaseRequisitionPage() {
 
   const isReadOnly = editingRequisition?.status === "STOCKED";
   const isSettingToStocked = formData.status === "STOCKED";
+  const closeDialog = () => setDialog((prev) => ({ ...prev, isOpen: false }));
 
   const showAlert = (title, message, status = "info") =>
     setDialog({
@@ -911,7 +1234,6 @@ export default function PurchaseRequisitionPage() {
       message,
       onConfirm,
     });
-  const closeDialog = () => setDialog((prev) => ({ ...prev, isOpen: false }));
 
   useEffect(() => {
     Promise.all([
@@ -998,16 +1320,16 @@ export default function PurchaseRequisitionPage() {
       prev.includes(id) ? prev.filter((rowId) => rowId !== id) : [...prev, id],
     );
 
-  // 🌟 列印控制邏輯更新
   const handlePrint = (req, type = "PR") => {
     setPrintConfig({ type, data: req });
     setTimeout(() => {
       const originalTitle = document.title;
-      const typeStr = type === "PR" ? "請購單" : "採購單";
+      const typeStr =
+        type === "PR" ? "請購單" : type === "PO" ? "採購單" : "進貨單";
       document.title = `${req.request_date}_${typeStr}_請購人_${req.applicant}`;
       window.print();
       document.title = originalTitle;
-      setPrintConfig(null); // 列印完畢後清除
+      setPrintConfig(null);
     }, 150);
   };
 
@@ -1033,12 +1355,16 @@ export default function PurchaseRequisitionPage() {
 
   const openModal = (requisition = null) => {
     if (requisition) {
+      console.log(requisition.invoices);
       setEditingRequisition(requisition);
       setFormData({
         request_date: requisition.request_date || "",
         applicant: requisition.applicant || "",
         status: (requisition.status || "WAITING").toUpperCase(),
         items: JSON.parse(JSON.stringify(requisition.items)),
+        invoices_payload: requisition.invoices
+          ? JSON.parse(JSON.stringify(requisition.invoices))
+          : [],
       });
     } else {
       const today = new Date().toISOString().split("T")[0];
@@ -1048,6 +1374,7 @@ export default function PurchaseRequisitionPage() {
         applicant: me?.full_name || "",
         status: "WAITING",
         items: [],
+        invoices_payload: [],
       });
     }
     setIsModalOpen(true);
@@ -1072,6 +1399,7 @@ export default function PurchaseRequisitionPage() {
         ...item,
         expected_delivery_date: item.expected_delivery_date || null,
       })),
+      invoices_payload: formData.invoices_payload || [],
     };
     const url = editingRequisition
       ? `/api/purchase_requisitions/${editingRequisition.id}`
@@ -1083,17 +1411,17 @@ export default function PurchaseRequisitionPage() {
         body: JSON.stringify(payload),
       });
       if (!res.ok) throw new Error("儲存失敗");
-      await fetchRequisitions();
-      closeModal();
       showAlert(
         "儲存成功",
         `已成功${editingRequisition ? "更新" : "新增"}請購單。`,
         "success",
       );
+      closeModal();
     } catch (err) {
       showAlert("發生錯誤", err.message, "error");
     } finally {
       setIsSubmitting(false);
+      await fetchRequisitions();
     }
   };
 
@@ -1223,7 +1551,7 @@ export default function PurchaseRequisitionPage() {
               請購單管理
             </h2>
             <p className="text-slate-500 mt-2 font-semibold">
-              高效管理廠內食材與包材進貨流程
+              高效管理廠內食材與包材進貨流程，支援分批收貨、獨立批號與彈性發票登打
             </p>
           </div>
         </div>
@@ -1234,11 +1562,16 @@ export default function PurchaseRequisitionPage() {
           </p>
           <ul className="list-disc list-inside space-y-1 ml-6 text-slate-700">
             <li>
-              條列系統中所有原物料的<strong>批號、庫存</strong>狀態。
+              支援<strong>分批送貨與多次入庫批號建立</strong>
+              ，可隨時追蹤各明細累計交貨進度。
             </li>
             <li>
-              支援以批號代碼、物料名稱進行<strong>搜尋資料</strong>
-              ，產出回收計畫書 4 大報表。
+              彈性登打<strong>多張進貨發票資訊</strong>
+              （支援期號如115年09-10月與備註細節）。
+            </li>
+            <li>
+              當請購單完成入庫（狀態變為已入庫）後，可直接一鍵列印 A4 橫向
+              <strong>進貨單</strong>。
             </li>
           </ul>
         </div>
@@ -1439,9 +1772,162 @@ export default function PurchaseRequisitionPage() {
                         disabled={isReadOnly}
                         className={`w-full px-4 py-3 border rounded-xl text-[15px] outline-none transition-all font-bold disabled:opacity-80 disabled:cursor-not-allowed ${formData.status === "STOCKED" ? "bg-emerald-50 border-emerald-200 text-emerald-800" : "bg-slate-50 border-slate-200 text-slate-800 focus:bg-white focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500"}`}
                       >
-                        <option value="WAITING">等待進貨</option>
-                        <option value="STOCKED">已經入庫 (產生批號)</option>
+                        <option value="WAITING">等待進貨 (未完成)</option>
+                        <option value="STOCKED">已經入庫 (已完成)</option>
                       </select>
+                    </div>
+                  </div>
+
+                  {/* 🌟 彈性登打進貨發票資訊區塊（發票號碼、期號、textarea細節） */}
+                  <div className="mb-8 bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
+                    <div className="flex justify-between items-center mb-4 pb-2 border-b border-slate-100">
+                      <h4 className="text-xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
+                        進貨發票資訊
+                      </h4>
+                      {!isReadOnly && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setFormData((prev) => ({
+                              ...prev,
+                              invoices_payload: [
+                                ...(prev.invoices_payload || []),
+                                {
+                                  invoice_number: "",
+                                  period: "",
+                                  note: "",
+                                  invoice_date: new Date()
+                                    .toISOString()
+                                    .split("T")[0],
+                                },
+                              ],
+                            }));
+                          }}
+                          className="text-sm bg-indigo-600 text-white px-4 py-2 rounded-xl hover:bg-indigo-700 font-bold transition-all shadow-sm"
+                        >
+                          + 新增發票
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="space-y-4">
+                      {(formData.invoices_payload || []).map((inv, invIdx) => (
+                        <div
+                          key={invIdx}
+                          className="bg-slate-50 border border-slate-200 p-5 rounded-2xl relative"
+                        >
+                          <div className="flex justify-between items-center mb-3">
+                            <span className="text-xs font-black text-indigo-600 uppercase tracking-wider">
+                              發票 #{invIdx + 1}
+                            </span>
+                            {!isReadOnly && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setFormData((prev) => ({
+                                    ...prev,
+                                    invoices_payload:
+                                      prev.invoices_payload.filter(
+                                        (_, i) => i !== invIdx,
+                                      ),
+                                  }));
+                                }}
+                                className="text-red-500 hover:text-red-700 text-xs font-bold"
+                              >
+                                移除
+                              </button>
+                            )}
+                          </div>
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-3">
+                            <div>
+                              <label className="block text-xs font-bold text-slate-500 mb-1">
+                                發票號碼
+                              </label>
+                              <input
+                                type="text"
+                                disabled={isReadOnly}
+                                value={inv.invoice_number || ""}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setFormData((prev) => {
+                                    const newInv = [...prev.invoices_payload];
+                                    newInv[invIdx].invoice_number = val;
+                                    return {
+                                      ...prev,
+                                      invoices_payload: newInv,
+                                    };
+                                  });
+                                }}
+                                className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm font-bold"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-bold text-slate-500 mb-1">
+                                期號
+                              </label>
+                              <input
+                                type="text"
+                                disabled={isReadOnly}
+                                value={inv.period || ""}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setFormData((prev) => {
+                                    const newInv = [...prev.invoices_payload];
+                                    newInv[invIdx].period = val;
+                                    return {
+                                      ...prev,
+                                      invoices_payload: newInv,
+                                    };
+                                  });
+                                }}
+                                className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm font-bold"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-bold text-slate-500 mb-1">
+                                發票日期
+                              </label>
+                              <input
+                                type="date"
+                                disabled={isReadOnly}
+                                value={inv.invoice_date || ""}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setFormData((prev) => {
+                                    const newInv = [...prev.invoices_payload];
+                                    newInv[invIdx].invoice_date = val;
+                                    return {
+                                      ...prev,
+                                      invoices_payload: newInv,
+                                    };
+                                  });
+                                }}
+                                className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm font-bold"
+                              />
+                            </div>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-bold text-slate-500 mb-1">
+                              發票細節 / 備註
+                            </label>
+                            <textarea
+                              disabled={isReadOnly}
+                              rows={2}
+                              value={inv.note || ""}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setFormData((prev) => {
+                                  const newInv = [...prev.invoices_payload];
+                                  newInv[invIdx].note = val;
+                                  return { ...prev, invoices_payload: newInv };
+                                });
+                              }}
+                              className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm font-medium resize-none"
+                              placeholder="輸入發票品名、金額、明細或其他需要記錄的細節..."
+                            />
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   </div>
 
@@ -1546,11 +2032,7 @@ export default function PurchaseRequisitionPage() {
                                     <span className="text-red-500">*</span>
                                   </span>
                                   {item.current_stock !== undefined && (
-                                    <div className="inline-flex items-center gap-1.5 bg-emerald-100 border border-emerald-300 px-2.5 py-1 rounded-lg shadow-sm transition-all duration-300 hover:shadow-md hover:bg-emerald-50">
-                                      <span className="relative flex h-2 w-2">
-                                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                                        <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                                      </span>
+                                    <div className="inline-flex items-center gap-1.5 bg-emerald-100 border border-emerald-300 px-2.5 py-1 rounded-lg shadow-sm">
                                       <span className="text-emerald-800 font-black text-[11px] tracking-wider">
                                         廠內庫存:{" "}
                                         <span className="font-mono text-[13px]">
@@ -1599,147 +2081,6 @@ export default function PurchaseRequisitionPage() {
                                 )}
                               </div>
 
-                              {!isReadOnly && item.suggestions && (
-                                <div className="lg:col-span-4 flex flex-col gap-3 p-4 bg-indigo-50/50 border border-indigo-100 rounded-2xl animate-in slide-in-from-top-2 overflow-hidden">
-                                  <div className="flex justify-between items-center">
-                                    <span className="text-[11px] font-black text-indigo-500 uppercase tracking-widest flex items-center gap-1.5">
-                                      <DownloadCloud size={14} />{" "}
-                                      發現可用報價與歷史紀錄
-                                    </span>
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        handleItemChange(
-                                          index,
-                                          "suggestions",
-                                          null,
-                                        )
-                                      }
-                                      className="text-xs font-bold text-slate-400 hover:text-slate-600 transition-colors bg-white px-2 py-1 rounded shadow-sm border border-slate-200"
-                                    >
-                                      ✕ 隱藏面板
-                                    </button>
-                                  </div>
-
-                                  <div className="flex gap-4 overflow-x-auto pt-2 pb-4 px-2 -mx-2 custom-scrollbar snap-x items-stretch">
-                                    {item.suggestions.from_provider && (
-                                      <button
-                                        type="button"
-                                        onClick={() =>
-                                          applySuggestion(
-                                            index,
-                                            item.suggestions.from_provider,
-                                          )
-                                        }
-                                        className="flex-none w-[280px] text-left p-4 bg-white border border-indigo-200 hover:border-indigo-400 focus:outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-500/20 hover:shadow-lg rounded-xl transition-all duration-200 group snap-start flex flex-col"
-                                      >
-                                        <div className="flex justify-between items-start w-full mb-1.5">
-                                          <span className="text-[10px] font-bold text-white bg-indigo-500 px-2 py-0.5 rounded shadow-sm">
-                                            廠商報價單
-                                          </span>
-                                          <span className="text-xs font-bold text-indigo-400 group-hover:text-indigo-600 transition-colors">
-                                            套用 ➔
-                                          </span>
-                                        </div>
-                                        <div className="font-bold text-slate-700 text-[15px] mt-2 truncate w-full">
-                                          {item.suggestions.from_provider
-                                            .latest_spec || "無特定規格"}
-                                        </div>
-                                        <div className="font-mono font-black text-blue-700 text-xl mt-1 w-full">
-                                          $
-                                          {formatDisplayNum(
-                                            item.suggestions.from_provider
-                                              .latest_price,
-                                          )}{" "}
-                                          <span className="text-xs text-slate-400">
-                                            / {item.unit}
-                                          </span>
-                                        </div>
-                                        {(item.suggestions.from_provider
-                                          .quote_date ||
-                                          item.suggestions.from_provider
-                                            .valid_until) && (
-                                          <div className="mt-auto pt-4 w-full">
-                                            <div className="bg-slate-50/80 rounded-lg p-3 border border-slate-100 flex flex-col gap-1.5">
-                                              {item.suggestions.from_provider
-                                                .quote_date && (
-                                                <div className="flex justify-between items-center text-[11px]">
-                                                  <span className="text-slate-400 font-bold">
-                                                    報價日期
-                                                  </span>
-                                                  <span className="text-slate-600 font-mono font-bold">
-                                                    {
-                                                      item.suggestions
-                                                        .from_provider
-                                                        .quote_date
-                                                    }
-                                                  </span>
-                                                </div>
-                                              )}
-                                              {item.suggestions.from_provider
-                                                .valid_until && (
-                                                <div className="flex justify-between items-center text-[11px]">
-                                                  <span className="text-slate-400 font-bold">
-                                                    報價效期
-                                                  </span>
-                                                  <span className="text-slate-600 font-mono font-bold">
-                                                    {
-                                                      item.suggestions
-                                                        .from_provider
-                                                        .valid_until
-                                                    }
-                                                  </span>
-                                                </div>
-                                              )}
-                                            </div>
-                                          </div>
-                                        )}
-                                      </button>
-                                    )}
-                                    {item.suggestions.from_historical_pr
-                                      ?.latest_price !== null &&
-                                      item.suggestions.from_historical_pr
-                                        ?.latest_price !== undefined && (
-                                        <button
-                                          type="button"
-                                          onClick={() =>
-                                            applySuggestion(
-                                              index,
-                                              item.suggestions
-                                                .from_historical_pr,
-                                            )
-                                          }
-                                          className="flex-none w-[280px] text-left p-4 bg-white border border-slate-200 hover:border-slate-400 focus:outline-none focus:border-slate-400 focus:ring-4 focus:ring-slate-500/20 hover:shadow-lg rounded-xl transition-all duration-200 group snap-start flex flex-col"
-                                        >
-                                          <div className="flex justify-between items-start w-full mb-1.5">
-                                            <span className="text-[10px] font-bold text-slate-500 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded shadow-sm">
-                                              前次請購紀錄
-                                            </span>
-                                            <span className="text-xs font-bold text-slate-400 group-hover:text-slate-600 transition-colors">
-                                              套用 ➔
-                                            </span>
-                                          </div>
-                                          <div className="font-bold text-slate-700 text-[15px] mt-2 truncate w-full">
-                                            {item.suggestions.from_historical_pr
-                                              .latest_spec || "無特定規格"}
-                                          </div>
-                                          <div className="font-mono font-black text-slate-600 text-xl mt-1 w-full">
-                                            $
-                                            {formatDisplayNum(
-                                              item.suggestions
-                                                .from_historical_pr
-                                                .latest_price,
-                                            )}{" "}
-                                            <span className="text-xs text-slate-400">
-                                              / {item.unit}
-                                            </span>
-                                          </div>
-                                        </button>
-                                      )}
-                                  </div>
-                                </div>
-                              )}
-
                               <div className="lg:col-span-4 grid grid-cols-1 md:grid-cols-4 gap-5 bg-slate-50/70 p-5 rounded-3xl border border-slate-100">
                                 <div>
                                   <label className="block text-xs font-bold text-slate-500 mb-2 ml-1">
@@ -1763,7 +2104,7 @@ export default function PurchaseRequisitionPage() {
                                         e.target.value,
                                       )
                                     }
-                                    className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-[15px] font-bold focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all disabled:opacity-80 disabled:bg-slate-100 disabled:text-emerald-800"
+                                    className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-[15px] font-bold outline-none"
                                   />
                                 </div>
                                 <div>
@@ -1791,7 +2132,7 @@ export default function PurchaseRequisitionPage() {
                                         e.target.value,
                                       )
                                     }
-                                    className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-[15px] focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none font-mono font-bold transition-all disabled:opacity-80 disabled:bg-slate-100 disabled:text-emerald-800"
+                                    className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-[15px] font-mono font-bold outline-none"
                                   />
                                 </div>
                                 <div className="flex gap-3">
@@ -1815,7 +2156,7 @@ export default function PurchaseRequisitionPage() {
                                           e.target.value,
                                         )
                                       }
-                                      className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-[15px] font-bold focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all disabled:opacity-80 disabled:bg-slate-100 disabled:text-emerald-800"
+                                      className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-[15px] font-bold outline-none"
                                     />
                                   </div>
                                   <div className="w-1/2">
@@ -1841,7 +2182,7 @@ export default function PurchaseRequisitionPage() {
                                           e.target.value,
                                         )
                                       }
-                                      className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-[15px] focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none font-mono font-bold transition-all disabled:opacity-80 disabled:bg-slate-100 disabled:text-emerald-800"
+                                      className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-[15px] font-mono font-bold outline-none"
                                     />
                                   </div>
                                 </div>
@@ -1872,7 +2213,7 @@ export default function PurchaseRequisitionPage() {
                                           e.target.value,
                                         )
                                       }
-                                      className={`w-full px-4 py-3 border rounded-xl text-[15px] outline-none font-mono font-black transition-all ${isReadOnly ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-blue-200 bg-blue-50 text-blue-900 focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 placeholder-blue-300"}`}
+                                      className={`w-full px-4 py-3 border rounded-xl text-[15px] outline-none font-mono font-black transition-all ${isReadOnly ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-blue-200 bg-blue-50 text-blue-900"}`}
                                       placeholder="自動計算..."
                                     />
                                   </div>
@@ -1884,7 +2225,7 @@ export default function PurchaseRequisitionPage() {
                                       type="text"
                                       readOnly
                                       value={item.unit}
-                                      className="w-full px-4 py-3 border border-slate-200 bg-white rounded-xl text-[15px] font-black text-slate-600 outline-none text-center shadow-sm"
+                                      className="w-full px-4 py-3 border border-slate-200 bg-white rounded-xl text-[15px] font-black text-slate-600 text-center shadow-sm"
                                     />
                                   </div>
                                 </div>
@@ -1927,7 +2268,7 @@ export default function PurchaseRequisitionPage() {
                                         );
                                       }
                                     }}
-                                    className="w-full pl-9 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-[15px] focus:bg-white focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none font-mono font-bold transition-all disabled:opacity-80 disabled:bg-slate-100"
+                                    className="w-full pl-9 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-[15px] font-mono font-bold outline-none"
                                   />
                                 </div>
                               </div>
@@ -1947,7 +2288,7 @@ export default function PurchaseRequisitionPage() {
                                       e.target.value,
                                     )
                                   }
-                                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-[15px] font-bold focus:bg-white focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all disabled:opacity-80 disabled:bg-slate-100"
+                                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-[15px] font-bold outline-none"
                                 />
                               </div>
 
@@ -1966,7 +2307,7 @@ export default function PurchaseRequisitionPage() {
                                       e.target.value,
                                     )
                                   }
-                                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-[15px] font-bold focus:bg-white focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all disabled:opacity-80 disabled:bg-slate-100"
+                                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-[15px] font-bold outline-none"
                                 />
                               </div>
                             </div>
@@ -1981,7 +2322,7 @@ export default function PurchaseRequisitionPage() {
                   <button
                     type="button"
                     onClick={closeModal}
-                    className="px-8 py-3.5 border border-slate-200 rounded-xl text-slate-600 hover:bg-slate-50 hover:text-slate-800 transition-all text-[15px] font-bold shadow-sm"
+                    className="px-8 py-3.5 border border-slate-200 rounded-xl text-slate-600 hover:bg-slate-50 transition-all text-[15px] font-bold shadow-sm"
                   >
                     取消
                   </button>
@@ -1989,7 +2330,7 @@ export default function PurchaseRequisitionPage() {
                     <button
                       type="submit"
                       disabled={isSubmitting}
-                      className="px-10 py-3.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 shadow-[0_4px_12px_rgba(37,99,235,0.2)] text-[15px] font-bold disabled:opacity-50 hover:-translate-y-0.5 transition-all tracking-wide"
+                      className="px-10 py-3.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 shadow-[0_4px_12px_rgba(37,99,235,0.2)] text-[15px] font-bold disabled:opacity-50 transition-all"
                     >
                       {isSubmitting ? "處理中..." : "確認儲存"}
                     </button>
@@ -2016,6 +2357,13 @@ export default function PurchaseRequisitionPage() {
       )}
       {printConfig?.type === "PO" && (
         <PurchaseOrderPrintTemplate
+          data={printConfig.data}
+          providers={materialProviders}
+          materials={materials}
+        />
+      )}
+      {printConfig?.type === "RECEIVING" && (
+        <PurchaseStockedReceivingPrintTemplate
           data={printConfig.data}
           providers={materialProviders}
           materials={materials}

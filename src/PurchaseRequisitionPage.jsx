@@ -9,6 +9,9 @@ import {
   DownloadCloud,
   Printer,
   FileText,
+  PackagePlus,
+  AlertCircle,
+  CheckCircle2,
 } from "lucide-react";
 import CustomDialog from "./components/customDialog";
 import { fetchWithAuth } from "./utils/fetchWithAuth";
@@ -367,7 +370,7 @@ const PurchaseRequisitionPrintTemplate = ({ data }) => {
 };
 
 // ==========================================
-// 🌟 列印 Template - 進貨單 (C-34 格式 - A4 橫向 landscape, 用於當 status 變成 stocked 時)
+// 🌟 列印 Template - 進貨單 (C-34 格式 - A4 橫向 landscape)
 // ==========================================
 const PurchaseStockedReceivingPrintTemplate = ({
   data,
@@ -964,6 +967,7 @@ const RequisitionNode = ({
   onEdit,
   onDelete,
   onPrint,
+  onOpenBatchModal,
 }) => {
   const hasItems = req.items && req.items.length > 0;
   const isStocked = (req.status || "").toUpperCase() === "STOCKED";
@@ -1047,16 +1051,40 @@ const RequisitionNode = ({
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
               {req.items.map((item, idx) => {
                 const batches = item.generated_batches || [];
+                const isNotFullyReceived = item.is_fully_received === false;
+
                 return (
                   <div
                     key={item.id || idx}
                     className="bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col overflow-hidden transition-shadow hover:shadow-md"
                   >
                     <div className="p-5 border-b border-slate-100 flex justify-between items-start gap-3 bg-white">
-                      <span className="font-bold text-slate-900 text-lg leading-tight tracking-tight">
-                        {item.material_name}
-                      </span>
+                      <div className="flex flex-col">
+                        <span className="font-bold text-slate-900 text-lg leading-tight tracking-tight">
+                          {item.material_name}
+                        </span>
+                        {/* 🌟 提醒標籤：該請購品項尚未收貨完畢 */}
+                        {isNotFullyReceived && (
+                          <div className="mt-2 inline-flex items-center gap-1.5 bg-amber-50 text-amber-800 border border-amber-300 px-2.5 py-1 rounded-lg text-xs font-bold shadow-2xs w-fit">
+                            <AlertCircle
+                              size={14}
+                              className="text-amber-600 shrink-0"
+                            />
+                            <span>尚未收貨完畢</span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* 🌟 快速建立收貨批號按鈕 */}
+                      <button
+                        type="button"
+                        onClick={() => onOpenBatchModal(item, req)}
+                        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-sm transition-all inline-flex items-center gap-1 shrink-0"
+                      >
+                        <PackagePlus size={14} /> 登錄收貨批號
+                      </button>
                     </div>
+
                     <div className="p-5 flex-1 flex flex-col gap-4 bg-white">
                       <div className="flex flex-col gap-3">
                         <div className="flex items-center justify-between p-3.5 bg-slate-50 border border-slate-200/60 rounded-xl shadow-2xs">
@@ -1087,8 +1115,8 @@ const RequisitionNode = ({
                                 {formatDisplayNum(item.quantity)} {item.unit})
                               </span>
                               {item.is_fully_received && (
-                                <span className="text-[10px] font-bold text-white bg-emerald-600 px-2 py-0.5 rounded-full">
-                                  已全數交貨
+                                <span className="text-[10px] font-bold text-white bg-emerald-600 px-2 py-0.5 rounded-full inline-flex items-center gap-1">
+                                  <CheckCircle2 size={12} /> 已全數交貨
                                 </span>
                               )}
                             </div>
@@ -1203,6 +1231,18 @@ export default function PurchaseRequisitionPage() {
     invoices_payload: [],
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // 🌟 分批收貨建立批號 Modal 狀態
+  const [isBatchModalOpen, setIsBatchModalOpen] = useState(false);
+  const [batchModalItem, setBatchModalItem] = useState(null);
+  const [batchModalData, setBatchModalData] = useState({
+    batch_number: "",
+    original_qty: "",
+    received_date: new Date().toISOString().split("T")[0],
+    expiration_date: new Date().toISOString().split("T")[0],
+    note: "",
+  });
+
   const [dialog, setDialog] = useState({
     isOpen: false,
     type: "alert",
@@ -1213,7 +1253,6 @@ export default function PurchaseRequisitionPage() {
   });
 
   const isReadOnly = editingRequisition?.status === "STOCKED";
-  const isSettingToStocked = formData.status === "STOCKED";
   const closeDialog = () => setDialog((prev) => ({ ...prev, isOpen: false }));
 
   const showAlert = (title, message, status = "info") =>
@@ -1355,7 +1394,6 @@ export default function PurchaseRequisitionPage() {
 
   const openModal = (requisition = null) => {
     if (requisition) {
-      console.log(requisition.invoices);
       setEditingRequisition(requisition);
       setFormData({
         request_date: requisition.request_date || "",
@@ -1422,6 +1460,68 @@ export default function PurchaseRequisitionPage() {
     } finally {
       setIsSubmitting(false);
       await fetchRequisitions();
+    }
+  };
+
+  // 🌟 開啟分批收貨建立批號 Modal
+  const handleOpenBatchModal = (item) => {
+    setBatchModalItem(item);
+    const remainingNeeded = Math.max(
+      0,
+      parseFloat(item.quantity || 0) - parseFloat(item.total_received_qty || 0),
+    );
+    setBatchModalData({
+      batch_number: "",
+      original_qty: remainingNeeded > 0 ? remainingNeeded.toString() : "",
+      received_date: new Date().toISOString().split("T")[0],
+      expiration_date: new Date().toISOString().split("T")[0],
+      note: "",
+    });
+    setIsBatchModalOpen(true);
+  };
+
+  // 🌟 提交分批收貨建立批號
+  const handleBatchModalSubmit = async (e) => {
+    e.preventDefault();
+    if (!batchModalData.batch_number || !batchModalData.original_qty) {
+      return showAlert("提示", "請填寫完整批號與數量", "warning");
+    }
+
+    setIsSubmitting(true);
+    try {
+      const payload = {
+        material: batchModalItem.material_id,
+        source_pr_item: batchModalItem.id,
+        batch_number: batchModalData.batch_number,
+        original_qty: batchModalData.original_qty,
+        remaining_qty: batchModalData.original_qty,
+        received_date: batchModalData.received_date,
+        expiration_date: batchModalData.expiration_date,
+        note: batchModalData.note,
+      };
+
+      const res = await fetchWithAuth("/api/batches", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error || "建立收貨批號失敗");
+      }
+
+      await fetchRequisitions();
+      setIsBatchModalOpen(false);
+      showAlert(
+        "成功",
+        `已成功登錄收貨批號: ${batchModalData.batch_number}`,
+        "success",
+      );
+    } catch (err) {
+      showAlert("錯誤", err.message, "error");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -1642,6 +1742,7 @@ export default function PurchaseRequisitionPage() {
                     onEdit={openModal}
                     onDelete={handleDelete}
                     onPrint={handlePrint}
+                    onOpenBatchModal={handleOpenBatchModal}
                   />
                 ))}
               </div>
@@ -1693,6 +1794,140 @@ export default function PurchaseRequisitionPage() {
           )}
         </div>
 
+        {/* 🌟 登錄收貨批號 Modal */}
+        {isBatchModalOpen && batchModalItem && (
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-[2rem] p-8 w-full max-w-md shadow-2xl flex flex-col max-h-[90vh]">
+              <div className="flex justify-between items-center mb-6 shrink-0">
+                <h3 className="text-xl font-extrabold text-slate-800">
+                  登錄收貨批號 ({batchModalItem.material_name})
+                </h3>
+                <button
+                  onClick={() => setIsBatchModalOpen(false)}
+                  className="text-slate-400 hover:text-slate-600 font-bold text-xl"
+                >
+                  ✕
+                </button>
+              </div>
+              <form
+                onSubmit={handleBatchModalSubmit}
+                className="space-y-4 overflow-y-auto custom-scrollbar pr-2 flex-1"
+              >
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1 ml-1">
+                    批號代碼 <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={batchModalData.batch_number}
+                    onChange={(e) =>
+                      setBatchModalData((prev) => ({
+                        ...prev,
+                        batch_number: e.target.value,
+                      }))
+                    }
+                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-[15px] font-mono font-bold focus:bg-white focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none"
+                    placeholder="請輸入本次到貨批號..."
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1 ml-1">
+                    本次收貨數量 ({batchModalItem.unit}){" "}
+                    <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    required
+                    value={batchModalData.original_qty}
+                    onChange={(e) =>
+                      setBatchModalData((prev) => ({
+                        ...prev,
+                        original_qty: e.target.value,
+                      }))
+                    }
+                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-[15px] font-mono font-bold focus:bg-white focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none text-right"
+                  />
+                  <div className="text-[11px] text-slate-400 mt-1 ml-1">
+                    採購總量: {formatDisplayNum(batchModalItem.quantity)} |
+                    已收總量:{" "}
+                    {formatDisplayNum(batchModalItem.total_received_qty)}
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 mb-1 ml-1">
+                      入庫日期
+                    </label>
+                    <input
+                      type="date"
+                      value={batchModalData.received_date}
+                      onChange={(e) =>
+                        setBatchModalData((prev) => ({
+                          ...prev,
+                          received_date: e.target.value,
+                        }))
+                      }
+                      className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 mb-1 ml-1">
+                      有效期限
+                    </label>
+                    <input
+                      type="date"
+                      value={batchModalData.expiration_date}
+                      onChange={(e) =>
+                        setBatchModalData((prev) => ({
+                          ...prev,
+                          expiration_date: e.target.value,
+                        }))
+                      }
+                      className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1 ml-1">
+                    收貨備註
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={batchModalData.note}
+                    onChange={(e) =>
+                      setBatchModalData((prev) => ({
+                        ...prev,
+                        note: e.target.value,
+                      }))
+                    }
+                    className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium resize-none"
+                    placeholder="分批收貨備註說明..."
+                  />
+                </div>
+
+                <div className="mt-6 flex justify-end gap-3 shrink-0 pt-3 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => setIsBatchModalOpen(false)}
+                    className="px-6 py-2.5 border border-slate-200 rounded-xl text-slate-600 font-bold hover:bg-slate-50 transition-all text-sm"
+                  >
+                    取消
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSubmitting}
+                    className="px-8 py-2.5 bg-emerald-600 text-white rounded-xl font-bold hover:bg-emerald-700 shadow-md transition-all text-sm disabled:opacity-50"
+                  >
+                    {isSubmitting ? "建立中..." : "確認建立批號"}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
         {isModalOpen && (
           <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-md flex items-center justify-center z-50 p-4 transition-opacity duration-300">
             <div className="bg-white rounded-[2rem] w-full max-w-[1200px] shadow-2xl flex flex-col max-h-[90vh] overflow-hidden border border-white/20">
@@ -1722,15 +1957,7 @@ export default function PurchaseRequisitionPage() {
                       <span className="text-xl bg-white rounded-full p-1 shadow-sm">
                         ✅
                       </span>
-                      此單據已入庫並自動產生實體批號。為了確保庫存資料一致性，單據已鎖定為唯讀狀態。
-                    </div>
-                  )}
-                  {!isReadOnly && isSettingToStocked && (
-                    <div className="mb-6 p-4 bg-amber-50/80 text-amber-800 border border-amber-200/60 rounded-2xl text-[15px] font-bold flex items-center gap-3 shadow-sm">
-                      <span className="text-xl bg-white rounded-full p-1 shadow-sm animate-pulse">
-                        ⚠️
-                      </span>
-                      注意：設定為「已經入庫」並儲存後，系統將自動為明細產生批號庫存，且此單據將無法再被修改。
+                      此單據已入庫。若需分批收貨，可直接於外部明細展開處點擊「登錄收貨批號」。
                     </div>
                   )}
 
@@ -1743,10 +1970,9 @@ export default function PurchaseRequisitionPage() {
                         type="date"
                         name="request_date"
                         required
-                        disabled={isReadOnly}
                         value={formData.request_date}
                         onChange={handleMasterChange}
-                        className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-[15px] focus:bg-white focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all disabled:opacity-70 disabled:cursor-not-allowed font-bold"
+                        className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-[15px] focus:bg-white focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all font-bold"
                       />
                     </div>
                     <div>
@@ -1763,14 +1989,13 @@ export default function PurchaseRequisitionPage() {
                     </div>
                     <div>
                       <label className="block text-xs font-bold text-slate-500 mb-2 ml-1">
-                        單據狀態
+                        單據狀態 (當全數收貨完畢後手動更改為已入庫)
                       </label>
                       <select
                         name="status"
                         value={formData.status}
                         onChange={handleMasterChange}
-                        disabled={isReadOnly}
-                        className={`w-full px-4 py-3 border rounded-xl text-[15px] outline-none transition-all font-bold disabled:opacity-80 disabled:cursor-not-allowed ${formData.status === "STOCKED" ? "bg-emerald-50 border-emerald-200 text-emerald-800" : "bg-slate-50 border-slate-200 text-slate-800 focus:bg-white focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500"}`}
+                        className={`w-full px-4 py-3 border rounded-xl text-[15px] outline-none transition-all font-bold ${formData.status === "STOCKED" ? "bg-emerald-50 border-emerald-200 text-emerald-800" : "bg-slate-50 border-slate-200 text-slate-800 focus:bg-white focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500"}`}
                       >
                         <option value="WAITING">等待進貨 (未完成)</option>
                         <option value="STOCKED">已經入庫 (已完成)</option>
@@ -1784,30 +2009,28 @@ export default function PurchaseRequisitionPage() {
                       <h4 className="text-xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
                         進貨發票資訊
                       </h4>
-                      {!isReadOnly && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setFormData((prev) => ({
-                              ...prev,
-                              invoices_payload: [
-                                ...(prev.invoices_payload || []),
-                                {
-                                  invoice_number: "",
-                                  period: "",
-                                  note: "",
-                                  invoice_date: new Date()
-                                    .toISOString()
-                                    .split("T")[0],
-                                },
-                              ],
-                            }));
-                          }}
-                          className="text-sm bg-indigo-600 text-white px-4 py-2 rounded-xl hover:bg-indigo-700 font-bold transition-all shadow-sm"
-                        >
-                          + 新增發票
-                        </button>
-                      )}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFormData((prev) => ({
+                            ...prev,
+                            invoices_payload: [
+                              ...(prev.invoices_payload || []),
+                              {
+                                invoice_number: "",
+                                period: "",
+                                note: "",
+                                invoice_date: new Date()
+                                  .toISOString()
+                                  .split("T")[0],
+                              },
+                            ],
+                          }));
+                        }}
+                        className="text-sm bg-indigo-600 text-white px-4 py-2 rounded-xl hover:bg-indigo-700 font-bold transition-all shadow-sm"
+                      >
+                        + 新增發票
+                      </button>
                     </div>
 
                     <div className="space-y-4">
@@ -1820,23 +2043,21 @@ export default function PurchaseRequisitionPage() {
                             <span className="text-xs font-black text-indigo-600 uppercase tracking-wider">
                               發票 #{invIdx + 1}
                             </span>
-                            {!isReadOnly && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setFormData((prev) => ({
-                                    ...prev,
-                                    invoices_payload:
-                                      prev.invoices_payload.filter(
-                                        (_, i) => i !== invIdx,
-                                      ),
-                                  }));
-                                }}
-                                className="text-red-500 hover:text-red-700 text-xs font-bold"
-                              >
-                                移除
-                              </button>
-                            )}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setFormData((prev) => ({
+                                  ...prev,
+                                  invoices_payload:
+                                    prev.invoices_payload.filter(
+                                      (_, i) => i !== invIdx,
+                                    ),
+                                }));
+                              }}
+                              className="text-red-500 hover:text-red-700 text-xs font-bold"
+                            >
+                              移除
+                            </button>
                           </div>
                           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-3">
                             <div>
@@ -1845,7 +2066,6 @@ export default function PurchaseRequisitionPage() {
                               </label>
                               <input
                                 type="text"
-                                disabled={isReadOnly}
                                 value={inv.invoice_number || ""}
                                 onChange={(e) => {
                                   const val = e.target.value;
@@ -1867,7 +2087,6 @@ export default function PurchaseRequisitionPage() {
                               </label>
                               <input
                                 type="text"
-                                disabled={isReadOnly}
                                 value={inv.period || ""}
                                 onChange={(e) => {
                                   const val = e.target.value;
@@ -1881,6 +2100,7 @@ export default function PurchaseRequisitionPage() {
                                   });
                                 }}
                                 className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm font-bold"
+                                placeholder="例如: 115年09-10月"
                               />
                             </div>
                             <div>
@@ -1889,7 +2109,6 @@ export default function PurchaseRequisitionPage() {
                               </label>
                               <input
                                 type="date"
-                                disabled={isReadOnly}
                                 value={inv.invoice_date || ""}
                                 onChange={(e) => {
                                   const val = e.target.value;
@@ -1911,7 +2130,6 @@ export default function PurchaseRequisitionPage() {
                               發票細節 / 備註
                             </label>
                             <textarea
-                              disabled={isReadOnly}
                               rows={2}
                               value={inv.note || ""}
                               onChange={(e) => {
@@ -1938,15 +2156,13 @@ export default function PurchaseRequisitionPage() {
                         {formData.items.length}
                       </span>
                     </h4>
-                    {!isReadOnly && (
-                      <button
-                        type="button"
-                        onClick={handleAddItem}
-                        className="text-sm bg-blue-600 text-white px-5 py-2.5 rounded-xl hover:bg-blue-700 font-bold shadow-[0_4px_12px_rgba(37,99,235,0.2)] transition-all hover:shadow-[0_6px_16px_rgba(37,99,235,0.3)] hover:-translate-y-0.5"
-                      >
-                        + 加入品項
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      onClick={handleAddItem}
+                      className="text-sm bg-blue-600 text-white px-5 py-2.5 rounded-xl hover:bg-blue-700 font-bold shadow-[0_4px_12px_rgba(37,99,235,0.2)] transition-all hover:shadow-[0_6px_16px_rgba(37,99,235,0.3)] hover:-translate-y-0.5"
+                    >
+                      + 加入品項
+                    </button>
                   </div>
 
                   <div className="space-y-6">
@@ -1967,7 +2183,7 @@ export default function PurchaseRequisitionPage() {
                         return (
                           <div
                             key={index}
-                            className={`bg-white border rounded-[2rem] p-7 shadow-sm relative transition-all duration-300 group ${isReadOnly ? "border-slate-200" : "border-slate-200 hover:border-blue-300 hover:shadow-md"}`}
+                            className="bg-white border rounded-[2rem] p-7 shadow-sm relative transition-all duration-300 group border-slate-200 hover:border-blue-300 hover:shadow-md"
                           >
                             <div className="flex justify-between items-center mb-6 pb-4 border-b border-slate-100">
                               <h5 className="font-extrabold text-slate-800 flex items-center gap-3 text-lg tracking-tight">
@@ -1976,15 +2192,13 @@ export default function PurchaseRequisitionPage() {
                                 </span>
                                 品項內容
                               </h5>
-                              {!isReadOnly && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleRemoveItem(index)}
-                                  className="text-slate-400 hover:text-red-600 bg-white hover:bg-red-50 px-3 py-2 rounded-xl transition-colors flex items-center gap-2 text-[13px] font-bold opacity-60 group-hover:opacity-100 border border-transparent hover:border-red-100"
-                                >
-                                  <Trash2 size={16} /> 移除
-                                </button>
-                              )}
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveItem(index)}
+                                className="text-slate-400 hover:text-red-600 bg-white hover:bg-red-50 px-3 py-2 rounded-xl transition-colors flex items-center gap-2 text-[13px] font-bold opacity-60 group-hover:opacity-100 border border-transparent hover:border-red-100"
+                              >
+                                <Trash2 size={16} /> 移除
+                              </button>
                             </div>
 
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -1992,37 +2206,28 @@ export default function PurchaseRequisitionPage() {
                                 <label className="block text-xs font-bold text-slate-500 mb-2 ml-1">
                                   供應商 <span className="text-red-500">*</span>
                                 </label>
-                                {isReadOnly ? (
-                                  <input
-                                    type="text"
-                                    readOnly
-                                    value={item.provider_name || "-"}
-                                    className="w-full px-4 py-3 border border-slate-200 rounded-xl text-[15px] bg-slate-50 text-slate-800 font-bold"
-                                  />
-                                ) : (
-                                  <SearchableDropdown
-                                    value={item.material_provider_id}
-                                    options={materialProviders}
-                                    onChange={(opt) => {
-                                      handleItemChange(
-                                        index,
-                                        "material_provider_id",
-                                        opt.id,
-                                      );
-                                      handleItemChange(
-                                        index,
-                                        "provider_name",
-                                        opt.name,
-                                      );
-                                      fetchPriceSuggestions(
-                                        index,
-                                        item.material_id,
-                                        opt.id,
-                                      );
-                                    }}
-                                    placeholder="選擇供應商..."
-                                  />
-                                )}
+                                <SearchableDropdown
+                                  value={item.material_provider_id}
+                                  options={materialProviders}
+                                  onChange={(opt) => {
+                                    handleItemChange(
+                                      index,
+                                      "material_provider_id",
+                                      opt.id,
+                                    );
+                                    handleItemChange(
+                                      index,
+                                      "provider_name",
+                                      opt.name,
+                                    );
+                                    fetchPriceSuggestions(
+                                      index,
+                                      item.material_id,
+                                      opt.id,
+                                    );
+                                  }}
+                                  placeholder="選擇供應商..."
+                                />
                               </div>
 
                               <div className="lg:col-span-2 relative">
@@ -2043,60 +2248,43 @@ export default function PurchaseRequisitionPage() {
                                     </div>
                                   )}
                                 </label>
-                                {isReadOnly ? (
-                                  <input
-                                    type="text"
-                                    readOnly
-                                    value={item.material_name}
-                                    className="w-full px-4 py-3 border border-slate-200 rounded-xl text-[15px] bg-slate-50 text-slate-800 font-bold"
-                                  />
-                                ) : (
-                                  <SearchableDropdown
-                                    value={item.material_id}
-                                    options={materials}
-                                    onChange={(m) => {
-                                      handleItemChange(
-                                        index,
-                                        "material_id",
-                                        m.id,
-                                      );
-                                      handleItemChange(
-                                        index,
-                                        "material_name",
-                                        m.name,
-                                      );
-                                      handleItemChange(
-                                        index,
-                                        "unit",
-                                        m.unit || "KG",
-                                      );
-                                      fetchPriceSuggestions(
-                                        index,
-                                        m.id,
-                                        item.material_provider_id,
-                                      );
-                                    }}
-                                    placeholder="選擇物料..."
-                                  />
-                                )}
+                                <SearchableDropdown
+                                  value={item.material_id}
+                                  options={materials}
+                                  onChange={(m) => {
+                                    handleItemChange(
+                                      index,
+                                      "material_id",
+                                      m.id,
+                                    );
+                                    handleItemChange(
+                                      index,
+                                      "material_name",
+                                      m.name,
+                                    );
+                                    handleItemChange(
+                                      index,
+                                      "unit",
+                                      m.unit || "KG",
+                                    );
+                                    fetchPriceSuggestions(
+                                      index,
+                                      m.id,
+                                      item.material_provider_id,
+                                    );
+                                  }}
+                                  placeholder="選擇物料..."
+                                />
                               </div>
 
                               <div className="lg:col-span-4 grid grid-cols-1 md:grid-cols-4 gap-5 bg-slate-50/70 p-5 rounded-3xl border border-slate-100">
                                 <div>
                                   <label className="block text-xs font-bold text-slate-500 mb-2 ml-1">
-                                    {isReadOnly
-                                      ? "真實入庫規格"
-                                      : "下單規格 (可修改)"}
+                                    下單規格 (可修改)
                                   </label>
                                   <input
                                     type="text"
-                                    disabled={isReadOnly}
-                                    value={
-                                      isReadOnly
-                                        ? (item.actual_in_stock_spec ??
-                                          item.in_stock_spec)
-                                        : item.in_stock_spec
-                                    }
+                                    value={item.in_stock_spec}
                                     onChange={(e) =>
                                       handleItemChange(
                                         index,
@@ -2109,22 +2297,14 @@ export default function PurchaseRequisitionPage() {
                                 </div>
                                 <div>
                                   <label className="block text-xs font-bold text-slate-500 mb-2 ml-1">
-                                    {isReadOnly ? "真實入庫件數" : "採購件數"}{" "}
+                                    採購件數{" "}
                                     <span className="text-red-500">*</span>
                                   </label>
                                   <input
                                     type="number"
                                     min="0"
                                     step="0.01"
-                                    disabled={isReadOnly}
-                                    value={
-                                      isReadOnly
-                                        ? formatDisplayNum(
-                                            item.actual_package_qty ??
-                                              item.package_qty,
-                                          )
-                                        : item.package_qty
-                                    }
+                                    value={item.package_qty}
                                     onChange={(e) =>
                                       handleItemChange(
                                         index,
@@ -2142,13 +2322,7 @@ export default function PurchaseRequisitionPage() {
                                     </label>
                                     <input
                                       type="text"
-                                      disabled={isReadOnly}
-                                      value={
-                                        isReadOnly
-                                          ? (item.actual_aux_unit ??
-                                            item.aux_unit)
-                                          : item.aux_unit
-                                      }
+                                      value={item.aux_unit}
                                       onChange={(e) =>
                                         handleItemChange(
                                           index,
@@ -2166,15 +2340,7 @@ export default function PurchaseRequisitionPage() {
                                     <input
                                       type="number"
                                       step="0.01"
-                                      disabled={isReadOnly}
-                                      value={
-                                        isReadOnly
-                                          ? formatDisplayNum(
-                                              item.actual_aux_quantity ??
-                                                item.aux_quantity,
-                                            )
-                                          : item.aux_quantity
-                                      }
+                                      value={item.aux_quantity}
                                       onChange={(e) =>
                                         handleItemChange(
                                           index,
@@ -2197,15 +2363,7 @@ export default function PurchaseRequisitionPage() {
                                       type="number"
                                       required
                                       step="0.01"
-                                      disabled={isReadOnly}
-                                      value={
-                                        isReadOnly
-                                          ? formatDisplayNum(
-                                              item.actual_quantity ??
-                                                item.quantity,
-                                            )
-                                          : item.quantity
-                                      }
+                                      value={item.quantity}
                                       onChange={(e) =>
                                         handleItemChange(
                                           index,
@@ -2213,7 +2371,7 @@ export default function PurchaseRequisitionPage() {
                                           e.target.value,
                                         )
                                       }
-                                      className={`w-full px-4 py-3 border rounded-xl text-[15px] outline-none font-mono font-black transition-all ${isReadOnly ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-blue-200 bg-blue-50 text-blue-900"}`}
+                                      className="w-full px-4 py-3 border rounded-xl text-[15px] outline-none font-mono font-black transition-all border-blue-200 bg-blue-50 text-blue-900"
                                       placeholder="自動計算..."
                                     />
                                   </div>
@@ -2242,7 +2400,6 @@ export default function PurchaseRequisitionPage() {
                                   </span>
                                   <input
                                     type="text"
-                                    disabled={isReadOnly}
                                     value={item.purchased_price ?? ""}
                                     placeholder="無前次紀錄"
                                     onChange={(e) =>
@@ -2279,7 +2436,6 @@ export default function PurchaseRequisitionPage() {
                                 </label>
                                 <input
                                   type="date"
-                                  disabled={isReadOnly}
                                   value={item.expected_delivery_date || ""}
                                   onChange={(e) =>
                                     handleItemChange(
@@ -2298,7 +2454,6 @@ export default function PurchaseRequisitionPage() {
                                 </label>
                                 <input
                                   type="text"
-                                  disabled={isReadOnly}
                                   value={item.remark || ""}
                                   onChange={(e) =>
                                     handleItemChange(
@@ -2326,15 +2481,13 @@ export default function PurchaseRequisitionPage() {
                   >
                     取消
                   </button>
-                  {!isReadOnly && (
-                    <button
-                      type="submit"
-                      disabled={isSubmitting}
-                      className="px-10 py-3.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 shadow-[0_4px_12px_rgba(37,99,235,0.2)] text-[15px] font-bold disabled:opacity-50 transition-all"
-                    >
-                      {isSubmitting ? "處理中..." : "確認儲存"}
-                    </button>
-                  )}
+                  <button
+                    type="submit"
+                    disabled={isSubmitting}
+                    className="px-10 py-3.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 shadow-[0_4px_12px_rgba(37,99,235,0.2)] text-[15px] font-bold disabled:opacity-50 transition-all"
+                  >
+                    {isSubmitting ? "處理中..." : "確認儲存"}
+                  </button>
                 </div>
               </form>
             </div>

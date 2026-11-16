@@ -1,18 +1,22 @@
 import React, { useEffect } from "react";
 import { Outlet, Link, useLocation, useNavigate } from "react-router-dom";
 import {
+  LayoutDashboard,
   Boxes,
-  Package,
-  Waypoints,
-  FlaskConical,
+  Network,
+  BadgePercent,
+  TrendingUp,
+  ReceiptText,
+  TestTubes,
   Building2,
-  Truck,
-  ClipboardList,
-  PackageCheck,
-  Factory,
+  Store,
+  FileSpreadsheet,
+  FileStack,
+  Cog,
+  PackagePlus,
   ShoppingCart,
   Calculator,
-  Users,
+  UserCog,
   LogOut,
 } from "lucide-react";
 import { useAuthStore } from "./store/authStore";
@@ -21,60 +25,59 @@ const MENU_GROUPS = [
   {
     group: "營運資料",
     items: [
-      { path: "/", label: "庫存監控", icon: Boxes },
-      { path: "/materials", label: "產品管理", icon: Package },
-      { path: "/trace", label: "追蹤追溯", icon: Waypoints },
+      { path: "/", label: "庫存總覽與監控", icon: LayoutDashboard },
+      { path: "/materials", label: "物料管理", icon: Boxes },
+      { path: "/trace", label: "批號追溯與追蹤", icon: Network },
       {
         path: "/material-price",
-        label: "物料報價管理",
-        icon: Truck,
+        label: "供應商報價",
+        icon: BadgePercent,
       },
       {
         path: "/impact-analysis",
-        label: "物料成本影響列表",
-        icon: Truck,
+        label: "成本影響",
+        icon: TrendingUp,
       },
       {
         path: "/accounting-report",
-        label: "財務",
-        icon: Truck,
+        label: "財務會計報表",
+        icon: ReceiptText,
       },
     ],
   },
   {
     group: "研發專區",
-    items: [{ path: "/bom-create", label: "配方研製", icon: FlaskConical }],
+    items: [{ path: "/bom-create", label: "配方研製", icon: TestTubes }],
   },
   {
     group: "往來單位",
     items: [
-      { path: "/vendors", label: "客戶名錄", icon: Building2 },
+      { path: "/vendors", label: "客戶資料管理", icon: Building2 },
       {
         path: "/material-providers",
-        label: "供應商名錄",
-        icon: Truck,
+        label: "供應商資料管理",
+        icon: Store,
       },
     ],
   },
   {
     group: "單據管理",
     items: [
-      { path: "/requirement", label: "訂購單管理", icon: ClipboardList },
-      { path: "/delivery-notes", label: "銷貨單管理", icon: PackageCheck },
-      { path: "/production", label: "生產單管理", icon: Factory },
-      { path: "/package-order", label: "包裝單管理", icon: PackageCheck },
-
+      { path: "/requirement", label: "客戶訂購單管理", icon: FileSpreadsheet },
+      { path: "/delivery-notes", label: "銷貨單管理", icon: FileStack },
+      { path: "/production", label: "生產單管理", icon: Cog },
+      { path: "/package-order", label: "包裝單管理", icon: PackagePlus },
       {
         path: "/purchase-requisitions",
-        label: "請購單管理",
+        label: "採購單管理",
         icon: ShoppingCart,
       },
-      { path: "/quotations", label: "報價單管理", icon: Calculator },
+      { path: "/quotations", label: "客戶報價單管理", icon: Calculator },
     ],
   },
   {
     group: "系統管理",
-    items: [{ path: "/users", label: "系統帳號管理", icon: Users }],
+    items: [{ path: "/users", label: "使用者管理", icon: UserCog }],
   },
 ];
 

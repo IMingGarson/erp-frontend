@@ -169,19 +169,39 @@ const SingleCustomerStatementPrintTemplate = ({
     .replace(/\//g, "/");
 
   const notes = customerRow.delivery_notes || [];
-  const totalSales = customerRow.total_sales_amount || 0;
-  const totalTax = customerRow.total_tax_amount || 0;
-  const totalPaid = customerRow.total_paid_amount || 0;
-  const unpaid = customerRow.total_unpaid_amount || 0;
 
-  // 🌟 修正：前期欠款計算公式 (總累積欠額扣除當期未清，避免重複計算)
+  // 統計各項金額 (正常銷貨淨額、折讓金額、退貨金額)
+  let totalSalesNet = 0;
+  let totalAllowance = 0;
+  let totalReturnAmount = 0;
+  let totalTax = customerRow.total_tax_amount || 0;
+  let totalPaid = customerRow.total_paid_amount || 0;
+
+  notes.forEach((dn) => {
+    const baseTotal = dn.grand_total || 0;
+    const retAmt = parseFloat(dn.return_amount || 0);
+
+    if (dn.return_type === "ALLOWANCE") {
+      totalAllowance += retAmt;
+      totalSalesNet += baseTotal; // grand_total 已經是 net_grand_total
+    } else if (dn.return_type === "RETURN") {
+      totalReturnAmount += retAmt;
+      totalSalesNet += baseTotal;
+    } else {
+      totalSalesNet += baseTotal;
+    }
+  });
+
+  const unpaid = customerRow.total_unpaid_amount || 0;
   const totalLifetimeDebt = debtMap[customerRow.customer_code] || 0;
   const priorDebt = Math.max(0, totalLifetimeDebt - unpaid);
   const grandTotalUnpaid = priorDebt + unpaid;
 
   const shouldImposeTax = customerRow.customer_should_impose_tax;
   const finalTax = shouldImposeTax ? totalTax : 0;
-  const finalGrandTotal = shouldImposeTax ? totalSales + finalTax : totalSales;
+  const finalGrandTotal = shouldImposeTax
+    ? totalSalesNet + finalTax
+    : totalSalesNet;
 
   return (
     <div className="hidden print:block w-full bg-white text-black font-serif">
@@ -239,43 +259,66 @@ const SingleCustomerStatementPrintTemplate = ({
           </tr>
         </thead>
         <tbody>
-          {notes.map((dn, idx) => (
-            <tr key={idx} className="border-b border-black h-7">
-              <td className="border border-black text-center font-mono">
-                {dn.note_date}
-              </td>
-              <td className="border border-black text-center font-mono">
-                {dn.note_number}
-              </td>
-              <td className="border border-black text-left px-2 font-bold">
-                {dn.product_name}
-                {dn.return_type && (
-                  <div className="text-[10px] text-red-600 font-normal">
-                    {dn.return_type === "RETURN" ? "[退貨]" : "[折讓]"}
-                    {" $"}
-                    {formatMoney(dn.return_amount)}
-                    {" 共 "}
-                    {formatMoney(dn.return_qty)} {dn.unit}
-                  </div>
+          {notes.map((dn, idx) => {
+            const hasMovement = Boolean(dn.return_type);
+            const netItemTotal = dn.grand_total || 0;
+            return (
+              <React.Fragment key={idx}>
+                <tr className="border-b border-black h-7">
+                  <td className="border border-black text-center font-mono">
+                    {dn.note_date}
+                  </td>
+                  <td className="border border-black text-center font-mono">
+                    {dn.note_number}
+                  </td>
+                  <td className="border border-black text-left px-2 font-bold">
+                    {dn.product_name}
+                  </td>
+                  <td className="border border-black text-center">
+                    {dn.spec || "-"}
+                  </td>
+                  <td className="border border-black text-right font-mono px-2">
+                    {formatMoney(dn.sales_price || 0)}
+                  </td>
+                  <td className="border border-black text-right font-mono px-2">
+                    {formatMoney(dn.quantity)}
+                  </td>
+                  <td className="border border-black text-right font-mono px-2">
+                    {formatMoney(netItemTotal)}
+                  </td>
+                  <td className="border border-black text-right font-mono px-2 font-bold">
+                    {formatMoney(netItemTotal)}
+                  </td>
+                </tr>
+
+                {/* 🌟 若有退貨或折讓，獨立產生一行負數列說明 */}
+                {hasMovement && (
+                  <tr className="border-b border-black h-7 bg-slate-50">
+                    <td className="border border-black text-center font-mono text-red-600">
+                      {dn.note_date}
+                    </td>
+                    <td className="border border-black text-center font-mono text-red-600">
+                      {dn.note_number}-
+                      {dn.return_type === "RETURN" ? "退貨" : "折讓"}
+                    </td>
+                    <td
+                      className="border border-black text-left px-2 text-red-600 font-bold"
+                      colSpan="5"
+                    >
+                      ↳{" "}
+                      {dn.return_type === "RETURN"
+                        ? "【退貨退款】"
+                        : "【銷貨折讓】"}
+                      退回數量: {formatMoney(dn.return_qty)} {dn.unit}
+                    </td>
+                    <td className="border border-black text-right font-mono px-2 font-bold text-red-600">
+                      -${formatMoney(dn.return_amount)}
+                    </td>
+                  </tr>
                 )}
-              </td>
-              <td className="border border-black text-center">
-                {dn.spec || "-"}
-              </td>
-              <td className="border border-black text-right font-mono px-2">
-                {formatMoney(dn.sales_price || 0)}
-              </td>
-              <td className="border border-black text-right font-mono px-2">
-                {formatMoney(dn.quantity)}
-              </td>
-              <td className="border border-black text-right font-mono px-2">
-                {formatMoney(dn.grand_total)}
-              </td>
-              <td className="border border-black text-right font-mono px-2 font-bold">
-                {formatMoney(dn.grand_total)}
-              </td>
-            </tr>
-          ))}
+              </React.Fragment>
+            );
+          })}
         </tbody>
       </table>
 
@@ -283,10 +326,15 @@ const SingleCustomerStatementPrintTemplate = ({
         <div className="grid grid-cols-3 gap-4">
           <div>
             合計金額：
-            <span className="font-mono text-sm">{formatMoney(totalSales)}</span>
+            <span className="font-mono text-sm">
+              {formatMoney(totalSalesNet)}
+            </span>
           </div>
           <div>
-            折讓金額： <span className="font-mono text-sm">0</span>
+            折讓金額：{" "}
+            <span className="font-mono text-sm">
+              {formatMoney(totalAllowance)}
+            </span>
           </div>
           <div>
             可沖銷金額： <span className="font-mono text-sm">0</span>
@@ -408,11 +456,21 @@ const AllCustomersSummaryPrintTemplate = ({
               0,
               totalLifetimeDebt - (row.total_unpaid_amount || 0),
             );
+
+            // 獨立加總折讓金額
+            let customerAllowanceTotal = 0;
+            (row.delivery_notes || []).forEach((dn) => {
+              if (dn.return_type === "ALLOWANCE") {
+                customerAllowanceTotal += parseFloat(dn.return_amount || 0);
+              }
+            });
+
             const shouldImposeTax = row.customer_should_impose_tax ?? true;
             const taxAmt = shouldImposeTax ? row.total_tax_amount || 0 : 0;
             const grandTotalAmt = shouldImposeTax
               ? row.grand_total || 0
               : row.total_sales_amount || 0;
+
             return (
               <tr key={idx} className="border-b border-black h-7">
                 <td className="border border-black font-mono">
@@ -431,7 +489,7 @@ const AllCustomersSummaryPrintTemplate = ({
                   {formatMoney(grandTotalAmt)}
                 </td>
                 <td className="border border-black text-right font-mono px-2">
-                  0
+                  {formatMoney(customerAllowanceTotal)}
                 </td>
                 <td className="border border-black text-right font-mono px-2">
                   {formatMoney(row.total_paid_amount)}
@@ -732,6 +790,7 @@ export default function AccountingPage() {
                 ),
                 grand_total: parseFloat(d.grand_total || 0),
                 type: "DELIVERY_NOTE",
+                is_error: d.return_type !== null,
               }));
               setUnpaidNotesList(normalized);
             }
@@ -1264,10 +1323,10 @@ export default function AccountingPage() {
             <div className="p-5 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
               <div>
                 <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider">
-                  銷貨單退貨與折讓異動紀錄
+                  退貨與折讓紀錄
                 </h3>
                 <p className="text-xs text-slate-500 font-bold mt-0.5">
-                  顯示目前區間內所有銷貨單的貨品異動與庫存回補狀態
+                  顯示目前區間內所有銷貨單的貨品異動狀態
                 </p>
               </div>
               <span className="px-3 py-1 bg-blue-50 text-blue-700 rounded-xl text-xs font-mono font-bold border border-blue-200">
@@ -1278,7 +1337,7 @@ export default function AccountingPage() {
               <thead>
                 <tr className="bg-slate-100/70 border-b border-slate-200 text-[11px] uppercase tracking-widest text-slate-500 font-black">
                   <th className="py-4 px-5">銷貨單號</th>
-                  <th className="py-4 px-5">日期</th>
+                  {/* <th className="py-4 px-5">日期</th> */}
                   <th className="py-4 px-5">客戶名稱</th>
                   <th className="py-4 px-5">產品與規格</th>
                   <th className="py-4 px-5 text-right">出貨數量</th>
@@ -1318,9 +1377,9 @@ export default function AccountingPage() {
                         <td className="py-4 px-5 font-mono font-bold text-slate-900">
                           {dn.note_number}
                         </td>
-                        <td className="py-4 px-5 font-mono text-slate-600 text-xs font-semibold">
+                        {/* <td className="py-4 px-5 font-mono text-slate-600 text-xs font-semibold">
                           {dn.note_date}
-                        </td>
+                        </td> */}
                         <td className="py-4 px-5 font-bold text-slate-800">
                           {custName}
                         </td>
@@ -1685,18 +1744,24 @@ export default function AccountingPage() {
                                               </span>
                                             )}
                                             {dn.return_type && (
-                                              <span className="ml-2 px-2 py-0.5 bg-amber-50 text-amber-700 border border-amber-200 rounded text-[10px] font-bold">
-                                                {dn.return_type === "RETURN"
-                                                  ? "[退貨]"
-                                                  : "[折讓]"}
-                                                {" $"}
-                                                {formatMoney(dn.return_amount)}
-                                                {" 共 "}
-                                                {formatMoney(
-                                                  dn.return_qty,
-                                                )}{" "}
-                                                {dn.unit}
-                                              </span>
+                                              <div className="w-full flex flex-row justify-left items-center">
+                                                <span className="flex w-[40%] px-2 py-0.5 bg-amber-50 text-amber-700 border border-amber-200 rounded text-[10px] font-bold">
+                                                  {dn.return_type === "RETURN"
+                                                    ? "[退貨]"
+                                                    : "[折讓]"}
+                                                  {" $"}
+                                                  {formatMoney(
+                                                    dn.return_amount,
+                                                  )}
+                                                </span>
+                                                <span className="flex w-[40%] ml-1 px-2 py-0.5 bg-green-50 text-green-700 border border-green-200 rounded text-[10px] font-bold">
+                                                  {" 退貨 "}
+                                                  {formatMoney(
+                                                    dn.return_qty,
+                                                  )}{" "}
+                                                  {dn.unit}
+                                                </span>
+                                              </div>
                                             )}
                                           </td>
                                           <td className="py-3 px-4 text-right font-mono font-bold text-slate-600">
@@ -1863,7 +1928,7 @@ export default function AccountingPage() {
 
   const renderPayments = () => {
     const tableData = paymentSubTab === "ALL" ? payments : pendingChecks;
-
+    console.log(payments);
     return (
       <div className="space-y-6">
         <div className="flex flex-col md:flex-row justify-between items-center gap-4">
@@ -1895,7 +1960,7 @@ export default function AccountingPage() {
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200 text-[11px] uppercase tracking-widest text-slate-400 font-black">
                 <th className="p-5 pl-8 w-[30%]">日期</th>
-                <th className="p-5">對象</th>
+                <th className="p-5">客戶名稱</th>
                 <th className="p-5">收付方式</th>
                 <th className="p-5 text-right">收付總額</th>
                 <th className="p-5 text-center">操作</th>
@@ -1971,6 +2036,11 @@ export default function AccountingPage() {
                             }`}
                           >
                             {row.partner_type === "CUSTOMER" ? "收" : "付"}
+                          </span>
+                          <span className="text-[10px] px-1.5 py-0.5 rounded border mr-2 font-black text-xs font-bold text-slate-600 px-3 py-1 bg-slate-100 rounded-xl border border-slate-200">
+                            {writeOffs.find(
+                              (w) => w.delivery_note_return_type !== null,
+                            ) && <>異常</>}
                           </span>
                           {row.partner_type === "CUSTOMER"
                             ? row.customer_name
@@ -2904,6 +2974,9 @@ export default function AccountingPage() {
                 ) : (
                   <div className="max-h-64 overflow-y-auto custom-scrollbar space-y-2 pr-1">
                     {unpaidNotesList.map((note) => {
+                      if (note.is_error) {
+                        return null;
+                      }
                       const isSelected = selectedNoteIds.includes(note.id);
                       const allocInfo = poolSummary.allocationsMap[note.id];
                       const allocated = allocInfo ? allocInfo.allocated : 0;

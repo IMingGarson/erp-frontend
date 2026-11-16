@@ -247,7 +247,11 @@ const OverlaySelect = ({
 export default function ProductionOrderEditPage() {
   const { production_order_id } = useParams();
   const navigate = useNavigate();
-
+  const [mainHeaderForm, setMainHeaderForm] = useState({
+    is_completed: false,
+    completed_date: "",
+    actual_qty: "",
+  });
   const [mainOrder, setMainOrder] = useState(null);
   const [childrenOrders, setChildrenOrders] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -326,6 +330,15 @@ export default function ProductionOrderEditPage() {
 
       const orderData = json.data || json;
       setMainOrder(orderData);
+
+      setMainHeaderForm({
+        is_completed: orderData.is_completed || false,
+        completed_date: orderData.completed_date || "",
+        actual_qty:
+          orderData.actual_qty !== null && orderData.actual_qty !== undefined
+            ? orderData.actual_qty
+            : "",
+      });
 
       const allChildren = orderData.children_orders || [];
       setChildrenOrders(allChildren);
@@ -445,6 +458,24 @@ export default function ProductionOrderEditPage() {
           body: JSON.stringify({ materials_info: updatedMainMaterials }),
         }).then((res) => {
           if (!res.ok) throw new Error(`主單儲存失敗`);
+        }),
+      );
+
+      const mainHeaderPayload = {
+        materials_info: updatedMainMaterials,
+        is_completed: mainHeaderForm.is_completed,
+        completed_date: mainHeaderForm.completed_date || null,
+        actual_qty:
+          mainHeaderForm.actual_qty !== "" ? mainHeaderForm.actual_qty : null,
+      };
+
+      promises.push(
+        fetchWithAuth(`/api/production_orders/${mainOrder.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(mainHeaderPayload),
+        }).then((res) => {
+          if (!res.ok) throw new Error(`生產單儲存失敗`);
         }),
       );
 
@@ -984,6 +1015,71 @@ export default function ProductionOrderEditPage() {
         </button>
       </div>
 
+      {/* 🌟 新增：生產完工狀態與實際產量回填表單區塊 */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 mb-8 w-full">
+        <h3 className="font-extrabold text-slate-800 text-[16px] mb-4 flex items-center gap-2">
+          <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+          生產完工與實際產量回填
+        </h3>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="flex items-center gap-3 bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl">
+            <input
+              type="checkbox"
+              id="is_completed"
+              checked={mainHeaderForm.is_completed}
+              onChange={(e) =>
+                setMainHeaderForm((prev) => ({
+                  ...prev,
+                  is_completed: e.target.checked,
+                }))
+              }
+              className="w-5 h-5 text-blue-600 border-slate-300 rounded focus:ring-blue-500 cursor-pointer"
+            />
+            <label
+              htmlFor="is_completed"
+              className="text-sm font-bold text-slate-700 cursor-pointer select-none"
+            >
+              標記為「製造完成」
+            </label>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-500 mb-1.5 ml-1">
+              完工日期
+            </label>
+            <input
+              type="date"
+              value={mainHeaderForm.completed_date || ""}
+              onChange={(e) =>
+                setMainHeaderForm((prev) => ({
+                  ...prev,
+                  completed_date: e.target.value,
+                }))
+              }
+              className="w-full h-11 px-4 bg-white border border-slate-200 rounded-xl text-sm font-bold text-slate-700 focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10 outline-none"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-500 mb-1.5 ml-1">
+              最終實際產量 (KG)
+            </label>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={mainHeaderForm.actual_qty || ""}
+              onChange={(e) =>
+                setMainHeaderForm((prev) => ({
+                  ...prev,
+                  actual_qty: e.target.value,
+                }))
+              }
+              placeholder="請輸入實際產量."
+              className="w-full h-11 px-4 bg-white border border-slate-200 rounded-xl font-mono text-sm font-bold text-blue-700 focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10 outline-none"
+            />
+          </div>
+        </div>
+      </div>
       {mainOrder && renderEditableTable(mainOrder, "【主母單】", true)}
 
       {childrenOrders.length > 0 && (

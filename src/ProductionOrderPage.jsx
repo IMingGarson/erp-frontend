@@ -2364,6 +2364,72 @@ export default function ProductionOrderPage() {
     });
   };
 
+  // 下載生產進度報表 (CSV 格式)
+  const handleDownloadProgressReport = async () => {
+    try {
+      const params = new URLSearchParams();
+
+      if (startDate) params.append("start_date", startDate);
+      if (endDate) params.append("end_date", endDate);
+
+      const res = await fetchWithAuth(
+        `/api/production_orders/progress_report?${params.toString()}`,
+      );
+      if (!res.ok) throw new Error("下載生產進度報表失敗");
+      const reportData = await res.json();
+
+      if (!Array.isArray(reportData.data) || reportData.data.length === 0) {
+        return showAlert(
+          "提示",
+          "選定的區間內沒有生產單資料可供匯出。",
+          "info",
+        );
+      }
+
+      // 組裝 CSV 欄位標題與內容
+      const headers = [
+        "建立日期",
+        "生產單號",
+        "原料編號",
+        "原料/產品名稱",
+        "預計產量",
+        "實際產量",
+        "完工日期",
+      ];
+
+      const csvRows = [headers.join(",")];
+
+      reportData.data.forEach((row) => {
+        const values = [
+          `"${row.created_at || ""}"`,
+          `"${row.order_number || ""}"`,
+          `"${row.material_code || ""}"`,
+          `"${row.material_name || ""}"`,
+          row.target_qty ?? 0,
+          row.actual_qty ?? 0,
+          `"${row.completed_date || ""}"`,
+        ];
+        csvRows.push(values.join(","));
+      });
+
+      // 建立 Blob 並觸發下載
+      const csvString = "\uFEFF" + csvRows.join("\n");
+      const blob = new Blob([csvString], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.setAttribute("href", url);
+      link.setAttribute(
+        "download",
+        `生產進度報表_${startDate || "all"}_to_${endDate || "all"}.csv`,
+      );
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (err) {
+      showAlert("錯誤", err.message, "error");
+    }
+  };
+
   const filteredOrders = useMemo(() => {
     return productionOrders.filter((po) => {
       const matchOrder =
@@ -2452,7 +2518,7 @@ export default function ProductionOrderPage() {
                 </div>
               </div>
 
-              <div className="flex flex-wrap items-center justify-start xl:justify-end gap-3 w-full xl:w-auto">
+              <div className="flex flex-wrap items-center justify-start xl:justify-end gap-4 w-full xl:w-auto">
                 <div className="text-xs text-slate-400 font-bold flex items-center gap-2 mr-2">
                   {loading && <Loader2 size={14} className="animate-spin" />}共{" "}
                   {filteredOrders.length} 筆
@@ -2481,6 +2547,13 @@ export default function ProductionOrderPage() {
                   className="px-4 h-[40px] bg-emerald-600 text-white border border-emerald-700 rounded-lg text-sm font-bold shadow-sm hover:bg-emerald-700 transition-all disabled:opacity-30 flex items-center gap-2"
                 >
                   <ClipboardCheck size={16} /> 批次產生客戶報告
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDownloadProgressReport}
+                  className="px-4 h-[40px] bg-slate-800 text-white border border-slate-900 rounded-lg text-sm font-bold shadow-sm hover:bg-slate-900 transition-all flex items-center gap-2"
+                >
+                  <FileText size={16} /> 下載生產進度報表
                 </button>
               </div>
             </div>

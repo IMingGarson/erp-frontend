@@ -26,7 +26,7 @@ import ImpactAnalysisPage from "./ImpactAnalysisPage.jsx";
 import ProductionOrderQCPage from "./ProductionOrderQCPage.jsx";
 import AccountingPage from "./AccountingPage.jsx";
 import PackageOrderPage from "./PackageOrderPage.jsx";
-
+import InHouseStockPage from "./InHouseStockPage.jsx";
 const router = createBrowserRouter([
   {
     path: "/",
@@ -47,6 +47,7 @@ const router = createBrowserRouter([
               { index: true, element: <InventoryPage /> },
               { path: "requirement", element: <RequirementOrderPage /> },
               { path: "production", element: <ProductionOrderPage /> },
+              { path: "inhouse-stock", element: <InHouseStockPage /> },
               {
                 path: "production/:production_order_id",
                 element: <ProductionOrderDetailEditPage />,

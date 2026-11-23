@@ -1585,7 +1585,9 @@ export default function AccountingPage() {
                   <th className="p-5 text-right">區間未稅總額</th>
                   <th className="p-5 text-right">營業稅</th>
                   <th className="p-5 text-right text-blue-600">區間含稅總額</th>
-                  <th className="p-5 text-right text-emerald-600">已收金額</th>
+                  <th className="p-5 text-right text-emerald-600">
+                    已收金額(含折讓與已退金額)
+                  </th>
                   <th className="p-5 text-right text-rose-600">尚欠金額</th>
                   <th className="p-5 text-center w-[140px]">操作</th>
                 </tr>
@@ -1689,10 +1691,6 @@ export default function AccountingPage() {
                                 <div className="px-4 py-3 bg-slate-100/70 border-b border-slate-200 flex justify-between items-center">
                                   <span className="text-xs font-black text-slate-600 uppercase tracking-wider">
                                     銷貨單明細 ({row.customer_name})
-                                  </span>
-                                  <span className="text-xs font-bold text-slate-500">
-                                    請至上方「貨品異動管理」Tab
-                                    進行退貨或折讓作業
                                   </span>
                                 </div>
                                 <table className="w-full text-left border-collapse text-xs">

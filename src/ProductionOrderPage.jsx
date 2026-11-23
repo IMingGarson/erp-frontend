@@ -199,9 +199,7 @@ const PackagingFormTemplate = ({ order }) => {
           <div className="mt-1 text-[14px] text-left pl-8 flex items-baseline gap-2">
             <span>製令數量 : </span>
             <span className="font-mono font-bold text-xl">{displayQty}</span>
-            <span className="font-bold">
-              {vInfo.sales_unit || order.product_profile?.unit || "箱"}
-            </span>
+            <span className="font-bold">{"KG"}</span>
           </div>
         </div>
 

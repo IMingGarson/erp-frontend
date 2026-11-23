@@ -134,13 +134,13 @@ const DeliveryNoteTemplate = ({ note }) => {
             </td>
             <td className="border border-black px-2 py-1 text-left">
               {profile?.name || ""}
-              {note.return_type && (
+              {/* {note.return_type && (
                 <div className="text-[11px] text-red-600 font-normal mt-0.5">
                   【{note.return_type === "RETURN" ? "退貨" : "折讓"}】 金額: -$
                   {formatDisplayNum(note.return_amount)} / 數量:{" "}
                   {formatDisplayNum(note.return_qty)}
                 </div>
-              )}
+              )} */}
             </td>
             <td className="border border-black px-2 py-1">{note.spec || ""}</td>
             <td className="border border-black px-2 py-1 text-right font-mono font-medium">

@@ -1212,9 +1212,10 @@ const RequirementOrderPage = () => {
     return materials.filter(
       (m) =>
         m.type === "PRODUCT" &&
-        customerQuotes.some(
-          (q) => String(q.product_detail?.id) === String(m.id),
-        ),
+        (Boolean(m.is_in_house) ||
+          customerQuotes.some(
+            (q) => String(q.product_detail?.id) === String(m.id),
+          )),
     );
   }, [materials, customerQuotes]);
 
@@ -1356,43 +1357,63 @@ const RequirementOrderPage = () => {
         const quoteItem = customerQuotes.find(
           (q) => String(q.id) === String(quoteItemId),
         );
-        if (!quoteItem) return item;
 
-        const salesPrice = quoteItem.final_price_per_kg
-          ? String(quoteItem.final_price_per_kg)
-          : "";
-
-        // 🌟 改用關聯表尋找 PackageOrder，而不是用 product_code 盲找
-        let targetPo = null;
         const matchedRel = productRelations.find(
-          (r) => String(r.product) === String(item.product_id),
+          (r) =>
+            String(r.product) === String(item.product_id) &&
+            r.is_active !== false,
         );
-        if (matchedRel) {
-          targetPo = packageOrders.find(
-            (p) => String(p.id) === String(matchedRel.package_order),
-          );
-        }
+        const targetPo = matchedRel
+          ? packageOrders.find(
+              (p) => String(p.id) === String(matchedRel.package_order),
+            )
+          : packageOrders.find((p) => String(p.id) === String(quoteItemId));
 
-        let outId = quoteItem.outer_pack || null;
-        let inId = quoteItem.inner_pack || null;
+        if (!quoteItem && !targetPo) return item;
 
+        const pkgList = Array.isArray(targetPo?.packaging_info)
+          ? targetPo.packaging_info
+          : [];
+        const outerPkg = pkgList.find((p) => p.layer === "outer");
+        const innerPkg = pkgList.find((p) => p.layer === "inner");
+
+        const outId =
+          quoteItem?.outer_pack ||
+          outerPkg?.material_id ||
+          targetPo?.outer_pack ||
+          null;
+        const inId =
+          quoteItem?.inner_pack ||
+          innerPkg?.material_id ||
+          targetPo?.inner_pack ||
+          null;
         const outMat = materials.find((m) => String(m.id) === String(outId));
         const inMat = materials.find((m) => String(m.id) === String(inId));
 
         return {
           ...item,
-          profile_id: quoteItem.id,
-          spec: quoteItem.spec || "",
-          unit: quoteItem.sales_unit || targetPo?.sales_unit || "箱",
-          unit_price: salesPrice,
-          sales_unit_quantity: quoteItem.sales_unit_quantity
+          profile_id: String(quoteItemId),
+          spec: quoteItem?.spec || targetPo?.spec || "",
+          unit:
+            quoteItem?.sales_unit ||
+            targetPo?.sales_unit ||
+            product.unit ||
+            "箱",
+          unit_price: quoteItem?.final_price_per_kg
+            ? String(quoteItem.final_price_per_kg)
+            : "",
+          sales_unit_quantity: quoteItem?.sales_unit_quantity
             ? String(quoteItem.sales_unit_quantity)
-            : "1",
+            : targetPo?.sales_unit_quantity
+              ? String(targetPo.sales_unit_quantity)
+              : "1",
           sales_pack_unit:
-            quoteItem.sales_pack_unit || targetPo?.sales_pack_unit || "包",
-          sales_pack_quantity: quoteItem.sales_pack_quantity
+            quoteItem?.sales_pack_unit || targetPo?.sales_pack_unit || "包",
+          sales_pack_quantity: quoteItem?.sales_pack_quantity
             ? String(quoteItem.sales_pack_quantity)
-            : "10",
+            : targetPo?.sales_pack_quantity
+              ? String(targetPo.sales_pack_quantity)
+              : "10",
           outer_pack_id: outId,
           inner_pack_id: inId,
           outer_capacity: outMat?.pack_capacity
@@ -2482,6 +2503,35 @@ const RequirementOrderPage = () => {
     );
   };
 
+  const getProductStockBatches = (productId, requiredQty) => {
+    const req = Number(requiredQty) || 0;
+    const prodBatches = batches
+      .filter(
+        (b) =>
+          String(b.material) === String(productId) &&
+          b.is_active !== false &&
+          parseFloat(b.remaining_qty) > 0,
+      )
+      .sort((a, b) => new Date(a.received_date) - new Date(b.received_date));
+
+    let remainingToFulfill = req;
+    return prodBatches.map((b) => {
+      const avail = parseFloat(b.remaining_qty) || 0;
+      let used = 0;
+      if (remainingToFulfill > 0) {
+        used = Math.min(avail, remainingToFulfill);
+        remainingToFulfill -= used;
+      }
+      return {
+        id: b.id,
+        batch_number: b.batch_number,
+        received_date: b.received_date,
+        available: avail,
+        used: used > 0 ? roundToDisplay(used, "PRODUCT").toString() : "",
+      };
+    });
+  };
+
   const filteredMrp = useMemo(() => {
     return mrpPlans.filter((d) => {
       const vInfo = d.vendor_info || {};
@@ -3303,41 +3353,67 @@ const RequirementOrderPage = () => {
                                       }
                                       options={[
                                         { id: "", name: "選擇規格" },
-                                        ...customerQuotes
-                                          .filter(
-                                            (q) =>
-                                              String(q.product_detail?.id) ===
-                                              String(item.product_id),
-                                          )
-                                          .map((q) => {
-                                            let po = null;
-                                            // 🌟 使用關聯表反查 PO
-                                            const matchedRel =
-                                              productRelations.find(
-                                                (r) =>
-                                                  String(r.product) ===
-                                                  String(item.product_id),
-                                              );
-                                            if (matchedRel) {
-                                              po = packageOrders.find(
+                                        ...(() => {
+                                          const matchedQuotes =
+                                            customerQuotes.filter(
+                                              (q) =>
+                                                String(q.product_detail?.id) ===
+                                                String(item.product_id),
+                                            );
+
+                                          if (matchedQuotes.length > 0) {
+                                            return matchedQuotes.map((q) => {
+                                              const matchedRel =
+                                                productRelations.find(
+                                                  (r) =>
+                                                    String(r.product) ===
+                                                      String(item.product_id) &&
+                                                    r.is_active !== false,
+                                                );
+                                              const po = matchedRel
+                                                ? packageOrders.find(
+                                                    (p) =>
+                                                      String(p.id) ===
+                                                      String(
+                                                        matchedRel.package_order,
+                                                      ),
+                                                  )
+                                                : null;
+
+                                              const prefix =
+                                                po && po.order_number
+                                                  ? `[${po.order_number}] `
+                                                  : "";
+
+                                              return {
+                                                id: String(q.id),
+                                                name: `${prefix}${q.spec || `規格 ${q.id}`}`,
+                                              };
+                                            });
+                                          }
+
+                                          return productRelations
+                                            .filter(
+                                              (r) =>
+                                                String(r.product) ===
+                                                  String(item.product_id) &&
+                                                r.is_active !== false,
+                                            )
+                                            .map((rel) => {
+                                              const po = packageOrders.find(
                                                 (p) =>
                                                   String(p.id) ===
-                                                  String(
-                                                    matchedRel.package_order,
-                                                  ),
+                                                  String(rel.package_order),
                                               );
-                                            }
-
-                                            const prefix =
-                                              po && po.order_number
+                                              const poCode = po?.order_number
                                                 ? `[${po.order_number}] `
                                                 : "";
-
-                                            return {
-                                              id: String(q.id),
-                                              name: `${prefix}${q.spec || `規格 ${q.id}`}`,
-                                            };
-                                          }),
+                                              return {
+                                                id: `pkg_${rel.id}`,
+                                                name: `${poCode}${po?.spec || `包裝單 #${rel.package_order}`}`,
+                                              };
+                                            });
+                                        })(),
                                       ]}
                                       placeholder={
                                         item.product_id
@@ -3616,6 +3692,130 @@ const RequirementOrderPage = () => {
                 {formItems.map((fItem, index) => {
                   if (!fItem.product_id || Number(fItem.quantity) <= 0)
                     return null;
+
+                  const selectedMat = materials.find(
+                    (m) => String(m.id) === String(fItem.product_id),
+                  );
+
+                  const isInHouseItem = Boolean(
+                    selectedMat &&
+                    selectedMat.type === "PRODUCT" &&
+                    selectedMat.is_in_house,
+                  );
+
+                  if (isInHouseItem) {
+                    const stockBatches = getProductStockBatches(
+                      fItem.product_id,
+                      fItem.quantity,
+                    );
+                    const totalAllocated = stockBatches.reduce(
+                      (sum, b) => sum + (parseFloat(b.used) || 0),
+                      0,
+                    );
+
+                    return (
+                      <div
+                        key={fItem.id}
+                        className="mb-8 border border-slate-200 rounded-[2rem] overflow-hidden shadow-sm bg-white"
+                      >
+                        <div className="bg-slate-50/80 px-6 py-5 border-b border-slate-200 flex items-center gap-4">
+                          <span className="bg-blue-500 text-white text-sm tracking-wide px-3 py-1 rounded-lg font-semibold shadow-sm whitespace-nowrap">
+                            明細列 {index + 1}
+                          </span>
+                          <span className="font-bold text-slate-900 truncate text-xl">
+                            {fItem.product_name}
+                          </span>
+                          <span className="ml-auto text-sm font-bold px-3.5 py-1.5 rounded-xl border bg-emerald-50 text-emerald-700 border-emerald-200">
+                            已分配 {formatNum(totalAllocated, "PRODUCT")}{" "}
+                            {fItem.unit}
+                          </span>
+                          <span className="text-slate-600 font-mono font-medium text-lg whitespace-nowrap bg-white px-4 py-1.5 rounded-xl border border-slate-200 shadow-sm">
+                            {fItem.quantity} {fItem.unit}
+                          </span>
+                        </div>
+
+                        <div className="p-6 md:p-8 bg-slate-50/30">
+                          <div className="mb-4 flex justify-between items-center">
+                            <span className="text-sm font-bold text-slate-800">
+                              📦 廠內自製成品批號選擇（直接扣除現有庫存）
+                            </span>
+                            <span className="text-xs font-bold text-slate-500">
+                              需求量：{fItem.quantity} {fItem.unit}
+                            </span>
+                          </div>
+
+                          {stockBatches.length > 0 ? (
+                            <div className="flex overflow-x-auto gap-4 pb-2 custom-scrollbar">
+                              {stockBatches.map((b) => (
+                                <div
+                                  key={b.id}
+                                  className="w-[85vw] sm:w-[340px] flex-shrink-0"
+                                >
+                                  <BatchRow
+                                    orderId={fItem.id}
+                                    matId={fItem.product_id}
+                                    batch={b}
+                                    matType="PRODUCT"
+                                    unit={fItem.unit}
+                                    onSave={(ordId, mId, bId, val) => {
+                                      setAllocations((prev) => {
+                                        const curr = prev[ordId] || {
+                                          _base_qty:
+                                            Number(fItem.quantity) || 0,
+                                          _productId: fItem.product_id,
+                                          [mId]: {
+                                            materialName: fItem.product_name,
+                                            unit: fItem.unit,
+                                            type: "PRODUCT",
+                                            code: fItem.product_code,
+                                            requiredQty:
+                                              Number(fItem.quantity) || 0,
+                                            maxQty:
+                                              (Number(fItem.quantity) || 0) *
+                                              USEAGE_THRESHOLD,
+                                            batches: stockBatches,
+                                          },
+                                        };
+                                        const targetMat = curr[mId] || {
+                                          batches: stockBatches,
+                                        };
+                                        const nextBatches = (
+                                          targetMat.batches || stockBatches
+                                        ).map((itemB) =>
+                                          String(itemB.id) === String(bId)
+                                            ? { ...itemB, used: val }
+                                            : itemB,
+                                        );
+                                        return {
+                                          ...prev,
+                                          [ordId]: {
+                                            ...curr,
+                                            [mId]: {
+                                              ...targetMat,
+                                              batches: nextBatches,
+                                            },
+                                          },
+                                        };
+                                      });
+                                      showAlert(
+                                        "成功",
+                                        "已更新成品批號用量",
+                                        "success",
+                                      );
+                                    }}
+                                  />
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="p-8 text-center text-amber-700 bg-amber-50 border border-amber-200 rounded-2xl text-sm font-bold">
+                              此廠內自製成品目前無可用庫存批號，請先至「成品預存庫存」建立批號庫存。
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  }
                   const rowOrderItems = orderItems.filter((item) =>
                     String(item.id).startsWith(fItem.id),
                   );

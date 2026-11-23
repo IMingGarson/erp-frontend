@@ -904,6 +904,7 @@ export default function MaterialPage() {
     phase: "IN_DEV",
     type: "RAW",
     unit: "KG",
+    is_in_house: false,
     pack_capacity: "",
     storage_method: "ROOM_TEMP",
     dietary_type: "",
@@ -1374,6 +1375,7 @@ export default function MaterialPage() {
         material.pack_capacity != null
           ? parseFloat(material.pack_capacity).toString()
           : "",
+      is_in_house: Boolean(material.is_in_house),
       storage_method: material.storage_method || "ROOM_TEMP",
       dietary_type: material.dietary_type || "",
       description: material.description || "",
@@ -1477,6 +1479,8 @@ export default function MaterialPage() {
 
         const payload = {
           ...formData,
+          is_in_house:
+            formData.type === "PRODUCT" ? Boolean(formData.is_in_house) : false,
           dietary_type: formData.dietary_type || null,
           allergen_info: formData.allergen_info.join(","),
           nutrition_fact: finalNutrition,
@@ -2710,6 +2714,27 @@ export default function MaterialPage() {
                         placeholder="未設定"
                       />
                     </div>
+                    {formData.type === "PRODUCT" && (
+                      <div className="flex items-center pt-6">
+                        <label className="relative inline-flex items-center cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(formData.is_in_house)}
+                            onChange={(e) =>
+                              setFormData((prev) => ({
+                                ...prev,
+                                is_in_house: e.target.checked,
+                              }))
+                            }
+                            className="sr-only peer"
+                          />
+                          <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                          <span className="ml-3 text-sm font-bold text-slate-700">
+                            是否開放廠內自製
+                          </span>
+                        </label>
+                      </div>
+                    )}
                     {formData.type === "PACK" && (
                       <div className="animate-in fade-in">
                         <label className="block text-[11px] font-bold text-slate-500 mb-1.5 uppercase">

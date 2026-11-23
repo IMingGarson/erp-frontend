@@ -300,15 +300,24 @@ export default function PackageOrderPage() {
           (rel) => rel.package_order === po.id,
         );
 
-        const mappedRelations = linkedRelations.map((rel) => {
-          const product = allMaterials.find((m) => m.id === rel.product) || {};
-          return {
-            relation_id: rel.id,
-            product_id: product.id,
-            product_code: product.code || "-",
-            product_name: product.name || "未知成品",
-          };
-        });
+        const mappedRelations = Array.from(
+          linkedRelations
+            .reduce((map, rel) => {
+              const product =
+                allMaterials.find((m) => m.id === rel.product) || {};
+              const dedupKey = product.id ?? rel.product ?? rel.id;
+              if (!map.has(dedupKey)) {
+                map.set(dedupKey, {
+                  relation_id: rel.id,
+                  product_id: product.id,
+                  product_code: product.code || "-",
+                  product_name: product.name || "未知成品",
+                });
+              }
+              return map;
+            }, new Map())
+            .values(),
+        );
 
         // 🌟 轉換 packaging_info，並帶入物料的 code 和 name
         const enrichedPackaging = (po.packaging_info || []).map((pi) => {

@@ -43,6 +43,11 @@ const MENU_GROUPS = [
         label: "財務會計報表",
         icon: ReceiptText,
       },
+      {
+        path: "/inhouse-stock",
+        label: "廠內自製",
+        icon: Boxes,
+      },
     ],
   },
   {

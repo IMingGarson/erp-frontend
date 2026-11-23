@@ -291,40 +291,68 @@ const ProductLabelTemplate = ({
   );
 };
 
-// 🌟 遞迴抽取 BOM 底下的所有成分 (支援展開無成分的 RAW 原料)
-const extractBomIngredients = (bomsArray) => {
-  const map = new Map();
-  if (!bomsArray || !Array.isArray(bomsArray)) return [];
+const extractBomIngredients = (
+  bomsArray,
+  material = null,
+  allMaterials = [],
+) => {
+  const rawMap = new Map();
+  const visitedSemiIds = new Set();
+  const matList = Array.isArray(allMaterials) ? allMaterials : [];
 
-  bomsArray.forEach((bom) => {
-    if (
-      bom.is_active !== false &&
-      !["PACK", "STICKER", "OTHER"].includes(bom.child_type)
-    ) {
-      if (bom.child_ingredients && bom.child_ingredients.length > 0) {
-        bom.child_ingredients.forEach((ci) => {
-          if (ci.ingredient_detail) {
-            const ing = ci.ingredient_detail;
-            if (!map.has(ing.id)) {
-              map.set(ing.id, { ...ing, _from_bom: bom.child_name });
-            }
-          }
-        });
-      } else {
-        // 🌟 如果該原料沒有手動設定成分，將原料本身視為展開成分
-        const fakeId = `mat-${bom.child}`;
-        if (!map.has(fakeId)) {
-          map.set(fakeId, {
-            id: fakeId,
-            name: bom.child_name,
-            is_additive: false,
-            _from_bom: "原料",
+  const findMaterialById = (matId) =>
+    matList.find((m) => String(m.id) === String(matId));
+
+  const collectFromBoms = (bomsList, sourceLabel = "") => {
+    if (!Array.isArray(bomsList)) return;
+
+    bomsList.forEach((bom) => {
+      if (!bom || bom.is_active === false) return;
+
+      if (bom.child_type === "RAW") {
+        const key = String(bom.child ?? bom.child_code ?? bom.child_name);
+        if (!rawMap.has(key)) {
+          const matchedMat = findMaterialById(bom.child);
+          rawMap.set(key, {
+            id: bom.child ?? key,
+            code: bom.child_code || matchedMat?.code || "",
+            name: bom.child_name || matchedMat?.name || "",
+            is_additive: Boolean(
+              matchedMat?.is_additive ?? bom.child_is_additive ?? false,
+            ),
+            allergen_info:
+              bom.child_allergen_info ?? matchedMat?.allergen_info ?? "",
+            nutrition_fact:
+              bom.child_nutrition_fact &&
+              Object.keys(bom.child_nutrition_fact).length > 0
+                ? bom.child_nutrition_fact
+                : matchedMat?.nutrition_fact || {},
+            _from_bom: sourceLabel || bom.child_name || "原料",
           });
         }
+      } else if (bom.child_type === "SEMI") {
+        const semiId = String(bom.child);
+        if (!semiId || visitedSemiIds.has(semiId)) return;
+        visitedSemiIds.add(semiId);
+
+        const semiMat = findMaterialById(semiId);
+        if (semiMat && Array.isArray(semiMat.boms)) {
+          collectFromBoms(
+            semiMat.boms,
+            bom.child_name || semiMat.name || "半成品",
+          );
+        }
       }
-    }
-  });
-  return Array.from(map.values());
+    });
+  };
+
+  if (material?.id != null) {
+    visitedSemiIds.add(String(material.id));
+  }
+
+  collectFromBoms(bomsArray, material?.name || "");
+
+  return Array.from(rawMap.values());
 };
 
 // ==========================================
@@ -643,9 +671,8 @@ const calculateNutritionFromBOMsAndIngredients = (
 
   if (ingredients && ingredients.length > 0) {
     ingredients.forEach((item) => {
-      if (!item.is_active || !item.ingredient_detail) return;
-
-      let ingNut = item.ingredient_detail.nutrition_fact;
+      const detail = item.ingredient_detail || item;
+      let ingNut = detail?.nutrition_fact;
       if (typeof ingNut === "string") {
         try {
           ingNut = JSON.parse(ingNut);
@@ -854,7 +881,7 @@ export default function MaterialPage() {
   const isRD = useAuthStore((state) => state.isRD());
   const me = useAuthStore((state) => state.me());
   const navigate = useNavigate();
-
+  const [additiveFilter, setAdditiveFilter] = useState("");
   const [materials, setMaterials] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -889,6 +916,10 @@ export default function MaterialPage() {
     qc_standards: [],
     boms: [],
     ingredients: [],
+    is_additive: false,
+    legal_limit_percent: "",
+    additive_license_no: "",
+    license_valid_date: "",
     product_registration_no: "",
     origin: "",
     nutrition_snapshots: [],
@@ -907,21 +938,6 @@ export default function MaterialPage() {
   const [isIngTfdaSearching, setIsIngTfdaSearching] = useState(false);
   const ingSearchRef = useRef(null);
 
-  const initialIngForm = {
-    name: "",
-    source_type: "MANUAL",
-    tfda_code: "",
-    nutrition_fact: emptyNutrition,
-    allergen_info: [],
-    is_additive: false,
-    legal_limit_percent: "",
-    additive_license_no: "",
-    license_valid_date: "",
-    source_material_id: null,
-  };
-  const [ingModalOpen, setIngModalOpen] = useState(false);
-  const [editingIngId, setEditingIngId] = useState(null);
-  const [ingForm, setIngForm] = useState(initialIngForm);
   const [ingTfdaQuery, setIngTfdaQuery] = useState("");
   const [ingTfdaResults, setIngTfdaResults] = useState([]);
   const [isIngTfdaDropdownOpen, setIsIngTfdaDropdownOpen] = useState(false);
@@ -1053,13 +1069,12 @@ export default function MaterialPage() {
   }, []);
 
   useEffect(() => {
-    if (isModalOpen || viewingMaterial || ingModalOpen)
-      document.body.style.overflow = "hidden";
+    if (isModalOpen || viewingMaterial) document.body.style.overflow = "hidden";
     else document.body.style.overflow = "unset";
     return () => {
       document.body.style.overflow = "unset";
     };
-  }, [isModalOpen, viewingMaterial, ingModalOpen]);
+  }, [isModalOpen, viewingMaterial]);
 
   const handleInputChange = (e) => {
     const { name, value, type, checked } = e.target;
@@ -1122,41 +1137,22 @@ export default function MaterialPage() {
     return detected;
   };
 
+  // 🌟 成分即為 type === "RAW" 的 Material，直接從 materials 或搜尋 API 取得 RAW 物料
   useEffect(() => {
     const delayDebounceFn = setTimeout(async () => {
       if (ingSearchTerm.trim()) {
         try {
-          const [ingRes, matRes] = await Promise.all([
-            fetchWithAuth(
-              `/api/ingredients?search=${encodeURIComponent(ingSearchTerm)}`,
-            ),
-            fetchWithAuth(
-              `/api/materials?search=${encodeURIComponent(ingSearchTerm)}&lite=true`,
-            ),
-          ]);
-
-          let combined = [];
-
-          if (ingRes.ok) {
-            const json = await ingRes.json();
-            combined = [...(json.results || json.data || json || [])];
-          }
+          const matRes = await fetchWithAuth(
+            `/api/materials?search=${encodeURIComponent(ingSearchTerm)}&type=RAW&lite=true`,
+          );
 
           if (matRes.ok) {
             const json = await matRes.json();
             const items = json.results || json.data || json || [];
-            const matItems = items
-              .filter((m) => ["RAW", "SEMI"].includes(m.type))
-              .map((m) => ({
-                ...m,
-                _is_material_copy: true,
-                source_type: "MATERIAL",
-              }));
-            combined = [...combined, ...matItems];
+            const rawItems = items.filter((m) => m.type === "RAW");
+            setIngSearchResults(rawItems);
+            setIsIngDropdownOpen(true);
           }
-
-          setIngSearchResults(combined);
-          setIsIngDropdownOpen(true);
         } catch (e) {
           console.error(e);
         }
@@ -1168,12 +1164,12 @@ export default function MaterialPage() {
     return () => clearTimeout(delayDebounceFn);
   }, [ingSearchTerm]);
 
-  const handleAddIngredientToMaterial = (ingredient) => {
-    if (formData.ingredients.find((i) => i.id === ingredient.id)) {
-      showAlert("提示", "此成分已在清單中", "info");
+  const handleAddRawMaterialAsIngredient = (rawMat) => {
+    if (formData.ingredients.find((i) => i.id === rawMat.id)) {
+      showAlert("提示", "此原料成分已在清單中", "info");
       return;
     }
-    const updatedIngredients = [...formData.ingredients, ingredient];
+    const updatedIngredients = [...formData.ingredients, rawMat];
 
     const newAllergens = getMergedAllergens(
       formData.manual_allergen_info,
@@ -1241,81 +1237,8 @@ export default function MaterialPage() {
     });
   };
 
-  const handleOpenIngModalFromMaterial = (material) => {
-    setEditingIngId(null);
-    const parsedAllergens = material.allergen_info
-      ? material.allergen_info
-          .split(",")
-          .map((s) => s.trim())
-          .filter(Boolean)
-      : [];
-
-    const nut = material.nutrition_fact || {};
-
-    setIngForm({
-      name: material.name,
-      source_type: "MANUAL",
-      tfda_code: "",
-      nutrition_fact: {
-        energy_kcal: nut.energy_kcal || "0",
-        protein: nut.protein || "0",
-        fat: nut.fat || "0",
-        saturated_fat: nut.saturated_fat || "0",
-        trans_fat: nut.trans_fat || "0",
-        carbs: nut.carbs || "0",
-        sugar: nut.sugar || "0",
-        sodium: nut.sodium || "0",
-      },
-      allergen_info: parsedAllergens,
-      is_additive: false,
-      legal_limit_percent: "",
-      additive_license_no: "",
-      license_valid_date: "",
-      source_material_id: material.id,
-    });
-
-    setIngTfdaQuery("");
-    setIngTfdaResults([]);
-    setIsIngDropdownOpen(false);
-    setIngSearchTerm("");
-    setIngModalOpen(true);
-  };
-
-  const handleOpenIngModal = (ingredientToEdit = null) => {
-    if (ingredientToEdit) {
-      setEditingIngId(ingredientToEdit.id);
-      const parsedAllergens = ingredientToEdit.allergen_info
-        ? ingredientToEdit.allergen_info.split(",").map((s) => s.trim())
-        : [];
-      setIngForm({
-        name: ingredientToEdit.name,
-        source_type: ingredientToEdit.source_type || "MANUAL",
-        tfda_code: ingredientToEdit.tfda_code || "",
-        nutrition_fact: ingredientToEdit.nutrition_fact || emptyNutrition,
-        allergen_info: parsedAllergens,
-        is_additive: ingredientToEdit.is_additive || false,
-        legal_limit_percent:
-          ingredientToEdit.legal_limit_percent != null
-            ? parseFloat(ingredientToEdit.legal_limit_percent).toString()
-            : "",
-        additive_license_no: ingredientToEdit.additive_license_no || "",
-        license_valid_date: ingredientToEdit.license_valid_date || "",
-        source_material_id: ingredientToEdit.source_material || null,
-      });
-      setIngTfdaQuery("");
-    } else {
-      setEditingIngId(null);
-      setIngForm({ ...initialIngForm, name: ingSearchTerm.trim() });
-      setIngTfdaQuery(ingSearchTerm.trim());
-    }
-    setIngTfdaResults([]);
-    setIsIngDropdownOpen(false);
-    setIngSearchTerm("");
-    setIngModalOpen(true);
-  };
-
   const handleIngTfdaSearch = async () => {
-    const query = (ingTfdaQuery || ingForm.name).trim();
+    const query = (ingTfdaQuery || formData.name).trim();
     if (!query) return;
     setIsIngTfdaSearching(true);
     try {
@@ -1337,15 +1260,13 @@ export default function MaterialPage() {
   const handleApplyIngTfdaResult = (item) => {
     const autoAllergens = autoDetectAllergens(item.name || "");
     const mergedAllergens = Array.from(
-      new Set([...ingForm.allergen_info, ...autoAllergens]),
+      new Set([...formData.allergen_info, ...autoAllergens]),
     );
 
     setIngTfdaQuery(item.name);
 
-    setIngForm((prev) => ({
+    setFormData((prev) => ({
       ...prev,
-      source_type: "TFDA",
-      tfda_code: item.code,
       allergen_info: mergedAllergens,
       nutrition_fact: {
         energy_kcal: item.energy_kcal || "0",
@@ -1361,81 +1282,9 @@ export default function MaterialPage() {
     setIsIngTfdaDropdownOpen(false);
   };
 
-  const handleSaveIngredient = async (e) => {
-    e.preventDefault();
-    if (!ingForm.name) return showAlert("警告", "請填寫成分名稱", "warning");
-
-    const payload = {
-      ...ingForm,
-      allergen_info: ingForm.allergen_info.join(","),
-      legal_limit_percent: ingForm.is_additive
-        ? ingForm.legal_limit_percent
-        : null,
-      additive_license_no: ingForm.is_additive
-        ? ingForm.additive_license_no
-        : "",
-      license_valid_date:
-        ingForm.is_additive && ingForm.license_valid_date
-          ? ingForm.license_valid_date
-          : null,
-      source_material_id: ingForm.source_material_id,
-    };
-
-    const method = editingIngId ? "PUT" : "POST";
-    const url = editingIngId
-      ? `/api/ingredients/${editingIngId}`
-      : "/api/ingredients";
-
-    try {
-      const res = await fetchWithAuth(url, {
-        method,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok)
-        throw new Error("儲存成分失敗，請確認名稱是否重複或資料正確");
-
-      const json = await res.json();
-      const savedIng = json.data || json;
-
-      if (editingIngId) {
-        const updatedIngredients = formData.ingredients.map((i) =>
-          i.id === editingIngId ? savedIng : i,
-        );
-        const newAllergens = getMergedAllergens(
-          formData.manual_allergen_info,
-          updatedIngredients,
-          formData.boms,
-        );
-
-        setFormData((prev) => ({
-          ...prev,
-          ingredients: updatedIngredients,
-          allergen_info: newAllergens,
-          nutrition_fact:
-            prev.type === "RAW"
-              ? calculateTotalNutrition(updatedIngredients)
-              : prev.nutrition_fact,
-        }));
-        showAlert("成功", `已更新成分「${savedIng.name}」`, "success");
-      } else {
-        handleAddIngredientToMaterial(savedIng);
-        showAlert(
-          "成功",
-          `已建立成分「${savedIng.name}」並加入清單`,
-          "success",
-        );
-      }
-
-      setIngModalOpen(false);
-    } catch (err) {
-      showAlert("錯誤", err.message, "error");
-    }
-  };
-
   const handleOpenViewModal = (material) => {
     const extractedIngredients =
-      material.ingredients?.map((i) => i.ingredient_detail) || [];
+      material.ingredients?.map((i) => i.ingredient_detail || i) || [];
 
     let displayNut = material.nutrition_fact || emptyNutrition;
     if (
@@ -1449,7 +1298,11 @@ export default function MaterialPage() {
       );
     }
 
-    const finalBomIngredients = extractBomIngredients(material.boms || []);
+    const finalBomIngredients = extractBomIngredients(
+      material.boms || [],
+      material,
+      materials,
+    );
     const displayQC = normalizeQCStandards(material.qc_standards);
 
     setViewingMaterial({
@@ -1475,6 +1328,8 @@ export default function MaterialPage() {
       return showAlert("權限不足", "僅有研發部可以新增物料。", "warning");
     setEditingId(null);
     setFormData(initialFormData);
+    setIngTfdaQuery("");
+    setIngTfdaResults([]);
     setIsModalOpen(true);
   };
 
@@ -1484,7 +1339,7 @@ export default function MaterialPage() {
     setEditingId(material.id);
 
     const parsedIngredients =
-      material.ingredients?.map((i) => i.ingredient_detail) || [];
+      material.ingredients?.map((i) => i.ingredient_detail || i) || [];
     const dbAllergens = material.allergen_info
       ? material.allergen_info.split(",").map((s) => s.trim())
       : [];
@@ -1529,6 +1384,13 @@ export default function MaterialPage() {
       nutrition_fact: editNut,
       ingredients: parsedIngredients,
       boms: material.boms || [],
+      is_additive: Boolean(material.is_additive),
+      legal_limit_percent:
+        material.legal_limit_percent != null
+          ? parseFloat(material.legal_limit_percent).toString()
+          : "",
+      additive_license_no: material.additive_license_no || "",
+      license_valid_date: material.license_valid_date || "",
       origin: material.origin || "",
       qc_standards: editQC,
       storage_life: material.storage_life || "",
@@ -1540,6 +1402,9 @@ export default function MaterialPage() {
         address: "",
       },
     });
+
+    setIngTfdaQuery(material.name || "");
+    setIngTfdaResults([]);
 
     if (
       material.nutrition_snapshots &&
@@ -1616,6 +1481,22 @@ export default function MaterialPage() {
           allergen_info: formData.allergen_info.join(","),
           nutrition_fact: finalNutrition,
           ingredients: payloadIngredients,
+          is_additive:
+            formData.type === "RAW" ? Boolean(isAdditiveChecked) : false,
+          legal_limit_percent:
+            formData.type === "RAW" && isAdditiveChecked
+              ? formData.legal_limit_percent || null
+              : null,
+          additive_license_no:
+            formData.type === "RAW" && formData.is_additive
+              ? formData.additive_license_no || ""
+              : "",
+          license_valid_date:
+            formData.type === "RAW" &&
+            formData.is_additive &&
+            formData.license_valid_date
+              ? formData.license_valid_date
+              : null,
           pack_capacity:
             formData.type === "PACK" ? formData.pack_capacity : null,
           qc_standards: cleanQC,
@@ -1777,6 +1658,39 @@ export default function MaterialPage() {
     }
   };
 
+  const isRawAdditiveIncomplete = (mat) => {
+    if (!mat || mat.type !== "RAW" || !mat.is_additive) return false;
+    const missingLimit =
+      mat.legal_limit_percent === null ||
+      mat.legal_limit_percent === undefined ||
+      String(mat.legal_limit_percent).trim() === "";
+    const missingLicenseNo =
+      !mat.additive_license_no || String(mat.additive_license_no).trim() === "";
+    const missingValidDate =
+      !mat.license_valid_date || String(mat.license_valid_date).trim() === "";
+    return missingLimit || missingLicenseNo || missingValidDate;
+  };
+
+  const isRawLicenseExpiringOrExpired = (mat, daysThreshold = 14) => {
+    if (!mat || mat.type !== "RAW" || !mat.license_valid_date) return false;
+    const targetDate = new Date(
+      `${String(mat.license_valid_date).slice(0, 10)}T23:59:59`,
+    );
+    if (isNaN(targetDate.getTime())) return false;
+
+    const now = new Date();
+    const todayStart = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
+    );
+    const deadline = new Date(todayStart);
+    deadline.setDate(deadline.getDate() - daysThreshold);
+    deadline.setHours(23, 59, 59, 999);
+
+    return targetDate.getTime() <= deadline.getTime();
+  };
+
   const filteredMaterials = useMemo(() => {
     const list = Array.isArray(materials) ? materials : [];
     return list.filter((mat) => {
@@ -1784,9 +1698,15 @@ export default function MaterialPage() {
         mat.code.toLowerCase().includes(searchTerm.toLowerCase()) ||
         mat.name.toLowerCase().includes(searchTerm.toLowerCase());
       const matchType = filterType === "" ? true : mat.type === filterType;
-      return matchSearch && matchType;
+      const matchAdditive =
+        additiveFilter === "INCOMPLETE"
+          ? isRawAdditiveIncomplete(mat)
+          : additiveFilter === "EXPIRING"
+            ? isRawLicenseExpiringOrExpired(mat, 14)
+            : true;
+      return matchSearch && matchType && matchAdditive;
     });
-  }, [materials, searchTerm, filterType]);
+  }, [materials, searchTerm, filterType, additiveFilter]);
 
   const totalPages = Math.ceil(filteredMaterials.length / itemsPerPage) || 1;
   const startIndex = (currentPage - 1) * itemsPerPage;
@@ -1795,18 +1715,38 @@ export default function MaterialPage() {
     startIndex + itemsPerPage,
   );
 
+  const hasAdditiveIngredient = useMemo(() => {
+    if (formData.type !== "RAW" || !Array.isArray(formData.ingredients)) {
+      return false;
+    }
+    return formData.ingredients.some((ing) =>
+      Boolean(ing?.is_additive || ing?.ingredient_detail?.is_additive),
+    );
+  }, [formData.type, formData.ingredients]);
+
+  const isAdditiveChecked =
+    Boolean(formData.is_additive) || hasAdditiveIngredient;
+
   const formBomIngredients = useMemo(() => {
-    return extractBomIngredients(formData.boms);
-  }, [formData.boms]);
+    return extractBomIngredients(formData.boms, formData, materials);
+  }, [formData.boms, formData, materials]);
 
-  const activeSnapshotData = useMemo(() => {
-    const activeList = viewingMaterial
-      ? viewingMaterial.nutrition_snapshots
-      : formData.nutrition_snapshots;
-    if (!activeList || !activeSnapshotId) return null;
-    return activeList.find((s) => s.id === activeSnapshotId);
-  }, [viewingMaterial, formData, activeSnapshotId]);
+  const additiveAlertsCount = useMemo(() => {
+    const list = Array.isArray(materials) ? materials : [];
+    let incompleteCount = 0;
+    let expiringCount = 0;
 
+    list.forEach((mat) => {
+      if (isRawAdditiveIncomplete(mat)) incompleteCount += 1;
+      if (isRawLicenseExpiringOrExpired(mat, 14)) expiringCount += 1;
+    });
+
+    return { incompleteCount, expiringCount };
+  }, [materials]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, filterType, additiveFilter]);
   return (
     <div className="p-6 md:p-8 max-w-7xl mx-auto bg-slate-50 min-h-screen font-sans text-slate-800 w-full">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
@@ -1862,6 +1802,39 @@ export default function MaterialPage() {
               className="py-0.5"
             />
           </div>
+          <label className="inline-flex items-center gap-2 px-3.5 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-700 cursor-pointer hover:border-rose-300 shadow-sm select-none">
+            <input
+              type="checkbox"
+              checked={additiveFilter === "INCOMPLETE"}
+              onChange={(e) =>
+                setAdditiveFilter(e.target.checked ? "INCOMPLETE" : "")
+              }
+              className="rounded border-slate-300 text-rose-600 focus:ring-rose-500"
+            />
+            <span>添加物資料缺漏</span>
+            {additiveAlertsCount.incompleteCount > 0 && (
+              <span className="px-2 py-0.5 text-[11px] font-black text-white bg-rose-600 rounded-full">
+                {additiveAlertsCount.incompleteCount}
+              </span>
+            )}
+          </label>
+
+          <label className="inline-flex items-center gap-2 px-3.5 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-700 cursor-pointer hover:border-rose-300 shadow-sm select-none">
+            <input
+              type="checkbox"
+              checked={additiveFilter === "EXPIRING"}
+              onChange={(e) =>
+                setAdditiveFilter(e.target.checked ? "EXPIRING" : "")
+              }
+              className="rounded border-slate-300 text-rose-600 focus:ring-rose-500"
+            />
+            <span>許可證即將/已到期(14天)</span>
+            {additiveAlertsCount.expiringCount > 0 && (
+              <span className="px-2 py-0.5 text-[11px] font-black text-white bg-rose-600 rounded-full">
+                {additiveAlertsCount.expiringCount}
+              </span>
+            )}
+          </label>
           {searchTerm && (
             <button
               onClick={() => setSearchTerm("")}
@@ -1925,14 +1898,16 @@ export default function MaterialPage() {
                     </td>
                     <td className="p-4 font-black text-slate-800">
                       {mat.name}
-                      {mat.ingredients &&
-                        mat.ingredients.some(
-                          (i) => i.ingredient_detail?.is_additive,
-                        ) && (
-                          <span className="ml-2 bg-indigo-50 text-indigo-600 border border-indigo-200/60 px-1.5 py-0.5 rounded text-[10px] font-bold">
-                            含添加物
-                          </span>
-                        )}
+                      {(mat.is_additive ||
+                        (mat.ingredients &&
+                          mat.ingredients.some(
+                            (i) =>
+                              i.ingredient_detail?.is_additive || i.is_additive,
+                          ))) && (
+                        <span className="ml-2 bg-indigo-50 text-indigo-600 border border-indigo-200/60 px-1.5 py-0.5 rounded text-[10px] font-bold">
+                          含添加物
+                        </span>
+                      )}
                     </td>
                     <td className="p-4">
                       <span className="px-3 py-1 inline-flex text-[11px] font-bold rounded-lg border bg-slate-50 text-slate-600 border-slate-200/80 shadow-sm">
@@ -2133,6 +2108,59 @@ export default function MaterialPage() {
                           )}
                         </span>
                       </div>
+                      {viewingMaterial.type === "RAW" && (
+                        <>
+                          <div>
+                            <span className="text-[10px] uppercase font-bold text-slate-400 mb-1 block">
+                              是否為法定添加物
+                            </span>
+                            <span
+                              className={`text-sm font-bold ${
+                                viewingMaterial.is_additive ||
+                                viewingMaterial.display_ingredients?.some(
+                                  (ing) => ing?.is_additive,
+                                )
+                                  ? "text-red-600"
+                                  : "text-slate-500"
+                              }`}
+                            >
+                              {viewingMaterial.is_additive ||
+                              viewingMaterial.display_ingredients?.some(
+                                (ing) => ing?.is_additive,
+                              )
+                                ? "是"
+                                : "否"}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-[10px] uppercase font-bold text-slate-400 mb-1 block">
+                              法定上限 (%)
+                            </span>
+                            <span className="text-sm font-bold text-slate-800 font-mono">
+                              {viewingMaterial.legal_limit_percent != null &&
+                              viewingMaterial.legal_limit_percent !== ""
+                                ? `${formatDisplayNum(viewingMaterial.legal_limit_percent)}%`
+                                : "-"}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-[10px] uppercase font-bold text-slate-400 mb-1 block">
+                              許可證字號
+                            </span>
+                            <span className="text-sm font-bold text-slate-800 font-mono">
+                              {viewingMaterial.additive_license_no || "-"}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-[10px] uppercase font-bold text-slate-400 mb-1 block">
+                              許可證效期
+                            </span>
+                            <span className="text-sm font-bold text-slate-800 font-mono">
+                              {viewingMaterial.license_valid_date || "-"}
+                            </span>
+                          </div>
+                        </>
+                      )}
                       {viewingMaterial.type === "PACK" &&
                         viewingMaterial.pack_capacity && (
                           <div>
@@ -2196,7 +2224,9 @@ export default function MaterialPage() {
                     materialType={viewingMaterial.type}
                   />
 
-                  {viewingMaterial.type !== "PACK" && (
+                  {["RAW", "SEMI", "PRODUCT"].includes(
+                    viewingMaterial.type,
+                  ) && (
                     <>
                       <div className="bg-white p-6 rounded-3xl border border-slate-200/60 shadow-[0_2px_10px_-4px_rgba(0,0,0,0.05)]">
                         <h4 className="text-[11px] font-black text-amber-600 uppercase tracking-widest mb-4 border-b border-slate-100 pb-2 flex items-center gap-1.5">
@@ -2700,6 +2730,7 @@ export default function MaterialPage() {
                     )}
                   </div>
                 </div>
+
                 {/* STICKER 標籤廠商資訊輸入區塊 */}
                 {formData.type === "STICKER" && (
                   <div className="bg-white p-6 rounded-3xl border border-slate-200/60 shadow-[0_2px_10px_-4px_rgba(0,0,0,0.05)] animate-in fade-in">
@@ -2791,103 +2822,94 @@ export default function MaterialPage() {
                     </div>
                   </div>
                 )}
-                {/* 🌟 根據 type 決定成分展開清單為 ReadOnly 或可編輯 */}
+
+                {/* 🌟 成分展開清單區塊：僅 RAW / SEMI / PRODUCT 顯示；PACK / STICKER / OTHER 預設隱藏 */}
                 {["RAW", "SEMI", "PRODUCT"].includes(formData.type) && (
-                  <>
-                    <div className="bg-white p-6 rounded-3xl border border-slate-200/60 shadow-[0_2px_10px_-4px_rgba(0,0,0,0.05)] relative overflow-visible">
-                      <h4 className="text-[11px] font-black text-amber-600 uppercase tracking-widest mb-4 border-b border-slate-100 pb-2 flex items-center gap-2">
-                        成分展開清單
-                        {formData.type === "RAW" && (
-                          <span className="text-xs font-medium text-slate-400 normal-case tracking-normal">
-                            ※ 點擊成分標籤可編輯添加物與營養素
-                          </span>
-                        )}
-                        {["SEMI", "PRODUCT"].includes(formData.type) && (
-                          <span className="text-xs font-medium text-slate-400 normal-case tracking-normal">
-                            ※ 半成品與成品的成分為唯讀，將自動由底層配方展算帶入
-                          </span>
-                        )}
-                      </h4>
-                      <div className="mb-5 flex flex-wrap gap-2">
-                        {/* 手動加入的成分 (RAW 專用) */}
-                        {formData.ingredients.map((ing) => (
+                  <div className="bg-white p-6 rounded-3xl border border-slate-200/60 shadow-[0_2px_10px_-4px_rgba(0,0,0,0.05)] relative overflow-visible">
+                    <h4 className="text-[11px] font-black text-amber-600 uppercase tracking-widest mb-4 border-b border-slate-100 pb-2 flex items-center gap-2">
+                      成分展開清單
+                      {formData.type === "RAW" && (
+                        <span className="text-xs font-medium text-slate-400 normal-case tracking-normal">
+                          ※ 原物料成分即為 RAW
+                          物料，可搜尋加入原料並設定添加物與營養價值
+                        </span>
+                      )}
+                      {formData.type === "SEMI" && (
+                        <span className="text-xs font-medium text-slate-400 normal-case tracking-normal">
+                          ※ 半成品成分為唯讀，自動依配方展開
+                        </span>
+                      )}
+                      {formData.type === "PRODUCT" && (
+                        <span className="text-xs font-medium text-slate-400 normal-case tracking-normal">
+                          ※ 成品先關聯半成品，再自動展開成分清單
+                        </span>
+                      )}
+                    </h4>
+
+                    {/* 已加入 / 展開的成分標籤（保留「是否為添加物」標籤） */}
+                    <div className="mb-5 flex flex-wrap gap-2">
+                      {formData.type === "RAW" &&
+                        formData.ingredients.map((ing) => (
                           <span
                             key={`manual-edit-${ing.id}`}
-                            className={`pl-3 pr-1 py-1.5 rounded-lg text-sm font-bold shadow-sm flex items-center gap-2 group transition-all hover:shadow-md ${
-                              formData.type === "RAW"
-                                ? "bg-amber-50 text-amber-900 border border-amber-200"
-                                : "bg-slate-50 text-slate-600 border border-slate-200 cursor-not-allowed"
-                            }`}
+                            className="bg-amber-50 text-amber-900 border border-amber-200 pl-3 pr-1 py-1.5 rounded-lg text-sm font-bold shadow-sm flex items-center gap-2 group transition-all hover:shadow-md"
                           >
-                            <span
-                              className={`flex items-center gap-2 ${formData.type === "RAW" ? "cursor-pointer hover:underline" : ""}`}
-                              onClick={() => {
-                                if (formData.type === "RAW")
-                                  handleOpenIngModal(ing);
-                              }}
-                              title={
-                                formData.type === "RAW" ? "點擊編輯成分" : ""
-                              }
-                            >
+                            <span className="flex items-center gap-2">
                               <span>{ing.name}</span>
-
-                              <div
-                                className={`flex items-center gap-1.5 border-l pl-2 ml-0.5 ${formData.type === "RAW" ? "border-amber-200/80" : "border-slate-200"}`}
-                              >
-                                {ing.source_type === "TFDA" ? (
-                                  <span className="text-[10px] bg-blue-100/80 text-blue-700 border border-blue-200 px-1.5 py-0.5 rounded-md tracking-wider">
-                                    TFDA
-                                  </span>
-                                ) : (
-                                  <span className="text-[10px] bg-slate-200/70 text-slate-600 border border-slate-300 px-1.5 py-0.5 rounded-md tracking-wider">
-                                    手動
-                                  </span>
-                                )}
-
-                                {ing.is_additive && (
+                              {ing.is_additive && (
+                                <div className="flex items-center gap-1.5 border-l border-amber-200/80 pl-2 ml-0.5">
                                   <span className="text-[10px] bg-orange-100 text-orange-700 border border-orange-200 px-1.5 py-0.5 rounded-md tracking-wider">
                                     添加物
                                   </span>
-                                )}
-                              </div>
+                                </div>
+                              )}
                             </span>
-
-                            {formData.type === "RAW" && (
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  handleRemoveIngredientFromMaterial(ing.id)
-                                }
-                                className="text-amber-400 hover:text-red-500 hover:bg-amber-100 rounded p-1 transition-colors ml-1"
-                                title="移除成分"
-                              >
-                                ×
-                              </button>
-                            )}
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleRemoveIngredientFromMaterial(ing.id)
+                              }
+                              className="text-amber-400 hover:text-red-500 hover:bg-amber-100 rounded p-1 transition-colors ml-1"
+                              title="移除成分"
+                            >
+                              ×
+                            </button>
                           </span>
                         ))}
 
-                        {/* 🌟 渲染由 BOM 繼承的成分 (唯讀) */}
-                        {formBomIngredients.map((ing) => (
-                          <span
-                            key={`bom-edit-${ing.id}`}
-                            className="bg-slate-50 text-slate-600 border border-slate-200 px-3 py-1.5 rounded-lg text-sm font-bold shadow-sm flex items-center"
-                          >
-                            <span>{ing.name}</span>
-                            {ing.is_additive && (
-                              <div className="flex items-center border-l border-slate-200 ml-0.5">
-                                <span className="text-[10px] bg-orange-100 text-orange-700 border border-orange-200 px-1.5 py-0.5 rounded-md tracking-wider">
-                                  添加物
-                                </span>
-                              </div>
-                            )}
+                      {["SEMI", "PRODUCT"].includes(formData.type) &&
+                        (formBomIngredients.length > 0 ? (
+                          formBomIngredients.map((ing) => (
+                            <span
+                              key={`bom-edit-${ing.id}`}
+                              className="bg-slate-50 text-slate-600 border border-slate-200 px-3 py-1.5 rounded-lg text-sm font-bold shadow-sm flex items-center gap-2"
+                              title={
+                                ing._from_bom
+                                  ? `來源: ${ing._from_bom}`
+                                  : undefined
+                              }
+                            >
+                              <span>{ing.name}</span>
+                              {ing.is_additive && (
+                                <div className="flex items-center border-l border-slate-200 pl-2 ml-0.5">
+                                  <span className="text-[10px] bg-orange-100 text-orange-700 border border-orange-200 px-1.5 py-0.5 rounded-md tracking-wider">
+                                    添加物
+                                  </span>
+                                </div>
+                              )}
+                            </span>
+                          ))
+                        ) : (
+                          <span className="text-sm font-bold text-slate-400">
+                            尚無可展開的成分
                           </span>
                         ))}
-                      </div>
+                    </div>
 
-                      {/* 只有 RAW 顯示搜尋與新增成分 */}
-                      {formData.type === "RAW" && (
-                        <div className="relative" ref={ingSearchRef}>
+                    {/* 僅 RAW 顯示 Search Bar 與原本 Modal 內的輸入 Form（SEMI / PRODUCT 不顯示 Search Bar） */}
+                    {formData.type === "RAW" && (
+                      <>
+                        <div className="relative mb-6" ref={ingSearchRef}>
                           <div className="flex gap-3">
                             <div className="relative flex-1">
                               <Search
@@ -2900,7 +2922,7 @@ export default function MaterialPage() {
                                 onChange={(e) =>
                                   setIngSearchTerm(e.target.value)
                                 }
-                                placeholder="搜尋並加入成分 (名稱或廠內物料代碼)..."
+                                placeholder="搜尋並加入原料成分 (名稱或代號)..."
                                 className="w-full pl-9 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-4 focus:ring-amber-500/10 focus:border-amber-400 text-sm font-bold text-slate-800 transition-all shadow-sm"
                               />
                             </div>
@@ -2910,58 +2932,28 @@ export default function MaterialPage() {
                               {ingSearchResults.length > 0 ? (
                                 ingSearchResults.map((res) => (
                                   <div
-                                    key={
-                                      res._is_material_copy
-                                        ? `mat-${res.id}`
-                                        : `ing-${res.id}`
-                                    }
+                                    key={`raw-mat-${res.id}`}
                                     onClick={() =>
-                                      res._is_material_copy
-                                        ? handleOpenIngModalFromMaterial(res)
-                                        : handleAddIngredientToMaterial(res)
+                                      handleAddRawMaterialAsIngredient(res)
                                     }
                                     className="p-4 hover:bg-amber-50 cursor-pointer transition-colors group flex justify-between items-center"
                                   >
                                     <div>
                                       <div className="font-bold text-slate-800 text-sm group-hover:text-amber-700 mb-1 flex items-center gap-1.5">
-                                        {res.source_type === "TFDA" ? (
-                                          <ShieldCheck
-                                            size={14}
-                                            className="text-blue-500"
-                                            title="來自 TFDA 資料庫"
-                                          />
-                                        ) : res._is_material_copy ? (
-                                          <Database
-                                            size={14}
-                                            className="text-purple-500"
-                                            title="廠內物料"
-                                          />
-                                        ) : (
-                                          <PenTool
-                                            size={14}
-                                            className="text-slate-400"
-                                            title="手動建檔"
-                                          />
-                                        )}
+                                        <Database
+                                          size={14}
+                                          className="text-purple-500"
+                                          title="原物料 (RAW)"
+                                        />
                                         {res.name}
-                                        {res.is_additive &&
-                                          !res._is_material_copy && (
-                                            <span className="ml-2 text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded">
-                                              添加物
-                                            </span>
-                                          )}
-                                        {res._is_material_copy && (
-                                          <span className="ml-2 text-[10px] bg-purple-100 text-purple-700 border border-purple-200 px-1.5 py-0.5 rounded">
-                                            轉換為成分
+                                        {res.is_additive && (
+                                          <span className="ml-2 text-[10px] bg-orange-100 text-orange-700 border border-orange-200 px-1.5 py-0.5 rounded">
+                                            添加物
                                           </span>
                                         )}
                                       </div>
                                       <div className="text-[10px] text-slate-500 font-mono">
-                                        {res.source_type === "TFDA"
-                                          ? `TFDA: ${res.tfda_code}`
-                                          : res._is_material_copy
-                                            ? `廠內代號: ${res.code}`
-                                            : "現有成分庫"}
+                                        物料代號: {res.code}
                                       </div>
                                     </div>
                                     <Plus
@@ -2972,26 +2964,212 @@ export default function MaterialPage() {
                                 ))
                               ) : (
                                 <div className="p-4 text-center text-sm font-bold text-slate-500">
-                                  找不到相符的資料
-                                </div>
-                              )}
-
-                              {ingSearchTerm.trim() && (
-                                <div
-                                  onClick={() => handleOpenIngModal(null)}
-                                  className="p-4 bg-blue-50 hover:bg-blue-100 cursor-pointer transition-colors text-center border-t border-blue-200"
-                                >
-                                  <span className="text-sm font-black text-blue-700">
-                                    ＋ 建立新成分「{ingSearchTerm}」
-                                  </span>
+                                  找不到相符的原物料
                                 </div>
                               )}
                             </div>
                           )}
                         </div>
-                      )}
-                    </div>
-                  </>
+
+                        {/* 原成分 Sub-Modal 內嵌表單：是否為添加物、TFDA、營養價值 */}
+                        <div className="border-t border-slate-100 pt-5 space-y-5">
+                          <div className="bg-indigo-50/50 p-5 rounded-2xl border border-indigo-100 relative">
+                            <div className="flex items-center">
+                              <label className="relative inline-flex items-center cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={Boolean(formData.is_additive)}
+                                  onChange={(e) =>
+                                    setFormData((prev) => ({
+                                      ...prev,
+                                      is_additive: e.target.checked,
+                                    }))
+                                  }
+                                  className="sr-only peer"
+                                />
+                                <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-500"></div>
+                                <span className="ml-3 text-[11px] font-bold text-indigo-700 uppercase tracking-wider">
+                                  此物料屬於「法定添加物」
+                                </span>
+                              </label>
+                              {hasAdditiveIngredient && (
+                                <span className="text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-lg">
+                                  成分包含添加物
+                                </span>
+                              )}
+                            </div>
+
+                            {isAdditiveChecked && (
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 animate-in fade-in pt-4">
+                                <div>
+                                  <label className="block text-[10px] font-bold text-indigo-500 mb-1.5 uppercase">
+                                    法定上限 (%)
+                                  </label>
+                                  <input
+                                    type="number"
+                                    step="any"
+                                    value={formData.legal_limit_percent}
+                                    onChange={(e) =>
+                                      setFormData((prev) => ({
+                                        ...prev,
+                                        legal_limit_percent: e.target.value,
+                                      }))
+                                    }
+                                    className="w-full px-3 py-2 border border-indigo-200 rounded-lg focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 outline-none text-sm font-bold text-slate-800 bg-white"
+                                    placeholder="例如: 2.0"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-[10px] font-bold text-indigo-500 mb-1.5 uppercase">
+                                    許可證字號
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={formData.additive_license_no}
+                                    onChange={(e) =>
+                                      setFormData((prev) => ({
+                                        ...prev,
+                                        additive_license_no: e.target.value,
+                                      }))
+                                    }
+                                    className="w-full px-3 py-2 border border-indigo-200 rounded-lg focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 outline-none text-sm font-bold text-slate-800 bg-white"
+                                    placeholder="衛部添製字第..."
+                                  />
+                                </div>
+                                <div className="sm:col-span-2">
+                                  <label className="block text-[10px] font-bold text-indigo-500 mb-1.5 uppercase">
+                                    許可證效期
+                                  </label>
+                                  <input
+                                    type="date"
+                                    value={formData.license_valid_date || ""}
+                                    onChange={(e) =>
+                                      setFormData((prev) => ({
+                                        ...prev,
+                                        license_valid_date: e.target.value,
+                                      }))
+                                    }
+                                    className="w-full px-3 py-2 border border-indigo-200 rounded-lg focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 outline-none text-sm font-bold text-slate-800 bg-white"
+                                  />
+                                </div>
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="bg-blue-50/50 p-5 rounded-2xl border border-blue-100">
+                            <label className="block text-[11px] font-bold text-blue-700 mb-2 flex items-center gap-1.5 uppercase tracking-wider">
+                              <Database size={14} /> 從 TFDA 國家資料庫帶入數據
+                              (選填)
+                              <span className="text-[10px] text-blue-500 font-normal ml-2 tracking-normal">
+                                ※ TFDA 搜尋時會自動忽略括號內文字 (如:
+                                複合原料展開)
+                              </span>
+                            </label>
+                            <div className="relative" ref={ingTfdaRef}>
+                              <div className="flex gap-3">
+                                <input
+                                  type="text"
+                                  value={ingTfdaQuery}
+                                  onChange={(e) =>
+                                    setIngTfdaQuery(e.target.value)
+                                  }
+                                  onKeyDown={(e) =>
+                                    e.key === "Enter" &&
+                                    (e.preventDefault(), handleIngTfdaSearch())
+                                  }
+                                  placeholder="搜尋 TFDA..."
+                                  className="flex-1 px-4 py-2.5 bg-white border border-blue-200 rounded-xl focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-400 text-sm font-bold text-slate-800 transition-all shadow-sm"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={handleIngTfdaSearch}
+                                  disabled={isIngTfdaSearching}
+                                  className="px-6 py-2.5 bg-[#007AFF] text-white font-bold rounded-xl hover:bg-[#0056b3] transition-colors disabled:opacity-50 flex items-center gap-2 text-sm shadow-md"
+                                >
+                                  {isIngTfdaSearching ? (
+                                    "搜尋中"
+                                  ) : (
+                                    <>
+                                      <Search size={16} /> 搜尋
+                                    </>
+                                  )}
+                                </button>
+                              </div>
+                              {isIngTfdaDropdownOpen &&
+                                ingTfdaResults.length > 0 && (
+                                  <div className="absolute top-full left-0 w-full mt-2 bg-white border border-slate-200 shadow-2xl rounded-2xl max-h-48 overflow-y-auto z-20 divide-y divide-slate-100">
+                                    {ingTfdaResults.map((res) => (
+                                      <div
+                                        key={res.code}
+                                        onClick={() =>
+                                          handleApplyIngTfdaResult(res)
+                                        }
+                                        className="p-3 hover:bg-blue-50 cursor-pointer transition-colors group"
+                                      >
+                                        <div className="flex justify-between items-center mb-1">
+                                          <span className="font-bold text-slate-800 text-sm group-hover:text-blue-700">
+                                            {res.name}
+                                          </span>
+                                          <span className="text-[10px] font-mono font-bold text-slate-400">
+                                            {res.code}
+                                          </span>
+                                        </div>
+                                        <div className="text-[11px] text-slate-500 font-mono">
+                                          熱: {res.energy_kcal} / 蛋:{" "}
+                                          {res.protein} / 脂: {res.fat} / 碳:{" "}
+                                          {res.carbs}
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                            </div>
+                          </div>
+
+                          <div className="border-t border-slate-100 pt-4">
+                            <label className="block text-[11px] font-bold text-slate-500 mb-3 uppercase">
+                              營養標示 (每100g)
+                            </label>
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                              {[
+                                { id: "energy_kcal", label: "熱量" },
+                                { id: "protein", label: "蛋白質" },
+                                { id: "fat", label: "脂肪" },
+                                { id: "saturated_fat", label: "飽和脂肪" },
+                                { id: "trans_fat", label: "反式脂肪" },
+                                { id: "carbs", label: "碳水" },
+                                { id: "sugar", label: "糖" },
+                                { id: "sodium", label: "鈉" },
+                              ].map((item) => (
+                                <div key={`ing-nut-${item.id}`}>
+                                  <label className="text-[10px] font-bold text-slate-400 mb-1 block">
+                                    {item.label}
+                                  </label>
+                                  <input
+                                    type="number"
+                                    step="any"
+                                    value={
+                                      formData.nutrition_fact?.[item.id] ?? "0"
+                                    }
+                                    onChange={(e) =>
+                                      setFormData((prev) => ({
+                                        ...prev,
+                                        nutrition_fact: {
+                                          ...prev.nutrition_fact,
+                                          [item.id]: e.target.value,
+                                        },
+                                      }))
+                                    }
+                                    className="w-full px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-bold text-slate-700 focus:bg-white focus:border-blue-400 outline-none transition-all"
+                                  />
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
                 )}
 
                 <div className="bg-white p-6 rounded-3xl border border-slate-200/60 shadow-[0_2px_10px_-4px_rgba(0,0,0,0.05)]">
@@ -3140,7 +3318,6 @@ export default function MaterialPage() {
                           const isChecked = formData.allergen_info.includes(
                             allergen.value,
                           );
-                          // 🌟 判斷是否由手動成分或BOM強制帶入
                           const isFromIngredients = getIngredientsOnlyAllergens(
                             formData.ingredients,
                             formData.boms,
@@ -3433,6 +3610,7 @@ export default function MaterialPage() {
           </div>
         </div>
       )}
+
       {/* ========================================================= */}
       {/* 🌟 審核退回輸入備註 Modal */}
       {/* ========================================================= */}
@@ -3477,6 +3655,7 @@ export default function MaterialPage() {
           </div>
         </div>
       )}
+
       {/* ========================================================= */}
       {/* 🌟 設定效期 Modal */}
       {/* ========================================================= */}
@@ -3541,301 +3720,6 @@ export default function MaterialPage() {
                 儲存設定
               </button>
             </div>
-          </div>
-        </div>
-      )}
-      {/* ========================================================= */}
-      {/* 🌟 新增/編輯「成分」 Sub-Modal */}
-      {/* ========================================================= */}
-      {ingModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
-          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200 border border-slate-200">
-            <div className="p-5 border-b border-slate-200/60 flex justify-between items-center bg-slate-50 shrink-0">
-              <h3 className="text-xl font-black text-slate-800 flex items-center gap-2">
-                {editingIngId ? (
-                  <>
-                    <Edit2 size={20} className="text-amber-500" /> 編輯成分
-                  </>
-                ) : (
-                  "建立全新成分"
-                )}
-              </h3>
-              <button
-                onClick={() => setIngModalOpen(false)}
-                className="text-slate-400 hover:text-red-500 text-3xl leading-none outline-none transition-colors"
-              >
-                ×
-              </button>
-            </div>
-
-            <form
-              onSubmit={handleSaveIngredient}
-              className="flex flex-col flex-1 overflow-hidden"
-            >
-              <div className="p-6 space-y-6 overflow-y-auto custom-scrollbar flex-1">
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-500 mb-1.5 uppercase">
-                    成分名稱 <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={ingForm.name}
-                    onChange={(e) =>
-                      setIngForm({ ...ingForm, name: e.target.value })
-                    }
-                    className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none text-sm font-bold text-slate-800 transition-all shadow-sm"
-                    placeholder="例如: 麥芽糊精"
-                  />
-                </div>
-
-                <div className="bg-indigo-50/50 p-5 rounded-2xl border border-indigo-100 relative">
-                  <div className="flex items-center">
-                    <label className="relative inline-flex items-center cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={ingForm.is_additive}
-                        onChange={(e) =>
-                          setIngForm({
-                            ...ingForm,
-                            is_additive: e.target.checked,
-                          })
-                        }
-                        className="sr-only peer"
-                      />
-                      <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-500"></div>
-                      <span className="ml-3 text-[11px] font-bold text-indigo-700 uppercase tracking-wider">
-                        此成分屬於「法定添加物」
-                      </span>
-                    </label>
-                  </div>
-
-                  {ingForm.is_additive && (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 animate-in fade-in pt-4">
-                      <div>
-                        <label className="block text-[10px] font-bold text-indigo-500 mb-1.5 uppercase">
-                          法定上限 (%) <span className="text-red-500">*</span>
-                        </label>
-                        <input
-                          type="number"
-                          step="any"
-                          required={ingForm.is_additive}
-                          value={ingForm.legal_limit_percent}
-                          onChange={(e) =>
-                            setIngForm({
-                              ...ingForm,
-                              legal_limit_percent: e.target.value,
-                            })
-                          }
-                          className="w-full px-3 py-2 border border-indigo-200 rounded-lg focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 outline-none text-sm font-bold text-slate-800"
-                          placeholder="例如: 2.0"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-bold text-indigo-500 mb-1.5 uppercase">
-                          許可證字號
-                        </label>
-                        <input
-                          type="text"
-                          value={ingForm.additive_license_no}
-                          onChange={(e) =>
-                            setIngForm({
-                              ...ingForm,
-                              additive_license_no: e.target.value,
-                            })
-                          }
-                          className="w-full px-3 py-2 border border-indigo-200 rounded-lg focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 outline-none text-sm font-bold text-slate-800"
-                          placeholder="衛部添製字第..."
-                        />
-                      </div>
-                      <div className="sm:col-span-2">
-                        <label className="block text-[10px] font-bold text-indigo-500 mb-1.5 uppercase">
-                          許可證效期
-                        </label>
-                        <input
-                          type="date"
-                          value={ingForm.license_valid_date || ""}
-                          onChange={(e) =>
-                            setIngForm({
-                              ...ingForm,
-                              license_valid_date: e.target.value,
-                            })
-                          }
-                          className="w-full px-3 py-2 border border-indigo-200 rounded-lg focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 outline-none text-sm font-bold text-slate-800"
-                        />
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                <div className="bg-blue-50/50 p-5 rounded-2xl border border-blue-100">
-                  <label className="block text-[11px] font-bold text-blue-700 mb-2 flex items-center gap-1.5 uppercase tracking-wider">
-                    <Database size={14} /> 從 TFDA 國家資料庫帶入數據 (選填)
-                    <span className="text-[10px] text-blue-500 font-normal ml-2 tracking-normal">
-                      ※ TFDA 搜尋時會自動忽略括號內文字 (如: 複合原料展開)
-                    </span>
-                  </label>
-                  <div className="relative" ref={ingTfdaRef}>
-                    <div className="flex gap-3">
-                      <input
-                        type="text"
-                        value={ingTfdaQuery}
-                        onChange={(e) => setIngTfdaQuery(e.target.value)}
-                        onKeyDown={(e) =>
-                          e.key === "Enter" &&
-                          (e.preventDefault(), handleIngTfdaSearch())
-                        }
-                        placeholder="搜尋 TFDA..."
-                        className="flex-1 px-4 py-2.5 bg-white border border-blue-200 rounded-xl focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-400 text-sm font-bold text-slate-800 transition-all shadow-sm"
-                      />
-                      <button
-                        type="button"
-                        onClick={handleIngTfdaSearch}
-                        disabled={isIngTfdaSearching}
-                        className="px-6 py-2.5 bg-[#007AFF] text-white font-bold rounded-xl hover:bg-[#0056b3] transition-colors disabled:opacity-50 flex items-center gap-2 text-sm shadow-md"
-                      >
-                        {isIngTfdaSearching ? (
-                          "搜尋中"
-                        ) : (
-                          <>
-                            <Search size={16} /> 搜尋
-                          </>
-                        )}
-                      </button>
-                    </div>
-                    {isIngTfdaDropdownOpen && ingTfdaResults.length > 0 && (
-                      <div className="absolute top-full left-0 w-full mt-2 bg-white border border-slate-200 shadow-2xl rounded-2xl max-h-48 overflow-y-auto z-20 divide-y divide-slate-100">
-                        {ingTfdaResults.map((res) => (
-                          <div
-                            key={res.code}
-                            onClick={() => handleApplyIngTfdaResult(res)}
-                            className="p-3 hover:bg-blue-50 cursor-pointer transition-colors group"
-                          >
-                            <div className="flex justify-between items-center mb-1">
-                              <span className="font-bold text-slate-800 text-sm group-hover:text-blue-700">
-                                {res.name}
-                              </span>
-                              <span className="text-[10px] font-mono font-bold text-slate-400">
-                                {res.code}
-                              </span>
-                            </div>
-                            <div className="text-[11px] text-slate-500 font-mono">
-                              熱: {res.energy_kcal} / 蛋: {res.protein} / 脂:{" "}
-                              {res.fat} / 碳: {res.carbs}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="border-t border-slate-100 pt-4">
-                  <label className="block text-[11px] font-bold text-slate-500 mb-3 uppercase flex items-center gap-2">
-                    法定過敏原 (可複選)
-                    {ingForm.allergen_info.length > 0 && (
-                      <span className="bg-red-100 text-red-600 px-2 py-0.5 rounded-full text-[9px]">
-                        已選 {ingForm.allergen_info.length} 項
-                      </span>
-                    )}
-                  </label>
-                  <div className="flex flex-wrap gap-2">
-                    {ALLERGEN_OPTIONS.map((allergen) => {
-                      const isChecked = ingForm.allergen_info.includes(
-                        allergen.value,
-                      );
-                      return (
-                        <label
-                          key={`ing-${allergen.value}`}
-                          className={`cursor-pointer px-3 py-1.5 rounded-lg border text-[11px] font-bold transition-all shadow-sm ${isChecked ? "bg-red-50 border-red-500 text-red-700" : "bg-white border-slate-200 text-slate-500"}`}
-                        >
-                          <input
-                            type="checkbox"
-                            className="hidden"
-                            checked={isChecked}
-                            onChange={(e) => {
-                              if (e.target.checked)
-                                setIngForm((p) => ({
-                                  ...p,
-                                  allergen_info: [
-                                    ...p.allergen_info,
-                                    allergen.value,
-                                  ],
-                                }));
-                              else
-                                setIngForm((p) => ({
-                                  ...p,
-                                  allergen_info: p.allergen_info.filter(
-                                    (val) => val !== allergen.value,
-                                  ),
-                                }));
-                            }}
-                          />
-                          {allergen.label}
-                        </label>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* 🌟 只有 RAW 物料才能手動輸入八大營養素 */}
-                {formData.type === "RAW" && (
-                  <div className="border-t border-slate-100 pt-4">
-                    <label className="block text-[11px] font-bold text-slate-500 mb-3 uppercase">
-                      營養標示 (每100g)
-                    </label>
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                      {[
-                        { id: "energy_kcal", label: "熱量" },
-                        { id: "protein", label: "蛋白質" },
-                        { id: "fat", label: "脂肪" },
-                        { id: "saturated_fat", label: "飽和脂肪" },
-                        { id: "trans_fat", label: "反式脂肪" },
-                        { id: "carbs", label: "碳水" },
-                        { id: "sugar", label: "糖" },
-                        { id: "sodium", label: "鈉" },
-                      ].map((item) => (
-                        <div key={`ing-nut-${item.id}`}>
-                          <label className="text-[10px] font-bold text-slate-400 mb-1 block">
-                            {item.label}
-                          </label>
-                          <input
-                            type="number"
-                            step="any"
-                            value={ingForm.nutrition_fact[item.id]}
-                            onChange={(e) =>
-                              setIngForm((p) => ({
-                                ...p,
-                                nutrition_fact: {
-                                  ...p.nutrition_fact,
-                                  [item.id]: e.target.value,
-                                },
-                              }))
-                            }
-                            className="w-full px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-bold text-slate-700 focus:bg-white focus:border-blue-400 outline-none transition-all"
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-              <div className="p-5 border-t border-slate-200/60 bg-slate-50 shrink-0 flex justify-end gap-3">
-                <button
-                  type="button"
-                  onClick={() => setIngModalOpen(false)}
-                  className="px-5 py-2.5 text-slate-600 bg-white border border-slate-300 hover:bg-slate-100 text-sm font-bold rounded-xl transition-colors"
-                >
-                  取消
-                </button>
-                <button
-                  type="submit"
-                  className="px-6 py-2.5 text-white bg-amber-500 hover:bg-amber-600 text-sm font-bold rounded-xl shadow-md transition-colors flex items-center gap-2"
-                >
-                  {editingIngId ? "儲存更新" : "建立並加入"}
-                </button>
-              </div>
-            </form>
           </div>
         </div>
       )}

@@ -627,8 +627,12 @@ export default function ProductionOrderEditPage() {
 
     if (hasDuplicateBatch)
       return showAlert("錯誤", "不能重複選擇相同的替換批號", "warning");
-    if (isLessThanOriginal)
-      return showAlert("錯誤", "替換的批號總用量不可少於原本的用量", "warning");
+    if (isNotEqualToOriginal)
+      return showAlert(
+        "錯誤",
+        `替換後的批號總用量 (${cleanFloat(totalNewQty)}) 必須等同於原本批號使用的總用量 (${cleanFloat(oldQty)})`,
+        "warning",
+      );
 
     setReplaceModal((prev) => ({ ...prev, submitting: true }));
     try {
@@ -673,7 +677,8 @@ export default function ProductionOrderEditPage() {
     const val = parseFloat(item.usedQty);
     return sum + (isNaN(val) ? 0 : val);
   }, 0);
-  const isLessThanOriginal = totalNewQty < oldQty - 0.0001;
+  // const isLessThanOriginal = totalNewQty < oldQty - 0.0001;
+  const isNotEqualToOriginal = Math.abs(totalNewQty - oldQty) > 1e-9;
   const hasExceedingStock = replaceModal.items.some((item) => {
     if (!item.batchId || item.usedQty === "") return false;
     const bInfo = replaceModal.batches.find(
@@ -1269,20 +1274,15 @@ export default function ProductionOrderEditPage() {
                     <div className="flex justify-between">
                       <span>替換後總用量：</span>
                       <span
-                        className={`font-mono font-bold ${isLessThanOriginal ? "text-red-600" : "text-blue-600"}`}
+                        className={`font-mono font-bold ${isNotEqualToOriginal ? "text-red-600" : "text-blue-600"}`}
                       >
                         {cleanFloat(totalNewQty)}
                       </span>
                     </div>
-                    {isLessThanOriginal && (
+                    {isNotEqualToOriginal && (
                       <p className="text-red-600 font-bold pt-1">
-                        ⚠️ 警告：替換後的總用量不可少於原本用量 (
+                        ⚠️ 警告：替換後的總用量必須等同於原本用量 (
                         {cleanFloat(oldQty)})！
-                      </p>
-                    )}
-                    {hasDuplicateBatch && (
-                      <p className="text-red-600 font-bold pt-1">
-                        ⚠️ 警告：不可重複選擇相同的替換批號！
                       </p>
                     )}
                   </div>
@@ -1304,7 +1304,7 @@ export default function ProductionOrderEditPage() {
                 disabled={
                   replaceModal.loading ||
                   replaceModal.submitting ||
-                  isLessThanOriginal ||
+                  isNotEqualToOriginal ||
                   hasExceedingStock ||
                   hasDuplicateBatch
                 }

@@ -27,23 +27,51 @@ const formatNum = (num, type) => {
 
 const CustomAdjustmentSelect = ({ value, onChange }) => {
   const [isOpen, setIsOpen] = useState(false);
+  const [coords, setCoords] = useState({ top: 0, left: 0, width: 0 });
   const selectRef = useRef(null);
+  const dropdownRef = useRef(null);
+
+  const handleToggle = () => {
+    if (!isOpen && selectRef.current) {
+      const rect = selectRef.current.getBoundingClientRect();
+      setCoords({
+        top: rect.bottom + 6,
+        left: rect.left,
+        width: rect.width,
+      });
+    }
+    setIsOpen(!isOpen);
+  };
 
   useEffect(() => {
     const handleClickOutside = (e) => {
-      if (selectRef.current && !selectRef.current.contains(e.target)) {
+      if (
+        selectRef.current &&
+        !selectRef.current.contains(e.target) &&
+        dropdownRef.current &&
+        !dropdownRef.current.contains(e.target)
+      ) {
         setIsOpen(false);
       }
     };
+    const handleScrollOrResize = () => {
+      if (isOpen) setIsOpen(false);
+    };
     document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
+    window.addEventListener("scroll", handleScrollOrResize, true);
+    window.addEventListener("resize", handleScrollOrResize);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      window.removeEventListener("scroll", handleScrollOrResize, true);
+      window.removeEventListener("resize", handleScrollOrResize);
+    };
+  }, [isOpen]);
 
   const config = {
     NONE: {
       label: "無調整",
       bg: "bg-slate-50",
-      text: "text-slate-500",
+      text: "text-slate-600",
       border: "border-slate-200",
       hover: "hover:bg-slate-100",
     },
@@ -56,10 +84,10 @@ const CustomAdjustmentSelect = ({ value, onChange }) => {
     },
     LOSS: {
       label: "盤虧",
-      bg: "bg-red-50",
-      text: "text-red-700",
-      border: "border-red-200",
-      hover: "hover:bg-red-100",
+      bg: "bg-rose-50",
+      text: "text-rose-700",
+      border: "border-rose-200",
+      hover: "hover:bg-rose-100",
     },
   };
   const current = config[value] || config.NONE;
@@ -68,33 +96,43 @@ const CustomAdjustmentSelect = ({ value, onChange }) => {
     <div className="relative w-full" ref={selectRef}>
       <button
         type="button"
-        onClick={() => setIsOpen(!isOpen)}
-        className={`w-full h-10 px-3 flex items-center justify-between rounded-lg text-[13px] font-medium transition-colors border focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 outline-none ${current.bg} ${current.text} ${current.border} ${current.hover}`}
+        onClick={handleToggle}
+        className={`w-full h-10 px-3 flex items-center justify-between rounded-xl text-[13px] font-medium transition-colors border focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 outline-none ${current.bg} ${current.text} ${current.border} ${current.hover}`}
       >
-        <span>{current.label}</span>
+        <span className="truncate">{current.label}</span>
         <ChevronDown
           size={14}
           strokeWidth={2}
-          className={`transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`}
+          className={`shrink-0 ml-1 transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`}
         />
       </button>
 
-      {isOpen && (
-        <div className="absolute top-[calc(100%+4px)] left-0 w-full z-[999] bg-white border border-slate-200 rounded-lg shadow-lg overflow-hidden animate-in fade-in zoom-in-95 duration-100">
-          {Object.entries(config).map(([key, { label, text }]) => (
-            <div
-              key={key}
-              onClick={() => {
-                onChange(key);
-                setIsOpen(false);
-              }}
-              className={`px-3 py-2.5 text-center text-[13px] font-medium cursor-pointer transition-colors border-b last:border-b-0 border-slate-50 hover:bg-slate-50 bg-white ${text}`}
-            >
-              {label}
-            </div>
-          ))}
-        </div>
-      )}
+      {isOpen &&
+        createPortal(
+          <div
+            ref={dropdownRef}
+            style={{
+              top: `${coords.top}px`,
+              left: `${coords.left}px`,
+              width: `${coords.width}px`,
+            }}
+            className="fixed z-[99999] bg-white border border-slate-200 rounded-xl shadow-xl overflow-hidden py-1"
+          >
+            {Object.entries(config).map(([key, { label, text }]) => (
+              <div
+                key={key}
+                onClick={() => {
+                  onChange(key);
+                  setIsOpen(false);
+                }}
+                className={`px-3 py-2 text-center text-[13px] font-medium cursor-pointer transition-colors hover:bg-slate-50 bg-white ${text}`}
+              >
+                {label}
+              </div>
+            ))}
+          </div>,
+          document.body,
+        )}
     </div>
   );
 };
@@ -153,11 +191,11 @@ const OverlaySelect = ({
         }`}
       >
         {selectedOpt ? (
-          <div className="flex justify-between items-center w-full pr-3">
-            <span className="font-mono font-medium text-slate-700 text-[14px]">
+          <div className="flex justify-between items-center w-full pr-3 gap-2">
+            <span className="font-mono font-medium text-slate-700 text-[14px] truncate">
               {selectedOpt.batch_number}
             </span>
-            <span className="text-[12px] font-medium text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-100">
+            <span className="text-[12px] font-medium text-blue-600 bg-blue-50 px-2.5 py-0.5 rounded-md border border-blue-100 shrink-0">
               餘: {cleanFloat(selectedOpt.remaining_qty)}
             </span>
           </div>
@@ -182,9 +220,9 @@ const OverlaySelect = ({
               left: `${coords.left}px`,
               width: `${coords.width}px`,
             }}
-            className="fixed z-[99999] bg-white/95 backdrop-blur-xl border border-slate-200 rounded-2xl shadow-2xl flex flex-col max-h-60 overflow-y-auto animate-in fade-in duration-200 custom-scrollbar"
+            className="fixed z-[99999] bg-white/95 backdrop-blur-xl border border-slate-200 rounded-2xl shadow-2xl flex flex-col max-h-60 overflow-y-auto custom-scrollbar"
           >
-            <div className="p-2">
+            <div className="p-2 space-y-1">
               {options.length > 0 ? (
                 options.map((opt) => {
                   const isSelected = String(value) === String(opt.id);
@@ -200,22 +238,22 @@ const OverlaySelect = ({
                           setIsOpen(false);
                         }
                       }}
-                      className={`flex items-center justify-between px-4 py-3 rounded-xl transition-all mb-1 border ${
+                      className={`flex items-center justify-between px-4 py-3 rounded-xl transition-all border ${
                         isDisabled
                           ? "bg-slate-100/60 border-transparent opacity-40 cursor-not-allowed"
                           : isSelected
-                            ? "bg-blue-50/80 border border-blue-100 cursor-pointer"
-                            : "bg-white border border-transparent hover:bg-slate-50 cursor-pointer"
+                            ? "bg-blue-50/80 border-blue-100 cursor-pointer"
+                            : "bg-white border-transparent hover:bg-slate-50 cursor-pointer"
                       }`}
                     >
-                      <div className="flex justify-between items-center w-full pr-3">
+                      <div className="flex justify-between items-center w-full pr-3 gap-2">
                         <span
-                          className={`font-mono text-[14px] ${isSelected ? "font-semibold text-blue-700" : "font-medium text-slate-600"}`}
+                          className={`font-mono text-[14px] truncate ${isSelected ? "font-semibold text-blue-700" : "font-medium text-slate-600"}`}
                         >
                           {opt.batch_number}
                         </span>
                         <span
-                          className={`text-[12px] font-medium px-2 py-0.5 rounded-md border ${isSelected ? "text-blue-600 bg-white border-blue-200" : "text-slate-500 bg-slate-50 border-slate-200"}`}
+                          className={`text-[12px] font-medium px-2.5 py-0.5 rounded-md border shrink-0 ${isSelected ? "text-blue-600 bg-white border-blue-200" : "text-slate-500 bg-slate-50 border-slate-200"}`}
                         >
                           餘: {cleanFloat(opt.remaining_qty)}
                         </span>
@@ -677,7 +715,6 @@ export default function ProductionOrderEditPage() {
     const val = parseFloat(item.usedQty);
     return sum + (isNaN(val) ? 0 : val);
   }, 0);
-  // const isLessThanOriginal = totalNewQty < oldQty - 0.0001;
   const isNotEqualToOriginal = Math.abs(totalNewQty - oldQty) > 1e-9;
   const hasExceedingStock = replaceModal.items.some((item) => {
     if (!item.batchId || item.usedQty === "") return false;
@@ -713,36 +750,38 @@ export default function ProductionOrderEditPage() {
 
   const renderEditableTable = (order, labelTitle, isMain = false) => {
     return (
-      <div key={order.id} className="w-full mb-8">
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden w-full">
-          <div className="p-4 bg-white border-b border-slate-100 flex items-center justify-between">
-            <h3 className="font-bold text-slate-800 text-[15px] flex items-center gap-2">
+      <div key={order.id} className="w-full mb-9">
+        <div className="bg-white rounded-3xl border border-slate-200/80 shadow-sm overflow-hidden w-full">
+          <div className="px-6 py-4 bg-slate-50/70 border-b border-slate-200/70 flex flex-wrap items-center justify-between gap-3">
+            <h3 className="font-bold text-slate-800 text-[15px] flex flex-wrap items-center gap-2.5">
               <span
-                className={`w-2.5 h-2.5 rounded-full ${isMain ? "bg-blue-500" : "bg-purple-500"}`}
+                className={`w-2.5 h-2.5 rounded-full shrink-0 ${isMain ? "bg-blue-500" : "bg-purple-500"}`}
               ></span>
-              <span className="text-slate-500 tracking-wide font-medium">
+              <span className="text-slate-500 tracking-wide font-semibold">
                 {labelTitle}
               </span>
-              <span className="text-slate-800">{order.order_number}</span>
-              <span className="bg-slate-50 border border-slate-200 px-2 py-0.5 rounded-md text-[13px] text-slate-600 ml-2">
+              <span className="font-mono text-slate-900 font-bold">
+                {order.order_number}
+              </span>
+              <span className="bg-white border border-slate-200 px-3 py-1 rounded-lg text-[13px] font-semibold text-slate-700 shadow-2xs">
                 {order.product_profile?.name || order.product_name}
               </span>
             </h3>
           </div>
 
           <div className="overflow-x-auto w-full custom-scrollbar">
-            <table className="w-full text-left border-collapse table-fixed min-w-[1050px]">
-              <thead className="bg-slate-50/50 text-[12px] text-slate-500 font-medium uppercase tracking-wider border-b border-slate-200">
+            <table className="w-full text-left border-collapse table-fixed min-w-[1160px]">
+              <thead className="bg-slate-50/50 text-[12px] text-slate-500 font-semibold tracking-wider border-b border-slate-200">
                 <tr>
-                  <th className="p-4 w-[20%]">原料編號 / 名稱</th>
-                  <th className="p-4 w-[16%]">投入批號</th>
-                  <th className="p-4 w-[8%] text-right">投入包數</th>
-                  <th className="p-4 w-[8%] text-right">空袋數</th>
-                  <th className="p-4 w-[9%] text-right">配方用量</th>
-                  <th className="p-4 w-[9%] text-right">耗損量</th>
-                  <th className="p-4 w-[10%] text-right">實際用量</th>
-                  <th className="p-4 w-[10%] text-center">盤盈虧</th>
-                  <th className="p-4 w-[10%] text-right pr-6">盈虧數</th>
+                  <th className="py-4 px-5 w-[21%]">原料編號 / 名稱</th>
+                  <th className="py-4 px-4 w-[18%]">投入批號</th>
+                  <th className="py-4 px-3 w-[8%] text-right">投入包數</th>
+                  <th className="py-4 px-3 w-[8%] text-right">空袋數</th>
+                  <th className="py-4 px-3 w-[9%] text-right">配方用量</th>
+                  <th className="py-4 px-3 w-[9%] text-right">耗損量</th>
+                  <th className="py-4 px-3 w-[9%] text-right">實際用量</th>
+                  <th className="py-4 px-3 w-[8%] text-center">盤盈虧</th>
+                  <th className="py-4 px-5 w-[9%] text-right">盈虧數</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-[13px]">
@@ -755,16 +794,16 @@ export default function ProductionOrderEditPage() {
                     0,
                   );
 
-                  if (usedBatches.length === 0) {
+                  if (usedBatches.length === 0 && !isMain) {
                     return (
-                      <tr key={mat.code} className="bg-slate-50/30">
-                        <td className="p-4 align-middle">
-                          <div className="font-bold text-slate-700 truncate">
+                      <tr key={mat.code} className="bg-slate-50/40">
+                        <td className="py-4 px-5 align-middle">
+                          <div className="font-semibold text-slate-600 truncate">
                             {mat.materialName}
                           </div>
                         </td>
                         <td
-                          className="p-4 text-center text-red-400 font-medium text-[13px] tracking-wide"
+                          className="py-4 px-5 text-center text-slate-400 font-medium text-[13px]"
                           colSpan="8"
                         >
                           無批號投入紀錄（未指派）
@@ -784,22 +823,22 @@ export default function ProductionOrderEditPage() {
                     return (
                       <tr
                         key={`${mat.code}_${b.id}`}
-                        className="hover:bg-slate-50/50 transition-colors group"
+                        className="hover:bg-slate-50/70 transition-colors group"
                       >
                         {idx === 0 ? (
                           <td
-                            className="p-4 align-middle border-r border-slate-50"
+                            className="py-4 px-5 align-middle border-r border-slate-100/80"
                             rowSpan={usedBatches.length}
                           >
-                            <div className="flex flex-col gap-1 pr-2">
+                            <div className="flex flex-col gap-1.5 pr-2">
                               <span className="font-mono text-[11px] text-slate-400 font-medium tracking-wide">
                                 {mat.code}
                               </span>
-                              <span className="text-slate-800 font-bold leading-tight line-clamp-2">
+                              <span className="text-slate-800 font-bold leading-snug">
                                 {mat.materialName}
                               </span>
                               {mat.remark && (
-                                <span className="mt-1 w-fit px-2 py-0.5 font-mono text-[11px] bg-slate-100 rounded text-slate-500 border border-slate-200 truncate max-w-full font-medium">
+                                <span className="mt-0.5 w-fit px-2 py-0.5 font-mono text-[11px] bg-slate-100 rounded-md text-slate-600 border border-slate-200/80 font-medium">
                                   {mat.remark}
                                 </span>
                               )}
@@ -807,20 +846,21 @@ export default function ProductionOrderEditPage() {
                           </td>
                         ) : null}
 
-                        <td className="p-4 align-middle">
+                        <td className="py-4 px-4 align-middle">
                           <div className="flex flex-col items-start justify-center gap-2">
                             <span
-                              className={`font-mono font-medium text-[13px] px-2 py-1 rounded-md border ${
+                              className={`font-mono font-medium text-[12px] px-2.5 py-1 rounded-lg border break-all ${
                                 mat.type === "SEMI" ||
                                 mat.type === "CHILD_PRODUCT"
-                                  ? "text-purple-700 bg-purple-50 border-purple-200"
-                                  : "text-blue-700 bg-blue-50 border-blue-200"
+                                  ? "text-purple-700 bg-purple-50/90 border-purple-200"
+                                  : "text-blue-700 bg-blue-50/90 border-blue-200"
                               }`}
                             >
                               {b.batch_number}
                             </span>
                             {isConvertible && (
                               <button
+                                type="button"
                                 onClick={() =>
                                   handleOpenReplaceModal(
                                     order.id,
@@ -832,16 +872,16 @@ export default function ProductionOrderEditPage() {
                                     currentTotalAllocated,
                                   )
                                 }
-                                className="flex items-center gap-1.5 px-2.5 py-1 bg-white border border-slate-200 text-slate-400 hover:text-blue-600 hover:border-blue-300 hover:bg-blue-50 rounded-full text-[11px] font-medium tracking-wide transition-all active:scale-95"
+                                className="flex items-center gap-1.5 px-3 py-1 bg-white border border-slate-200 text-slate-500 hover:text-blue-600 hover:border-blue-300 hover:bg-blue-50/60 rounded-full text-[11px] font-medium transition-all active:scale-95 shadow-2xs"
                                 title="替換批號與庫存"
                               >
-                                <RefreshCw size={12} strokeWidth={2} /> 替換
+                                <RefreshCw size={11} strokeWidth={2} /> 替換
                               </button>
                             )}
                           </div>
                         </td>
 
-                        <td className="p-3 align-middle">
+                        <td className="py-4 px-3 align-middle">
                           <input
                             type="text"
                             inputMode="decimal"
@@ -855,12 +895,12 @@ export default function ProductionOrderEditPage() {
                                 e.target.value,
                               )
                             }
-                            className="w-full h-9 px-2 bg-white border border-slate-200 rounded-lg text-right font-mono text-[14px] font-medium text-slate-700 focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10 outline-none transition-all placeholder:text-slate-300 placeholder:font-sans"
+                            className="w-full h-10 px-2.5 bg-white border border-slate-200 rounded-xl text-right font-mono text-[14px] font-medium text-slate-700 focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10 outline-none transition-all placeholder:text-slate-300 placeholder:font-sans"
                             placeholder="0"
                           />
                         </td>
 
-                        <td className="p-3 align-middle">
+                        <td className="py-4 px-3 align-middle">
                           <input
                             type="text"
                             inputMode="decimal"
@@ -874,16 +914,16 @@ export default function ProductionOrderEditPage() {
                                 e.target.value,
                               )
                             }
-                            className="w-full h-9 px-2 bg-white border border-slate-200 rounded-lg text-right font-mono text-[14px] font-medium text-slate-700 focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10 outline-none transition-all placeholder:text-slate-300 placeholder:font-sans"
+                            className="w-full h-10 px-2.5 bg-white border border-slate-200 rounded-xl text-right font-mono text-[14px] font-medium text-slate-700 focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10 outline-none transition-all placeholder:text-slate-300 placeholder:font-sans"
                             placeholder="0"
                           />
                         </td>
 
-                        <td className="p-4 text-right font-mono font-medium text-slate-600 align-middle text-[14px]">
+                        <td className="py-4 px-3 text-right font-mono font-semibold text-slate-700 align-middle text-[14px]">
                           {formatNum(b.used, mat.type)}
                         </td>
 
-                        <td className="p-3 align-middle">
+                        <td className="py-4 px-3 align-middle">
                           <input
                             type="text"
                             inputMode="decimal"
@@ -897,12 +937,12 @@ export default function ProductionOrderEditPage() {
                                 e.target.value,
                               )
                             }
-                            className="w-full h-9 px-2 bg-white border border-slate-200 rounded-lg text-right font-mono text-[14px] text-orange-600 font-medium focus:border-orange-400 focus:ring-2 focus:ring-orange-500/10 outline-none transition-all placeholder:text-slate-300 placeholder:font-sans"
+                            className="w-full h-10 px-2.5 bg-white border border-slate-200 rounded-xl text-right font-mono text-[14px] text-orange-600 font-medium focus:border-orange-400 focus:ring-2 focus:ring-orange-500/10 outline-none transition-all placeholder:text-slate-300 placeholder:font-sans"
                             placeholder="0.0"
                           />
                         </td>
 
-                        <td className="p-3 align-middle">
+                        <td className="py-4 px-3 align-middle">
                           <input
                             type="text"
                             inputMode="decimal"
@@ -916,12 +956,12 @@ export default function ProductionOrderEditPage() {
                                 e.target.value,
                               )
                             }
-                            className="w-full h-9 px-2 bg-white border border-slate-200 rounded-lg text-right font-mono text-[14px] text-blue-600 font-medium focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10 outline-none transition-all placeholder:text-slate-300 placeholder:font-sans"
+                            className="w-full h-10 px-2.5 bg-white border border-slate-200 rounded-xl text-right font-mono text-[14px] text-blue-600 font-medium focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10 outline-none transition-all placeholder:text-slate-300 placeholder:font-sans"
                             placeholder="0.00"
                           />
                         </td>
 
-                        <td className="p-3 align-middle">
+                        <td className="py-4 px-3 align-middle">
                           <CustomAdjustmentSelect
                             value={rowData.adjustment_type || "NONE"}
                             onChange={(val) =>
@@ -936,7 +976,7 @@ export default function ProductionOrderEditPage() {
                           />
                         </td>
 
-                        <td className="p-3 align-middle pr-6">
+                        <td className="py-4 px-5 align-middle">
                           <input
                             type="text"
                             inputMode="decimal"
@@ -955,7 +995,7 @@ export default function ProductionOrderEditPage() {
                                 e.target.value,
                               )
                             }
-                            className={`w-full h-9 px-2 rounded-lg text-right font-mono text-[14px] font-medium focus:outline-none transition-all ${
+                            className={`w-full h-10 px-2.5 rounded-xl text-right font-mono text-[14px] font-medium focus:outline-none transition-all ${
                               rowData.adjustment_type === "NONE"
                                 ? "bg-transparent text-transparent border-transparent"
                                 : "bg-white border border-slate-200 text-slate-700 focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10"
@@ -989,45 +1029,33 @@ export default function ProductionOrderEditPage() {
   }
 
   return (
-    <div className="p-6 md:p-10 max-w-[1400px] mx-auto bg-slate-50 min-h-screen font-sans text-slate-800 w-full relative">
+    <div className="p-6 md:p-10 max-w-[1440px] mx-auto bg-slate-50 min-h-screen font-sans text-slate-800 w-full relative">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
-        <div>
+        <div className="space-y-2">
           <button
+            type="button"
             onClick={() => navigate(-1)}
-            className="flex items-center gap-1.5 text-[13px] font-medium text-slate-400 hover:text-blue-600 transition-colors mb-3 tracking-widest"
+            className="flex items-center gap-1.5 text-[13px] font-medium text-slate-400 hover:text-blue-600 transition-colors tracking-wider"
           >
-            <ArrowLeft size={16} strokeWidth={2} /> 返回列表
+            <ArrowLeft size={15} strokeWidth={2} /> 返回列表
           </button>
-          <h2 className="text-2xl font-bold text-slate-800 tracking-tight flex items-center gap-3">
-            生產單編輯
-            <span className="text-sm px-3 py-1 bg-white border border-slate-200 text-slate-600 rounded-lg font-mono font-medium shadow-sm">
+          <h2 className="text-2xl font-bold text-slate-800 tracking-tight flex flex-wrap items-center gap-3">
+            <span>生產單編輯</span>
+            <span className="text-sm px-3 py-1 bg-white border border-slate-200 text-slate-600 rounded-xl font-mono font-semibold shadow-2xs">
               單號: {mainOrder?.order_number}
             </span>
           </h2>
         </div>
-
-        <button
-          onClick={handleSaveClick}
-          disabled={submitting}
-          className="w-full md:w-auto px-6 py-2.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all font-medium text-[14px] shadow-sm flex items-center justify-center gap-2 disabled:bg-blue-300 disabled:shadow-none hover:-translate-y-0.5"
-        >
-          {submitting ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
-          ) : (
-            <Save className="w-4 h-4" strokeWidth={2} />
-          )}
-          儲存變更
-        </button>
       </div>
 
-      {/* 🌟 新增：生產完工狀態與實際產量回填表單區塊 */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 mb-8 w-full">
-        <h3 className="font-extrabold text-slate-800 text-[16px] mb-4 flex items-center gap-2">
+      {/* 🌟 生產完工狀態與實際產量回填表單區塊 */}
+      <div className="bg-white rounded-3xl border border-slate-200/80 shadow-sm p-6 md:p-7 mb-9 w-full">
+        <h3 className="font-bold text-slate-800 text-[15px] mb-5 flex items-center gap-2.5">
           <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
           生產完工與實際產量回填
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div className="flex items-center gap-3 bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl">
+          <div className="flex items-center gap-3 bg-slate-50/80 border border-slate-200/80 px-4 py-3 rounded-xl">
             <input
               type="checkbox"
               id="is_completed"
@@ -1042,14 +1070,14 @@ export default function ProductionOrderEditPage() {
             />
             <label
               htmlFor="is_completed"
-              className="text-sm font-bold text-slate-700 cursor-pointer select-none"
+              className="text-sm font-semibold text-slate-700 cursor-pointer select-none"
             >
               標記為「製造完成」
             </label>
           </div>
 
           <div>
-            <label className="block text-xs font-bold text-slate-500 mb-1.5 ml-1">
+            <label className="block text-xs font-semibold text-slate-500 mb-1.5 ml-1">
               完工日期
             </label>
             <input
@@ -1061,12 +1089,12 @@ export default function ProductionOrderEditPage() {
                   completed_date: e.target.value,
                 }))
               }
-              className="w-full h-11 px-4 bg-white border border-slate-200 rounded-xl text-sm font-bold text-slate-700 focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10 outline-none"
+              className="w-full h-11 px-4 bg-white border border-slate-200 rounded-xl text-sm font-medium text-slate-700 focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10 outline-none"
             />
           </div>
 
           <div>
-            <label className="block text-xs font-bold text-slate-500 mb-1.5 ml-1">
+            <label className="block text-xs font-semibold text-slate-500 mb-1.5 ml-1">
               最終實際產量 (KG)
             </label>
             <input
@@ -1079,19 +1107,20 @@ export default function ProductionOrderEditPage() {
                   actual_qty: e.target.value,
                 }))
               }
-              placeholder="請輸入實際產量."
-              className="w-full h-11 px-4 bg-white border border-slate-200 rounded-xl font-mono text-sm font-bold text-blue-700 focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10 outline-none"
+              placeholder="請輸入實際產量"
+              className="w-full h-11 px-4 bg-white border border-slate-200 rounded-xl font-mono text-sm font-semibold text-blue-700 focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10 outline-none placeholder:font-sans placeholder:font-normal placeholder:text-slate-400"
             />
           </div>
         </div>
       </div>
+
       {mainOrder && renderEditableTable(mainOrder, "【主母單】", true)}
 
       {childrenOrders.length > 0 && (
-        <div className="mt-12 w-full animate-in fade-in slide-in-from-bottom-4 duration-500">
-          <div className="flex items-center gap-4 mb-6">
+        <div className="mt-12 w-full">
+          <div className="flex items-center gap-4 mb-7">
             <div className="h-px bg-slate-200 flex-1"></div>
-            <span className="text-slate-400 text-[12px] font-bold tracking-[0.2em] uppercase bg-white px-4 py-1.5 rounded-full border border-slate-200 shadow-sm">
+            <span className="text-slate-500 text-[12px] font-semibold tracking-widest uppercase bg-white px-4 py-1.5 rounded-full border border-slate-200 shadow-2xs">
               關聯子生產單物料細節
             </span>
             <div className="h-px bg-slate-200 flex-1"></div>
@@ -1101,11 +1130,26 @@ export default function ProductionOrderEditPage() {
           )}
         </div>
       )}
+      <div className="w-full flex justify-end">
+        <button
+          type="button"
+          onClick={handleSaveClick}
+          disabled={submitting}
+          className="md:w-auto px-6 py-2.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all font-medium text-[14px] shadow-sm flex items-center justify-center gap-2 disabled:bg-blue-300 disabled:shadow-none"
+        >
+          {submitting ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : (
+            <Save className="w-4 h-4" strokeWidth={2} />
+          )}
+          儲存變更
+        </button>
+      </div>
 
       {/* 🌟 批號替換 Modal */}
       {replaceModal.isOpen && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
-          <div className="bg-white rounded-3xl shadow-[0_10px_40px_-10px_rgba(0,0,0,0.2)] w-full max-w-[420px] flex flex-col relative animate-in fade-in zoom-in-95 duration-200">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-[440px] flex flex-col relative border border-slate-100">
             <div className="px-6 py-5 border-b border-slate-100 flex justify-between items-center rounded-t-3xl bg-white relative z-20">
               <h3 className="text-[17px] font-bold text-slate-800 flex items-center gap-2.5 tracking-tight">
                 <RefreshCw
@@ -1116,6 +1160,7 @@ export default function ProductionOrderEditPage() {
                 替換物料批號
               </h3>
               <button
+                type="button"
                 onClick={() =>
                   setReplaceModal((prev) => ({ ...prev, isOpen: false }))
                 }
@@ -1125,7 +1170,6 @@ export default function ProductionOrderEditPage() {
               </button>
             </div>
 
-            {/* 🌟 加上 pb-64 確保下拉式選單展開時不會被 Footer 或是卡片底部切掉 */}
             <div className="p-6 space-y-6 relative z-10 bg-white max-h-[65vh] overflow-y-auto overflow-x-visible pb-64 custom-scrollbar">
               {replaceModal.loading ? (
                 <div className="flex flex-col justify-center items-center py-8 text-slate-400 font-medium gap-3">
@@ -1134,30 +1178,30 @@ export default function ProductionOrderEditPage() {
                 </div>
               ) : (
                 <>
-                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 text-[13px] space-y-2.5">
-                    <div className="flex justify-between items-center">
-                      <span className="text-slate-500 font-medium">
+                  <div className="bg-slate-50/90 p-4 rounded-2xl border border-slate-200/70 text-[13px] space-y-3">
+                    <div className="flex justify-between items-center gap-3">
+                      <span className="text-slate-500 font-medium shrink-0">
                         替換物料
                       </span>
-                      <span className="text-slate-800 font-bold max-w-[200px] truncate text-right">
+                      <span className="text-slate-800 font-bold truncate text-right">
                         <span className="text-slate-400 font-mono mr-1.5 text-[12px]">
                           [{replaceModal.materialCode}]
                         </span>
                         {replaceModal.materialName}
                       </span>
                     </div>
-                    <div className="w-full h-px bg-slate-200/50"></div>
-                    <div className="flex justify-between items-center">
+                    <div className="w-full h-px bg-slate-200/60"></div>
+                    <div className="flex justify-between items-center gap-3">
                       <span className="text-slate-500 font-medium">
                         目前批號
                       </span>
-                      <span className="text-slate-700 font-mono font-medium bg-white px-2 py-0.5 rounded border border-slate-200 shadow-sm text-[13px]">
+                      <span className="text-slate-700 font-mono font-medium bg-white px-2.5 py-0.5 rounded-lg border border-slate-200 shadow-2xs text-[13px]">
                         {replaceModal.oldBatchNumber}
                       </span>
                     </div>
-                    <div className="flex justify-between items-center">
+                    <div className="flex justify-between items-center gap-3">
                       <span className="text-slate-500 font-medium">
-                        原本用量 (最低門檻)
+                        原本用量
                       </span>
                       <span className="text-blue-600 font-mono font-bold text-[14px]">
                         {cleanFloat(replaceModal.oldUsedQty)}
@@ -1174,7 +1218,7 @@ export default function ProductionOrderEditPage() {
                       <button
                         type="button"
                         onClick={handleAddReplaceItem}
-                        className="text-xs font-bold text-blue-600 hover:text-blue-700 bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-100 transition-colors flex items-center gap-1"
+                        className="text-xs font-semibold text-blue-600 hover:text-blue-700 bg-blue-50 px-3 py-1 rounded-lg border border-blue-100 transition-colors"
                       >
                         + 增加一筆批號
                       </button>
@@ -1198,19 +1242,19 @@ export default function ProductionOrderEditPage() {
                       return (
                         <div
                           key={item.id}
-                          className="p-4 bg-slate-50/70 border border-slate-200 rounded-2xl space-y-3 relative"
+                          className="p-4 bg-slate-50/80 border border-slate-200/80 rounded-2xl space-y-3.5 relative"
                         >
                           {replaceModal.items.length > 1 && (
                             <button
                               type="button"
                               onClick={() => handleRemoveReplaceItem(item.id)}
-                              className="absolute top-3 right-3 text-slate-400 hover:text-red-500 text-sm font-bold"
+                              className="absolute top-3 right-3 text-slate-400 hover:text-rose-500 text-sm font-bold"
                             >
                               ×
                             </button>
                           )}
                           <div>
-                            <span className="text-[11px] font-bold text-slate-400 block mb-1">
+                            <span className="text-[11px] font-semibold text-slate-500 block mb-1.5">
                               新批號 #{index + 1}
                             </span>
                             <OverlaySelect
@@ -1228,12 +1272,12 @@ export default function ProductionOrderEditPage() {
                             />
                           </div>
                           <div>
-                            <div className="flex justify-between items-center mb-1">
-                              <span className="text-[11px] font-bold text-slate-400">
+                            <div className="flex justify-between items-center mb-1.5">
+                              <span className="text-[11px] font-semibold text-slate-500">
                                 使用量
                               </span>
                               {selectedB && (
-                                <span className="text-[10px] text-blue-600 font-mono">
+                                <span className="text-[11px] text-blue-600 font-mono">
                                   庫存上限: {cleanFloat(maxQ)}
                                 </span>
                               )}
@@ -1250,11 +1294,11 @@ export default function ProductionOrderEditPage() {
                                 )
                               }
                               placeholder="0"
-                              className="w-full h-10 px-3 bg-white border border-slate-200 rounded-xl font-mono text-sm focus:outline-none focus:border-blue-400"
+                              className="w-full h-10 px-3.5 bg-white border border-slate-200 rounded-xl font-mono text-sm focus:outline-none focus:border-blue-400"
                             />
                           </div>
                           {isItemExceed && (
-                            <p className="text-[11px] text-red-600 font-medium">
+                            <p className="text-[11px] text-rose-600 font-medium">
                               ⚠️ 輸入用量超過該批號剩餘庫存
                             </p>
                           )}
@@ -1263,8 +1307,7 @@ export default function ProductionOrderEditPage() {
                     })}
                   </div>
 
-                  {/* 🌟 總結驗算提示 (使用 cleanFloat 消除浮點數誤差) */}
-                  <div className="bg-blue-50/50 border border-blue-100 rounded-xl p-3 text-xs space-y-1 font-medium text-slate-600">
+                  <div className="bg-blue-50/60 border border-blue-100 rounded-2xl p-4 text-xs space-y-2 font-medium text-slate-600">
                     <div className="flex justify-between">
                       <span>原本用量：</span>
                       <span className="font-mono font-bold text-slate-800">
@@ -1274,15 +1317,20 @@ export default function ProductionOrderEditPage() {
                     <div className="flex justify-between">
                       <span>替換後總用量：</span>
                       <span
-                        className={`font-mono font-bold ${isNotEqualToOriginal ? "text-red-600" : "text-blue-600"}`}
+                        className={`font-mono font-bold ${isNotEqualToOriginal ? "text-rose-600" : "text-blue-600"}`}
                       >
                         {cleanFloat(totalNewQty)}
                       </span>
                     </div>
                     {isNotEqualToOriginal && (
-                      <p className="text-red-600 font-bold pt-1">
-                        ⚠️ 警告：替換後的總用量必須等同於原本用量 (
+                      <p className="text-rose-600 font-semibold pt-1">
+                        ⚠️ 替換後的總用量必須等同於原本用量 (
                         {cleanFloat(oldQty)})！
+                      </p>
+                    )}
+                    {hasDuplicateBatch && (
+                      <p className="text-rose-600 font-semibold pt-1">
+                        ⚠️ 不可重複選擇相同的替換批號！
                       </p>
                     )}
                   </div>
@@ -1292,14 +1340,16 @@ export default function ProductionOrderEditPage() {
 
             <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex justify-end gap-3 rounded-b-3xl relative z-0">
               <button
+                type="button"
                 onClick={() =>
                   setReplaceModal((prev) => ({ ...prev, isOpen: false }))
                 }
-                className="px-5 py-2 text-[13px] font-medium text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg transition-colors shadow-sm"
+                className="px-5 py-2 text-[13px] font-medium text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 rounded-xl transition-colors shadow-2xs"
               >
                 取消
               </button>
               <button
+                type="button"
                 onClick={executeReplaceBatch}
                 disabled={
                   replaceModal.loading ||
@@ -1308,7 +1358,7 @@ export default function ProductionOrderEditPage() {
                   hasExceedingStock ||
                   hasDuplicateBatch
                 }
-                className="px-5 py-2 text-[13px] font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm flex items-center gap-2 disabled:opacity-50 disabled:shadow-none transition-all active:scale-95"
+                className="px-5 py-2 text-[13px] font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-sm flex items-center gap-2 disabled:opacity-50 disabled:shadow-none transition-all active:scale-95"
               >
                 {replaceModal.submitting && (
                   <Loader2 className="w-4 h-4 animate-spin" />

@@ -6,7 +6,6 @@ import {
   Trash2,
   ChevronLeft,
   ChevronRight,
-  DownloadCloud,
   Printer,
   FileText,
   PackagePlus,
@@ -1008,12 +1007,14 @@ const RequisitionNode = ({
           </div>
           <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
             <button
+              type="button"
               onClick={() => onPrint(req, "PR")}
               className="px-3 py-2 text-slate-600 border border-slate-200 bg-white rounded-xl hover:bg-slate-50 transition-colors text-xs font-bold shadow-sm inline-flex items-center gap-1.5"
             >
               <FileText size={14} /> 內部請購單
             </button>
             <button
+              type="button"
               onClick={() => onPrint(req, "PO")}
               className="px-3 py-2 text-indigo-600 border border-indigo-200 bg-indigo-50 rounded-xl hover:bg-indigo-100 transition-colors text-xs font-bold shadow-sm inline-flex items-center gap-1.5"
             >
@@ -1022,6 +1023,7 @@ const RequisitionNode = ({
 
             {isStocked && (
               <button
+                type="button"
                 onClick={() => onPrint(req, "RECEIVING")}
                 className="px-3 py-2 text-emerald-700 border border-emerald-200 bg-emerald-50 rounded-xl hover:bg-emerald-100 transition-colors text-xs font-bold shadow-sm inline-flex items-center gap-1.5"
               >
@@ -1030,12 +1032,14 @@ const RequisitionNode = ({
             )}
 
             <button
+              type="button"
               onClick={() => onEdit(req)}
               className="px-4 py-2 bg-blue-50 text-blue-700 border border-blue-100 rounded-xl hover:bg-blue-100 transition-colors text-xs font-bold shadow-sm ml-2"
             >
               {isStocked ? "檢視內容" : "編輯"}
             </button>
             <button
+              type="button"
               onClick={() => onDelete(req.id)}
               className="px-4 py-2 bg-red-50 text-red-600 border border-red-100 rounded-xl hover:bg-red-100 transition-colors text-xs font-bold shadow-sm"
             >
@@ -1060,10 +1064,16 @@ const RequisitionNode = ({
                   >
                     <div className="p-5 border-b border-slate-100 flex justify-between items-start gap-3 bg-white">
                       <div className="flex flex-col">
-                        <span className="font-bold text-slate-900 text-lg leading-tight tracking-tight">
-                          {item.material_name}
-                        </span>
-                        {/* 🌟 提醒標籤：該請購品項尚未收貨完畢 */}
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-bold text-slate-900 text-lg leading-tight tracking-tight">
+                            {item.material_name}
+                          </span>
+                          {item.is_done && (
+                            <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                              已完成銷貨紀錄
+                            </span>
+                          )}
+                        </div>
                         {isNotFullyReceived && (
                           <div className="mt-2 inline-flex items-center gap-1.5 bg-amber-50 text-amber-800 border border-amber-300 px-2.5 py-1 rounded-lg text-xs font-bold shadow-2xs w-fit">
                             <AlertCircle
@@ -1075,7 +1085,6 @@ const RequisitionNode = ({
                         )}
                       </div>
 
-                      {/* 🌟 快速建立收貨批號按鈕 */}
                       <button
                         type="button"
                         onClick={() => onOpenBatchModal(item, req)}
@@ -1105,7 +1114,6 @@ const RequisitionNode = ({
                           </span>
                         </div>
 
-                        {/* 分批入庫批號列表 */}
                         {batches.length > 0 && (
                           <div className="p-3.5 bg-emerald-50/70 border border-emerald-200/70 rounded-xl shadow-2xs space-y-2">
                             <div className="flex items-center justify-between">
@@ -1212,8 +1220,8 @@ export default function PurchaseRequisitionPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
+  const [startDate] = useState("");
+  const [endDate] = useState("");
   const [searchMaterial, setSearchMaterial] = useState("");
   const [filterStatus, setFilterStatus] = useState("ALL");
   const [currentPage, setCurrentPage] = useState(1);
@@ -1229,6 +1237,7 @@ export default function PurchaseRequisitionPage() {
     status: "WAITING",
     items: [],
     invoices_payload: [],
+    removed_invoice_ids: [],
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -1392,17 +1401,114 @@ export default function PurchaseRequisitionPage() {
     );
   };
 
+  const buildInvoiceDisplayItems = (reqItems, savedInvoiceItems = []) => {
+    const reqItemById = new Map(reqItems.map((it) => [String(it.id), it]));
+    const reqItemByName = new Map(
+      reqItems
+        .filter((it) => it.material_name)
+        .map((it) => [it.material_name, it]),
+    );
+
+    const matchedSavedByPrItemId = new Map();
+    const matchedSavedByName = new Map();
+
+    (savedInvoiceItems || []).forEach((s) => {
+      if (s.pr_item !== null && s.pr_item !== undefined) {
+        matchedSavedByPrItemId.set(String(s.pr_item), s);
+      } else if (s.item_name) {
+        matchedSavedByName.set(s.item_name, s);
+      }
+    });
+
+    const fromCurrentReq = reqItems
+      .map((it) => {
+        const kgQty = parseFloat(it.quantity) || 0;
+        const unitPrice = parseFloat(it.purchased_price) || 0;
+        const saved =
+          matchedSavedByPrItemId.get(String(it.id)) ||
+          matchedSavedByName.get(it.material_name);
+        const isDone = Boolean(it.is_done);
+
+        // 已經在其他發票完成（is_done）但不屬於這張發票的品項，不顯示在這張發票中
+        if (isDone && !saved) {
+          return null;
+        }
+
+        const isAttachedToThisInvoice = Boolean(saved);
+        const effectiveQty = saved
+          ? parseFloat(saved.quantity) || kgQty
+          : kgQty;
+        const effectivePrice = saved
+          ? parseFloat(saved.unit_price) || unitPrice
+          : unitPrice;
+
+        return {
+          id: saved?.id ?? null,
+          pr_item_id: it.id ?? null,
+          item_name: it.material_name,
+          quantity: effectiveQty,
+          unit: it.unit || "KG",
+          package_qty: it.package_qty || "",
+          aux_unit: it.aux_unit || "",
+          unit_price: effectivePrice,
+          subtotal: effectiveQty * effectivePrice,
+          remark: saved?.remark || it.remark || "",
+          is_active: true,
+          _checked: isAttachedToThisInvoice,
+          _readonly: isAttachedToThisInvoice,
+          _isDone: isDone,
+        };
+      })
+      .filter(Boolean);
+
+    const matchedSavedIds = new Set(
+      fromCurrentReq.map((x) => x.id).filter(Boolean),
+    );
+    const extraSavedItems = (savedInvoiceItems || [])
+      .filter((s) => {
+        if (s.id && matchedSavedIds.has(s.id)) return false;
+        if (s.pr_item && reqItemById.has(String(s.pr_item))) return false;
+        if (s.item_name && reqItemByName.has(s.item_name)) return false;
+        return true;
+      })
+      .map((s) => {
+        const q = parseFloat(s.quantity) || 0;
+        const p = parseFloat(s.unit_price) || 0;
+        return {
+          ...s,
+          pr_item_id: s.pr_item ?? null,
+          quantity: q,
+          unit_price: p,
+          subtotal: q * p,
+          _checked: true,
+          _readonly: true,
+          _isDone: true,
+        };
+      });
+
+    return [...fromCurrentReq, ...extraSavedItems];
+  };
+
   const openModal = (requisition = null) => {
     if (requisition) {
+      const reqItems = Array.isArray(requisition.items)
+        ? requisition.items
+        : [];
+      const mappedInvoices = Array.isArray(requisition.invoices)
+        ? JSON.parse(JSON.stringify(requisition.invoices)).map((inv) => ({
+            ...inv,
+            items: buildInvoiceDisplayItems(reqItems, inv.items || []),
+          }))
+        : [];
+
       setEditingRequisition(requisition);
       setFormData({
         request_date: requisition.request_date || "",
         applicant: requisition.applicant || "",
         status: (requisition.status || "WAITING").toUpperCase(),
-        items: JSON.parse(JSON.stringify(requisition.items)),
-        invoices_payload: requisition.invoices
-          ? JSON.parse(JSON.stringify(requisition.invoices))
-          : [],
+        items: JSON.parse(JSON.stringify(reqItems)),
+        invoices_payload: mappedInvoices,
+        removed_invoice_ids: [],
       });
     } else {
       const today = new Date().toISOString().split("T")[0];
@@ -1413,6 +1519,7 @@ export default function PurchaseRequisitionPage() {
         status: "WAITING",
         items: [],
         invoices_payload: [],
+        removed_invoice_ids: [],
       });
     }
     setIsModalOpen(true);
@@ -1423,6 +1530,41 @@ export default function PurchaseRequisitionPage() {
     setEditingRequisition(null);
   };
 
+  const handleRemoveInvoice = (invIdx) => {
+    setFormData((prev) => {
+      const targetInv = (prev.invoices_payload || [])[invIdx];
+      const nextRemovedIds =
+        targetInv && targetInv.id
+          ? Array.from(
+              new Set([...(prev.removed_invoice_ids || []), targetInv.id]),
+            )
+          : prev.removed_invoice_ids || [];
+
+      const removedPrItemIds = new Set();
+      const removedItemNames = new Set();
+      (targetInv?.items || []).forEach((fItem) => {
+        if (fItem.pr_item_id) removedPrItemIds.add(String(fItem.pr_item_id));
+        if (fItem.item_name) removedItemNames.add(fItem.item_name);
+      });
+
+      const updatedItems = (prev.items || []).map((it) => {
+        const isMatched =
+          (it.id && removedPrItemIds.has(String(it.id))) ||
+          (it.material_name && removedItemNames.has(it.material_name));
+        return isMatched ? { ...it, is_done: false } : it;
+      });
+
+      return {
+        ...prev,
+        items: updatedItems,
+        invoices_payload: (prev.invoices_payload || []).filter(
+          (_, i) => i !== invIdx,
+        ),
+        removed_invoice_ids: nextRemovedIds,
+      };
+    });
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!formData.applicant || !formData.request_date)
@@ -1430,15 +1572,48 @@ export default function PurchaseRequisitionPage() {
     if (formData.items.length === 0)
       return showAlert("資料不完整", "請至少新增一筆請購明細", "warning");
     setIsSubmitting(true);
+
+    const checkedPrItemIds = new Set();
+    const checkedItemNames = new Set();
+
+    (formData.invoices_payload || []).forEach((inv) => {
+      (inv.items || []).forEach((fItem) => {
+        if (fItem._checked !== false) {
+          if (fItem.pr_item_id) checkedPrItemIds.add(String(fItem.pr_item_id));
+          if (fItem.item_name) checkedItemNames.add(fItem.item_name);
+        }
+      });
+    });
+
     const payload = {
       ...formData,
       status: formData.status.toLowerCase(),
       items: formData.items.map((item) => ({
         ...item,
+        is_done:
+          Boolean(item.is_done) ||
+          (item.id && checkedPrItemIds.has(String(item.id))) ||
+          checkedItemNames.has(item.material_name),
         expected_delivery_date: item.expected_delivery_date || null,
       })),
-      invoices_payload: formData.invoices_payload || [],
+      invoices_payload: (formData.invoices_payload || []).map((inv) => ({
+        ...inv,
+        items: (inv.items || [])
+          .filter((fItem) => fItem._checked !== false)
+          .map(
+            ({
+              _checked,
+              _readonly,
+              _isDone,
+              package_qty,
+              aux_unit,
+              ...rest
+            }) => rest,
+          ),
+      })),
+      removed_invoice_ids: formData.removed_invoice_ids || [],
     };
+
     const url = editingRequisition
       ? `/api/purchase_requisitions/${editingRequisition.id}`
       : "/api/purchase_requisitions";
@@ -1466,13 +1641,13 @@ export default function PurchaseRequisitionPage() {
   // 🌟 開啟分批收貨建立批號 Modal
   const handleOpenBatchModal = (item) => {
     setBatchModalItem(item);
-    const remainingNeeded = Math.max(
+    const remainingKg = Math.max(
       0,
       parseFloat(item.quantity || 0) - parseFloat(item.total_received_qty || 0),
     );
     setBatchModalData({
       batch_number: "",
-      original_qty: remainingNeeded > 0 ? remainingNeeded.toString() : "",
+      original_qty: remainingKg > 0 ? remainingKg.toString() : "",
       received_date: new Date().toISOString().split("T")[0],
       expiration_date: new Date().toISOString().split("T")[0],
       note: "",
@@ -1547,6 +1722,7 @@ export default function PurchaseRequisitionPage() {
           purchased_price: "",
           expected_delivery_date: null,
           remark: "",
+          is_done: false,
           suggestions: null,
         },
       ],
@@ -1560,51 +1736,33 @@ export default function PurchaseRequisitionPage() {
     }));
 
   const fetchPriceSuggestions = async (index, material_id, provider_id) => {
-    if (!material_id || !provider_id) return;
+    if (!material_id) return;
     try {
+      const params = new URLSearchParams({ material_id });
+      if (provider_id) params.append("provider_id", provider_id);
+
       const res = await fetchWithAuth(
-        `/api/purchase_requisitions/prev_purchase_price?material_id=${material_id}&provider_id=${provider_id}`,
+        `/api/purchase_requisitions/prev_purchase_price?${params.toString()}`,
       );
       if (res.ok) {
         const json = await res.json();
-        const suggestionData = json.data || json;
-        setFormData((prev) => {
-          const newItems = [...prev.items];
-          newItems[index].suggestions = suggestionData;
-          if (suggestionData.from_provider?.current_stock !== undefined) {
-            newItems[index].current_stock =
-              suggestionData.from_provider.current_stock;
-          } else if (
-            suggestionData.from_historical_pr?.current_stock !== undefined
-          ) {
-            newItems[index].current_stock =
-              suggestionData.from_historical_pr.current_stock;
-          }
-          return { ...prev, items: newItems };
-        });
+        const latestPrice = json?.data?.latest_price;
+
+        if (latestPrice !== null && latestPrice !== undefined) {
+          setFormData((prev) => {
+            const newItems = [...prev.items];
+            if (!newItems[index]) return prev;
+            newItems[index] = {
+              ...newItems[index],
+              purchased_price: latestPrice,
+            };
+            return { ...prev, items: newItems };
+          });
+        }
       }
     } catch (error) {
       console.error(error);
     }
-  };
-
-  const applySuggestion = (index, suggestionData) => {
-    if (!suggestionData) return;
-    setFormData((prev) => {
-      const newItems = [...prev.items];
-      const item = newItems[index];
-      item.purchased_price =
-        suggestionData.latest_price !== null
-          ? formatDisplayNum(suggestionData.latest_price)
-          : "";
-      item.in_stock_spec = suggestionData.latest_spec ?? "";
-      item.aux_quantity =
-        suggestionData.latest_aux_quantity !== null
-          ? formatDisplayNum(suggestionData.latest_aux_quantity)
-          : "";
-      item.aux_unit = suggestionData.latest_aux_unit ?? "";
-      return { ...prev, items: newItems };
-    });
   };
 
   const handleItemChange = (index, field, value) => {
@@ -1710,6 +1868,7 @@ export default function PurchaseRequisitionPage() {
               </select>
               {(searchMaterial || filterStatus !== "ALL") && (
                 <button
+                  type="button"
                   onClick={() => {
                     setSearchMaterial("");
                     setFilterStatus("ALL");
@@ -1721,6 +1880,7 @@ export default function PurchaseRequisitionPage() {
               )}
             </div>
             <button
+              type="button"
               onClick={() => openModal()}
               className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-xl shadow-[0_4px_12px_rgba(37,99,235,0.2)] transition-all duration-200 text-sm font-bold w-full md:w-auto hover:shadow-[0_6px_16px_rgba(37,99,235,0.3)] hover:-translate-y-0.5"
             >
@@ -1769,6 +1929,7 @@ export default function PurchaseRequisitionPage() {
               </div>
               <div className="flex items-center gap-3">
                 <button
+                  type="button"
                   onClick={() =>
                     setCurrentPage((prev) => Math.max(prev - 1, 1))
                   }
@@ -1781,6 +1942,7 @@ export default function PurchaseRequisitionPage() {
                   {currentPage} / {totalPages}
                 </span>
                 <button
+                  type="button"
                   onClick={() =>
                     setCurrentPage((prev) => Math.min(prev + 1, totalPages))
                   }
@@ -1803,6 +1965,7 @@ export default function PurchaseRequisitionPage() {
                   登錄收貨批號 ({batchModalItem.material_name})
                 </h3>
                 <button
+                  type="button"
                   onClick={() => setIsBatchModalOpen(false)}
                   className="text-slate-400 hover:text-slate-600 font-bold text-xl"
                 >
@@ -1940,6 +2103,7 @@ export default function PurchaseRequisitionPage() {
                     : "新增請購單"}
                 </h3>
                 <button
+                  type="button"
                   onClick={closeModal}
                   className="w-10 h-10 flex items-center justify-center rounded-full bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-800 transition-colors font-bold text-xl"
                 >
@@ -2003,7 +2167,7 @@ export default function PurchaseRequisitionPage() {
                     </div>
                   </div>
 
-                  {/* 🌟 彈性登打進貨發票資訊區塊（發票號碼、期號、textarea細節） */}
+                  {/* 🌟 彈性登打進貨發票資訊區塊 */}
                   <div className="mb-8 bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
                     <div className="flex justify-between items-center mb-4 pb-2 border-b border-slate-100">
                       <h4 className="text-xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
@@ -2012,6 +2176,71 @@ export default function PurchaseRequisitionPage() {
                       <button
                         type="button"
                         onClick={() => {
+                          // 排除已 is_done 以及已經在其他發票卡片被勾選的品項
+                          const alreadyAssignedIds = new Set();
+                          const alreadyAssignedNames = new Set();
+                          (formData.invoices_payload || []).forEach((inv) => {
+                            (inv.items || []).forEach((fItem) => {
+                              if (fItem._checked !== false) {
+                                if (fItem.pr_item_id) {
+                                  alreadyAssignedIds.add(
+                                    String(fItem.pr_item_id),
+                                  );
+                                }
+                                if (fItem.item_name) {
+                                  alreadyAssignedNames.add(fItem.item_name);
+                                }
+                              }
+                            });
+                          });
+
+                          const availableItems = (formData.items || []).filter(
+                            (it) => {
+                              if (it.is_done) return false;
+                              if (
+                                it.id &&
+                                alreadyAssignedIds.has(String(it.id))
+                              ) {
+                                return false;
+                              }
+                              if (
+                                it.material_name &&
+                                alreadyAssignedNames.has(it.material_name)
+                              ) {
+                                return false;
+                              }
+                              return true;
+                            },
+                          );
+
+                          const defaultItems = availableItems.map((it, idx) => {
+                            const kgQty = parseFloat(it.quantity) || 0;
+                            const unitPrice =
+                              parseFloat(it.purchased_price) || 0;
+                            const subtotal = kgQty * unitPrice;
+
+                            return {
+                              pr_item_id: it.id ?? null,
+                              item_name: it.material_name || `品項 ${idx + 1}`,
+                              quantity: kgQty,
+                              unit: it.unit || "KG",
+                              package_qty: it.package_qty || "",
+                              aux_unit: it.aux_unit || "",
+                              unit_price: unitPrice,
+                              subtotal,
+                              remark: it.remark || "",
+                              is_active: true,
+                              _checked: true,
+                              _readonly: false,
+                              _isDone: false,
+                            };
+                          });
+
+                          const defaultTotal = defaultItems.reduce(
+                            (sum, x) => sum + (parseFloat(x.subtotal) || 0),
+                            0,
+                          );
+
                           setFormData((prev) => ({
                             ...prev,
                             invoices_payload: [
@@ -2020,9 +2249,13 @@ export default function PurchaseRequisitionPage() {
                                 invoice_number: "",
                                 period: "",
                                 note: "",
+                                total_amount: defaultTotal
+                                  ? String(defaultTotal)
+                                  : "0",
                                 invoice_date: new Date()
                                   .toISOString()
                                   .split("T")[0],
+                                items: defaultItems,
                               },
                             ],
                           }));
@@ -2045,21 +2278,13 @@ export default function PurchaseRequisitionPage() {
                             </span>
                             <button
                               type="button"
-                              onClick={() => {
-                                setFormData((prev) => ({
-                                  ...prev,
-                                  invoices_payload:
-                                    prev.invoices_payload.filter(
-                                      (_, i) => i !== invIdx,
-                                    ),
-                                }));
-                              }}
+                              onClick={() => handleRemoveInvoice(invIdx)}
                               className="text-red-500 hover:text-red-700 text-xs font-bold"
                             >
                               移除
                             </button>
                           </div>
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-3">
+                          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-3">
                             <div>
                               <label className="block text-xs font-bold text-slate-500 mb-1">
                                 發票號碼
@@ -2105,6 +2330,29 @@ export default function PurchaseRequisitionPage() {
                             </div>
                             <div>
                               <label className="block text-xs font-bold text-slate-500 mb-1">
+                                發票金額
+                              </label>
+                              <input
+                                type="number"
+                                step="any"
+                                value={inv.total_amount ?? ""}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setFormData((prev) => {
+                                    const newInv = [...prev.invoices_payload];
+                                    newInv[invIdx].total_amount = val;
+                                    return {
+                                      ...prev,
+                                      invoices_payload: newInv,
+                                    };
+                                  });
+                                }}
+                                className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm font-mono font-bold"
+                                placeholder="輸入發票金額"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-bold text-slate-500 mb-1">
                                 發票日期
                               </label>
                               <input
@@ -2125,6 +2373,241 @@ export default function PurchaseRequisitionPage() {
                               />
                             </div>
                           </div>
+
+                          <div className="mb-4 bg-white border border-slate-200/90 rounded-2xl p-4 shadow-2xs">
+                            <div className="flex flex-wrap items-center justify-between gap-2 pb-3 mb-3 border-b border-slate-100">
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs font-extrabold text-slate-700 tracking-wide">
+                                  發票對應品項
+                                </span>
+                                <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-100">
+                                  已選{" "}
+                                  {
+                                    (inv.items || []).filter(
+                                      (it) => it._checked !== false,
+                                    ).length
+                                  }{" "}
+                                  / {(inv.items || []).length} 項
+                                </span>
+                              </div>
+
+                              {(inv.items || []).some(
+                                (it) => !it._readonly,
+                              ) && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setFormData((prev) => {
+                                      const newInv = [...prev.invoices_payload];
+                                      const currItems =
+                                        newInv[invIdx].items || [];
+                                      const editableItems = currItems.filter(
+                                        (it) => !it._readonly,
+                                      );
+                                      const allEditableChecked =
+                                        editableItems.every(
+                                          (it) => it._checked !== false,
+                                        );
+                                      const toggledItems = currItems.map(
+                                        (it) =>
+                                          it._readonly
+                                            ? it
+                                            : {
+                                                ...it,
+                                                _checked: !allEditableChecked,
+                                              },
+                                      );
+                                      const newTotal = toggledItems
+                                        .filter((it) => it._checked)
+                                        .reduce(
+                                          (sum, x) =>
+                                            sum +
+                                            (parseFloat(x.quantity) || 0) *
+                                              (parseFloat(x.unit_price) || 0),
+                                          0,
+                                        );
+                                      newInv[invIdx] = {
+                                        ...newInv[invIdx],
+                                        items: toggledItems,
+                                        total_amount: newTotal
+                                          ? String(newTotal)
+                                          : "0",
+                                      };
+                                      return {
+                                        ...prev,
+                                        invoices_payload: newInv,
+                                      };
+                                    });
+                                  }}
+                                  className="text-xs font-bold text-indigo-600 hover:text-indigo-800 px-2.5 py-1 rounded-lg hover:bg-indigo-50 transition-colors"
+                                >
+                                  {(inv.items || [])
+                                    .filter((it) => !it._readonly)
+                                    .every((it) => it._checked !== false)
+                                    ? "取消全選"
+                                    : "全部勾選"}
+                                </button>
+                              )}
+                            </div>
+
+                            {(inv.items || []).length > 0 ? (
+                              <div className="space-y-2">
+                                {(inv.items || []).map((fItem, fIdx) => {
+                                  const isReadonlyItem = Boolean(
+                                    fItem._readonly,
+                                  );
+                                  const isChecked = fItem._checked !== false;
+                                  const kgQty = parseFloat(fItem.quantity) || 0;
+                                  const unitPrice =
+                                    parseFloat(fItem.unit_price) || 0;
+                                  const itemSubtotal = kgQty * unitPrice;
+
+                                  return (
+                                    <label
+                                      key={fIdx}
+                                      className={`flex items-center justify-between gap-3 px-3.5 py-2.5 rounded-xl border transition-all select-none ${
+                                        isReadonlyItem
+                                          ? "bg-emerald-50/50 border-emerald-200/80 cursor-default"
+                                          : isChecked
+                                            ? "bg-indigo-50/40 border-indigo-200/80 shadow-2xs hover:bg-indigo-50/70 cursor-pointer"
+                                            : "bg-slate-50/60 border-slate-200/60 opacity-55 hover:opacity-80 cursor-pointer"
+                                      }`}
+                                    >
+                                      <div className="flex items-center gap-3 min-w-0">
+                                        <input
+                                          type="checkbox"
+                                          checked={isChecked}
+                                          disabled={isReadonlyItem}
+                                          readOnly={isReadonlyItem}
+                                          onChange={(e) => {
+                                            if (isReadonlyItem) return;
+                                            const checked = e.target.checked;
+                                            setFormData((prev) => {
+                                              const newInv = [
+                                                ...prev.invoices_payload,
+                                              ];
+                                              const updatedItems = (
+                                                newInv[invIdx].items || []
+                                              ).map((it, i) =>
+                                                i === fIdx
+                                                  ? {
+                                                      ...it,
+                                                      _checked: checked,
+                                                      subtotal:
+                                                        (parseFloat(
+                                                          it.quantity,
+                                                        ) || 0) *
+                                                        (parseFloat(
+                                                          it.unit_price,
+                                                        ) || 0),
+                                                    }
+                                                  : it,
+                                              );
+                                              const newTotal = updatedItems
+                                                .filter(
+                                                  (it) => it._checked !== false,
+                                                )
+                                                .reduce(
+                                                  (sum, x) =>
+                                                    sum +
+                                                    (parseFloat(x.quantity) ||
+                                                      0) *
+                                                      (parseFloat(
+                                                        x.unit_price,
+                                                      ) || 0),
+                                                  0,
+                                                );
+                                              newInv[invIdx] = {
+                                                ...newInv[invIdx],
+                                                items: updatedItems,
+                                                total_amount: newTotal
+                                                  ? String(newTotal)
+                                                  : "0",
+                                              };
+                                              return {
+                                                ...prev,
+                                                invoices_payload: newInv,
+                                              };
+                                            });
+                                          }}
+                                          className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer disabled:cursor-not-allowed shrink-0"
+                                        />
+                                        <span
+                                          className={`text-sm font-bold truncate ${
+                                            isReadonlyItem
+                                              ? "text-emerald-900"
+                                              : isChecked
+                                                ? "text-slate-800"
+                                                : "text-slate-400 line-through"
+                                          }`}
+                                        >
+                                          {fItem.item_name}
+                                        </span>
+                                        {isReadonlyItem && (
+                                          <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 border border-emerald-200 shrink-0">
+                                            已開立
+                                          </span>
+                                        )}
+                                      </div>
+
+                                      <div className="grid grid-cols-[auto_96px_76px] items-center gap-3 text-xs font-mono shrink-0">
+                                        <div className="flex items-center justify-end gap-1.5">
+                                          <span
+                                            className={`px-2.5 py-1 rounded-lg border whitespace-nowrap ${
+                                              isChecked
+                                                ? "bg-white text-slate-700 border-slate-200"
+                                                : "bg-slate-100 text-slate-400 border-slate-200/70"
+                                            }`}
+                                          >
+                                            {formatDisplayNum(kgQty)}{" "}
+                                            {fItem.unit || "KG"} × $
+                                            {formatDisplayNum(unitPrice)}
+                                          </span>
+                                        </div>
+
+                                        <span
+                                          className={`font-bold text-sm text-right tabular-nums truncate ${
+                                            isChecked
+                                              ? "text-indigo-700"
+                                              : "text-slate-400 line-through"
+                                          }`}
+                                        >
+                                          ${formatCurrency(itemSubtotal)}
+                                        </span>
+
+                                        <div className="flex justify-end">
+                                          {fItem.package_qty ? (
+                                            <span
+                                              className={`w-[72px] text-center px-2 py-1 rounded-lg border whitespace-nowrap ${
+                                                isChecked
+                                                  ? "bg-amber-50/90 text-amber-800 border-amber-200/90"
+                                                  : "bg-slate-100 text-slate-400 border-slate-200/70"
+                                              }`}
+                                            >
+                                              共{" "}
+                                              {formatDisplayNum(
+                                                fItem.package_qty,
+                                              )}{" "}
+                                              {fItem.aux_unit || "件"}
+                                            </span>
+                                          ) : (
+                                            <span className="w-[72px] text-center text-slate-300">
+                                              -
+                                            </span>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </label>
+                                  );
+                                })}
+                              </div>
+                            ) : (
+                              <div className="py-4 text-center text-xs font-medium text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                                無未開立發票之品項
+                              </div>
+                            )}
+                          </div>
+
                           <div>
                             <label className="block text-xs font-bold text-slate-500 mb-1">
                               發票細節 / 備註
@@ -2280,7 +2763,7 @@ export default function PurchaseRequisitionPage() {
                               <div className="lg:col-span-4 grid grid-cols-1 md:grid-cols-4 gap-5 bg-slate-50/70 p-5 rounded-3xl border border-slate-100">
                                 <div>
                                   <label className="block text-xs font-bold text-slate-500 mb-2 ml-1">
-                                    下單規格 (可修改)
+                                    下單規格
                                   </label>
                                   <input
                                     type="text"
@@ -2292,6 +2775,7 @@ export default function PurchaseRequisitionPage() {
                                         e.target.value,
                                       )
                                     }
+                                    placeholder="10KG/桶、1KG/袋"
                                     className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-[15px] font-bold outline-none"
                                   />
                                 </div>

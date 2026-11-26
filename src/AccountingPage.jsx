@@ -60,6 +60,19 @@ const extractArrayData = (json) => {
   return [];
 };
 
+const formatReturnItemsDisplay = (items) => {
+  if (!Array.isArray(items) || items.length === 0) return "-";
+  return items
+    .map((it) => {
+      if (typeof it === "string") return it;
+      const name = it.product_name || it.name || "";
+      const spec = it.spec ? `(${it.spec})` : "";
+      return `${name}${spec}`.trim();
+    })
+    .filter(Boolean)
+    .join("、");
+};
+
 const STATUS_BADGE_MAP = {
   UNPAID: {
     label: "未付款",
@@ -86,8 +99,11 @@ const CustomSelect = ({
   disabled = false,
   className = "",
   menuClassName = "",
+  searchable = false,
+  searchPlaceholder = "搜尋名稱或代號...",
 }) => {
   const [isOpen, setIsOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
   const selectRef = useRef(null);
 
   useEffect(() => {
@@ -104,10 +120,34 @@ const CustomSelect = ({
     (opt) => String(opt.value) === String(value),
   );
 
+  const filteredOptions = useMemo(() => {
+    if (!searchable || !searchTerm.trim()) return options;
+    const kw = searchTerm.trim().toLowerCase();
+    return options.filter((opt) => {
+      const labelMatch = String(opt.label || "")
+        .toLowerCase()
+        .includes(kw);
+      const nameMatch = String(opt.name || "")
+        .toLowerCase()
+        .includes(kw);
+      const codeMatch = String(opt.code || "")
+        .toLowerCase()
+        .includes(kw);
+      return labelMatch || nameMatch || codeMatch;
+    });
+  }, [options, searchable, searchTerm]);
+
   return (
     <div className={`relative ${className}`} ref={selectRef}>
       <div
-        onClick={() => !disabled && setIsOpen(!isOpen)}
+        onClick={() => {
+          if (disabled) return;
+          setIsOpen((prev) => {
+            const next = !prev;
+            if (!next) setSearchTerm("");
+            return next;
+          });
+        }}
         className={`w-full flex justify-between items-center px-4 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-bold transition-all shadow-sm ${
           disabled
             ? "bg-slate-100 text-slate-400 cursor-not-allowed"
@@ -126,24 +166,48 @@ const CustomSelect = ({
       </div>
       {isOpen && !disabled && (
         <div
-          className={`absolute z-[100] top-[calc(100%+6px)] left-0 w-full bg-white border border-slate-200 rounded-xl shadow-xl max-h-60 overflow-y-auto animate-in fade-in slide-in-from-top-2 duration-150 custom-scrollbar ${menuClassName}`}
+          className={`absolute z-[100] top-[calc(100%+6px)] left-0 min-w-full w-80 bg-white border border-slate-200 rounded-xl shadow-xl overflow-hidden animate-in fade-in slide-in-from-top-2 duration-150 ${menuClassName}`}
         >
-          {options.map((opt) => (
+          {searchable && (
             <div
-              key={opt.value}
-              onClick={() => {
-                onChange(opt.value);
-                setIsOpen(false);
-              }}
-              className={`px-4 py-2.5 text-sm font-bold cursor-pointer transition-colors ${
-                String(value) === String(opt.value)
-                  ? "bg-blue-50 text-blue-700"
-                  : "text-slate-700 hover:bg-slate-50"
-              }`}
+              className="p-2 border-b border-slate-100 bg-slate-50/80"
+              onClick={(e) => e.stopPropagation()}
             >
-              {opt.label}
+              <input
+                type="text"
+                autoFocus
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder={searchPlaceholder}
+                className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs font-bold text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/10"
+              />
             </div>
-          ))}
+          )}
+          <div className="max-h-60 overflow-y-auto custom-scrollbar">
+            {filteredOptions.length > 0 ? (
+              filteredOptions.map((opt) => (
+                <div
+                  key={opt.value}
+                  onClick={() => {
+                    onChange(opt.value);
+                    setIsOpen(false);
+                    setSearchTerm("");
+                  }}
+                  className={`px-4 py-2.5 text-sm font-bold cursor-pointer transition-colors ${
+                    String(value) === String(opt.value)
+                      ? "bg-blue-50 text-blue-700"
+                      : "text-slate-700 hover:bg-slate-50"
+                  }`}
+                >
+                  {opt.label}
+                </div>
+              ))
+            ) : (
+              <div className="px-4 py-3 text-xs font-bold text-slate-400 text-center">
+                查無符合的對象
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>
@@ -291,11 +355,11 @@ const SingleCustomerStatementPrintTemplate = ({
                   </td>
                 </tr>
 
-                {/* 🌟 若有退貨或折讓，獨立產生一行負數列說明 */}
+                {/* 🌟 若有退貨或折讓，獨立產生一行說明列 */}
                 {hasMovement && (
                   <tr className="border-b border-black h-7 bg-slate-50">
                     <td className="border border-black text-center font-mono text-red-600">
-                      {dn.note_date}
+                      {dn.return_date || dn.note_date}
                     </td>
                     <td className="border border-black text-center font-mono text-red-600">
                       {dn.note_number}-
@@ -307,12 +371,17 @@ const SingleCustomerStatementPrintTemplate = ({
                     >
                       ↳{" "}
                       {dn.return_type === "RETURN"
-                        ? "【退貨退款】"
+                        ? "【退貨異動】"
                         : "【銷貨折讓】"}
-                      退回數量: {formatMoney(dn.return_qty)} {dn.unit}
+                      {dn.return_items && dn.return_items.length > 0
+                        ? ` 品項: ${formatReturnItemsDisplay(dn.return_items)}`
+                        : ""}
+                      {dn.return_detail ? `｜細節: ${dn.return_detail}` : ""}
                     </td>
                     <td className="border border-black text-right font-mono px-2 font-bold text-red-600">
-                      -${formatMoney(dn.return_amount)}
+                      {parseFloat(dn.return_amount || 0) > 0
+                        ? `-$${formatMoney(dn.return_amount)}`
+                        : "-"}
                     </td>
                   </tr>
                 )}
@@ -527,18 +596,24 @@ export default function AccountingPage() {
 
   const [printCustomerData, setPrintCustomerData] = useState(null);
   const [isPrintAllSummary, setIsPrintAllSummary] = useState(false);
+  const [checkClearDates, setCheckClearDates] = useState({});
 
-  // 🌟 貨品異動專用 Modal State
-  const [goodsMovementModal, setGoodsMovementModal] = useState({
+  // 🌟 貨品異動專用 Modal State（品項選擇 + 退貨細節 + 異動日期）
+  const initialGoodsMovementModal = {
     isOpen: false,
     deliveryNoteId: null,
     noteNumber: "",
     productionOrderNumber: "",
     spec: "",
-    returnType: "RETURN", // 'RETURN' 或 'ALLOWANCE'
-    returnAmount: "",
-    returnQty: "",
-  });
+    availableItems: [],
+    selectedItemIds: [],
+    returnType: "RETURN",
+    returnDetail: "",
+    returnDate: new Date().toISOString().split("T")[0],
+  };
+  const [goodsMovementModal, setGoodsMovementModal] = useState(
+    initialGoodsMovementModal,
+  );
 
   // 🌟 獨立「貨品異動管理」Tab 的資料列表
   const [allDeliveryNotes, setAllDeliveryNotes] = useState([]);
@@ -568,13 +643,6 @@ export default function AccountingPage() {
   const [isMiscModalOpen, setIsMiscModalOpen] = useState(false);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [editingMisc, setEditingMisc] = useState(null);
-
-  const [clearCheckModal, setClearCheckModal] = useState({
-    isOpen: false,
-    recordId: null,
-    checkId: null,
-    clearedDate: new Date().toISOString().split("T")[0],
-  });
 
   const [expandedPaymentRows, setExpandedPaymentRows] = useState(new Set());
 
@@ -859,27 +927,82 @@ export default function AccountingPage() {
     arStatusFilter,
   ]);
 
-  // 🌟 處理貨品異動送出 (含金額與庫存量)
-  const handleSaveGoodsMovement = async (e) => {
-    e.preventDefault();
-    const { deliveryNoteId, returnType, returnAmount, returnQty } =
-      goodsMovementModal;
+  // 🌟 開啟銷貨單貨品異動 Modal，整理該銷貨單可選品項
+  const handleOpenGoodsMovementModal = (dn) => {
+    const productProfile = dn.production_order_detail?.product_profile;
+    const baseSpec = dn.spec || productProfile?.spec || "";
+    const availableItems = [
+      {
+        id: `dn_${dn.id}`,
+        product_id: productProfile?.id ?? null,
+        product_code: productProfile?.code || "",
+        product_name: productProfile?.name || "銷貨單主品項",
+        spec: baseSpec,
+        quantity: dn.quantity,
+        unit: dn.unit || productProfile?.unit || "KG",
+      },
+    ];
+
+    const savedItems = Array.isArray(dn.return_items) ? dn.return_items : [];
+    const preselectedIds =
+      savedItems.length > 0
+        ? availableItems
+            .filter((avail) =>
+              savedItems.some(
+                (s) =>
+                  String(s.id) === String(avail.id) ||
+                  (s.product_name && s.product_name === avail.product_name),
+              ),
+            )
+            .map((a) => a.id)
+        : availableItems.map((a) => a.id);
 
     setGoodsMovementModal({
-      isOpen: false,
-      deliveryNoteId: null,
-      noteNumber: "",
-      productionOrderNumber: "",
-      spec: "",
-      returnType: "RETURN",
-      returnAmount: "",
-      returnQty: "",
+      isOpen: true,
+      deliveryNoteId: dn.id,
+      noteNumber: dn.note_number,
+      productionOrderNumber: dn.production_order_detail?.order_number || "-",
+      spec: baseSpec,
+      availableItems,
+      selectedItemIds:
+        preselectedIds.length > 0
+          ? preselectedIds
+          : availableItems.map((a) => a.id),
+      returnType: dn.return_type || "RETURN",
+      returnDetail: dn.return_detail || "",
+      returnDate: dn.return_date || new Date().toISOString().split("T")[0],
     });
+  };
 
-    if (!deliveryNoteId || returnAmount === "" || returnQty === "") {
-      showAlert("提示", "請完整填寫應退金額與退回庫存量", "warning");
+  // 🌟 處理貨品異動送出（品項選擇 + 退貨細節 + 異動日期）
+  const handleSaveGoodsMovement = async (e) => {
+    e.preventDefault();
+    const {
+      deliveryNoteId,
+      availableItems,
+      selectedItemIds,
+      returnType,
+      returnDetail,
+      returnDate,
+    } = goodsMovementModal;
+
+    if (!deliveryNoteId) return;
+
+    if (selectedItemIds.length === 0) {
+      showAlert("提示", "請至少勾選一項退貨品項", "warning");
       return;
     }
+
+    if (!returnDetail.trim()) {
+      showAlert("提示", "請填寫退貨細節（例如：3包污染、2袋破損）", "warning");
+      return;
+    }
+
+    const chosenItems = availableItems.filter((it) =>
+      selectedItemIds.includes(it.id),
+    );
+
+    setGoodsMovementModal(initialGoodsMovementModal);
 
     try {
       const res = await fetchWithAuth(
@@ -889,19 +1012,19 @@ export default function AccountingPage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             return_type: returnType,
-            return_amount: returnAmount,
-            return_qty: returnQty,
+            return_items: chosenItems,
+            return_detail: returnDetail.trim(),
+            return_date: returnDate || new Date().toISOString().split("T")[0],
           }),
         },
       );
       if (!res.ok) {
-        const errJson = await res.json();
+        const errJson = await res.json().catch(() => ({}));
         throw new Error(
           errJson.data?.error || errJson.error || "貨品異動更新失敗",
         );
       }
-      showAlert("成功", "貨品異動已成功更新，庫存與金額已同步調整", "success");
-
+      showAlert("成功", "貨品異動紀錄已成功更新", "success");
       fetchReports();
     } catch (err) {
       showAlert("錯誤", err.message, "error");
@@ -1124,9 +1247,10 @@ export default function AccountingPage() {
     }
   };
 
-  const handleExecuteClearCheck = async () => {
-    const { recordId, checkId, clearedDate } = clearCheckModal;
+  const handleClearCheckDirect = async (recordId, checkId, clearedDate) => {
     if (!recordId) return;
+    const effectiveClearedDate =
+      clearedDate || new Date().toISOString().split("T")[0];
 
     try {
       const res = await fetchWithAuth(
@@ -1136,19 +1260,13 @@ export default function AccountingPage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             check_id: checkId,
-            cleared_date: clearedDate,
+            cleared_date: effectiveClearedDate,
           }),
         },
       );
       if (!res.ok) throw new Error("兌現處理失敗");
 
       showAlert("成功", "支票已成功標記為兌現", "success");
-      setClearCheckModal({
-        isOpen: false,
-        recordId: null,
-        checkId: null,
-        clearedDate: "",
-      });
       fetchPayments();
     } catch (err) {
       showAlert("錯誤", err.message, "error");
@@ -1177,6 +1295,7 @@ export default function AccountingPage() {
 
   const TabButton = ({ label, icon: Icon, isActive, onClick }) => (
     <button
+      type="button"
       onClick={onClick}
       className={`px-6 py-3 rounded-2xl text-sm font-bold flex items-center gap-2.5 transition-all ${
         isActive
@@ -1191,6 +1310,7 @@ export default function AccountingPage() {
 
   const SubTabButton = ({ label, isActive, onClick }) => (
     <button
+      type="button"
       onClick={onClick}
       className={`px-5 py-2.5 rounded-xl text-sm font-bold transition-all whitespace-nowrap shrink-0 ${
         isActive
@@ -1269,18 +1389,22 @@ export default function AccountingPage() {
           <div className="flex flex-wrap items-center gap-3">
             {reportSubTab === "AR" && (
               <>
-                <div className="w-52 shrink-0">
+                <div className="w-72 shrink-0">
                   <CustomSelect
+                    searchable
+                    searchPlaceholder="搜尋客戶名稱或代號"
                     options={[
-                      { label: "所有客戶", value: "" },
+                      { label: "所有客戶", value: "", name: "", code: "" },
                       ...customers.map((c) => ({
                         label: `[${c.code}] ${c.name}`,
                         value: c.code,
+                        name: c.name,
+                        code: c.code,
                       })),
                     ]}
                     value={arCustomerCode}
                     onChange={(val) => setArCustomerCode(val)}
-                    placeholder="篩選單一客戶..."
+                    placeholder="篩選客戶"
                   />
                 </div>
                 <div className="w-40 shrink-0">
@@ -1337,13 +1461,13 @@ export default function AccountingPage() {
               <thead>
                 <tr className="bg-slate-100/70 border-b border-slate-200 text-[11px] uppercase tracking-widest text-slate-500 font-black">
                   <th className="py-4 px-5">銷貨單號</th>
-                  {/* <th className="py-4 px-5">日期</th> */}
                   <th className="py-4 px-5">客戶名稱</th>
                   <th className="py-4 px-5">產品與規格</th>
                   <th className="py-4 px-5 text-right">出貨數量</th>
                   <th className="py-4 px-5 text-center">異動類型</th>
-                  <th className="py-4 px-5 text-right">應退金額</th>
-                  <th className="py-4 px-5 text-right">退回庫存量</th>
+                  <th className="py-4 px-5">異動品項</th>
+                  <th className="py-4 px-5">退貨細節</th>
+                  <th className="py-4 px-5 text-center">異動日期</th>
                   <th className="py-4 px-5 text-center">操作</th>
                 </tr>
               </thead>
@@ -1377,9 +1501,6 @@ export default function AccountingPage() {
                         <td className="py-4 px-5 font-mono font-bold text-slate-900">
                           {dn.note_number}
                         </td>
-                        {/* <td className="py-4 px-5 font-mono text-slate-600 text-xs font-semibold">
-                          {dn.note_date}
-                        </td> */}
                         <td className="py-4 px-5 font-bold text-slate-800">
                           {custName}
                         </td>
@@ -1415,38 +1536,23 @@ export default function AccountingPage() {
                             </span>
                           )}
                         </td>
-                        <td className="py-4 px-5 text-right font-mono font-bold text-slate-900">
-                          {dn.return_amount
-                            ? `$${formatMoney(dn.return_amount)}`
-                            : "$0"}
+                        <td className="py-4 px-5 font-bold text-slate-800">
+                          {formatReturnItemsDisplay(dn.return_items)}
                         </td>
-                        <td className="py-4 px-5 text-right font-mono font-bold text-slate-900">
-                          {dn.return_qty
-                            ? `${formatMoney(dn.return_qty)} ${dn.unit || ""}`
-                            : "0"}
+                        <td
+                          className="py-4 px-5 text-slate-700 font-medium max-w-[220px] truncate"
+                          title={dn.return_detail || ""}
+                        >
+                          {dn.return_detail || "-"}
+                        </td>
+                        <td className="py-4 px-5 text-center font-mono text-xs font-bold text-slate-600">
+                          {dn.return_date || "-"}
                         </td>
                         <td className="py-4 px-5 text-center">
                           <button
                             type="button"
-                            onClick={() =>
-                              setGoodsMovementModal({
-                                isOpen: true,
-                                deliveryNoteId: dn.id,
-                                noteNumber: dn.note_number,
-                                productionOrderNumber:
-                                  dn.production_order_detail?.order_number ||
-                                  "-",
-                                spec:
-                                  dn.spec ||
-                                  dn.production_order_detail?.product_profile
-                                    ?.spec ||
-                                  "",
-                                returnType: dn.return_type || "RETURN",
-                                returnAmount: dn.return_amount || "",
-                                returnQty: dn.return_qty || "",
-                              })
-                            }
-                            className="px-2 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-sm hover:shadow transition-all inline-flex items-center gap-1.5"
+                            onClick={() => handleOpenGoodsMovementModal(dn)}
+                            className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-sm hover:shadow transition-all inline-flex items-center gap-1.5"
                           >
                             異動
                           </button>
@@ -1742,23 +1848,20 @@ export default function AccountingPage() {
                                               </span>
                                             )}
                                             {dn.return_type && (
-                                              <div className="w-full flex flex-row justify-left items-center">
-                                                <span className="flex w-[40%] px-2 py-0.5 bg-amber-50 text-amber-700 border border-amber-200 rounded text-[10px] font-bold">
+                                              <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                                                <span className="px-2 py-0.5 bg-amber-50 text-amber-700 border border-amber-200 rounded text-[10px] font-bold">
                                                   {dn.return_type === "RETURN"
                                                     ? "[退貨]"
                                                     : "[折讓]"}
-                                                  {" $"}
-                                                  {formatMoney(
-                                                    dn.return_amount,
-                                                  )}
+                                                  {dn.return_detail
+                                                    ? ` ${dn.return_detail}`
+                                                    : ""}
                                                 </span>
-                                                <span className="flex w-[40%] ml-1 px-2 py-0.5 bg-green-50 text-green-700 border border-green-200 rounded text-[10px] font-bold">
-                                                  {" 退貨 "}
-                                                  {formatMoney(
-                                                    dn.return_qty,
-                                                  )}{" "}
-                                                  {dn.unit}
-                                                </span>
+                                                {dn.return_date && (
+                                                  <span className="px-2 py-0.5 bg-slate-100 text-slate-600 border border-slate-200 rounded text-[10px] font-mono font-bold">
+                                                    異動日: {dn.return_date}
+                                                  </span>
+                                                )}
                                               </div>
                                             )}
                                           </td>
@@ -1808,6 +1911,7 @@ export default function AccountingPage() {
         <div className="flex flex-col md:flex-row justify-between items-center gap-4">
           <DateFilter />
           <button
+            type="button"
             onClick={() => {
               setEditingMisc(null);
               setMiscForm(initialMiscForm);
@@ -1897,6 +2001,7 @@ export default function AccountingPage() {
                     <td className="p-4 text-center">
                       <div className="flex w-full justify-center gap-2 opacity-60 group-hover:opacity-100 transition-opacity">
                         <button
+                          type="button"
                           onClick={() => {
                             setEditingMisc(row);
                             setMiscForm({ ...row });
@@ -1907,6 +2012,7 @@ export default function AccountingPage() {
                           <Edit2 size={16} />
                         </button>
                         <button
+                          type="button"
                           onClick={() => handleDeleteMisc(row.id)}
                           className="p-1.5 text-rose-600 hover:bg-red-50 rounded-lg transition-colors"
                         >
@@ -1926,7 +2032,6 @@ export default function AccountingPage() {
 
   const renderPayments = () => {
     const tableData = paymentSubTab === "ALL" ? payments : pendingChecks;
-    console.log(payments);
     return (
       <div className="space-y-6">
         <div className="flex flex-col md:flex-row justify-between items-center gap-4">
@@ -1943,6 +2048,7 @@ export default function AccountingPage() {
             />
           </div>
           <button
+            type="button"
             onClick={() => {
               resetPaymentModal();
               setIsPaymentModalOpen(true);
@@ -1988,6 +2094,7 @@ export default function AccountingPage() {
                   const checks = row.checks || [];
                   const writeOffs = row.write_offs || [];
                   const hasUnclearedChecks = checks.some((c) => !c.is_cleared);
+                  const firstUnclearedCheck = checks.find((c) => !c.is_cleared);
                   const isExpandable =
                     row.method_details?.length > 0 ||
                     checks.length > 0 ||
@@ -2035,11 +2142,13 @@ export default function AccountingPage() {
                           >
                             {row.partner_type === "CUSTOMER" ? "收" : "付"}
                           </span>
-                          <span className="text-[10px] px-1.5 py-0.5 rounded border mr-2 font-black text-xs font-bold text-slate-600 px-3 py-1 bg-slate-100 rounded-xl border border-slate-200">
-                            {writeOffs.find(
-                              (w) => w.delivery_note_return_type !== null,
-                            ) && <>異常</>}
-                          </span>
+                          {writeOffs.find(
+                            (w) => w.delivery_note_return_type !== null,
+                          ) && (
+                            <span className="text-[10px] px-2 py-0.5 rounded-lg border mr-2 font-black text-amber-700 bg-amber-50 border-amber-200">
+                              異常
+                            </span>
+                          )}
                           {row.partner_type === "CUSTOMER"
                             ? row.customer_name
                             : row.provider_name}
@@ -2066,20 +2175,17 @@ export default function AccountingPage() {
                         </td>
                         <td className="p-4 text-center">
                           <div className="flex w-full justify-center gap-2">
-                            {hasUnclearedChecks && (
+                            {hasUnclearedChecks && firstUnclearedCheck && (
                               <button
+                                type="button"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  setClearCheckModal({
-                                    isOpen: true,
-                                    recordId: row.id,
-                                    checkId:
-                                      checks.find((c) => !c.is_cleared)?.id ||
-                                      null,
-                                    clearedDate: new Date()
-                                      .toISOString()
-                                      .split("T")[0],
-                                  });
+                                  handleClearCheckDirect(
+                                    row.id,
+                                    firstUnclearedCheck.id,
+                                    checkClearDates[firstUnclearedCheck.id] ||
+                                      new Date().toISOString().split("T")[0],
+                                  );
                                 }}
                                 className="px-3 py-1.5 bg-emerald-50 text-emerald-600 border border-emerald-200 hover:bg-emerald-500 hover:text-white rounded-lg transition-all text-xs font-bold shadow-sm whitespace-nowrap"
                               >
@@ -2087,6 +2193,7 @@ export default function AccountingPage() {
                               </button>
                             )}
                             <button
+                              type="button"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 handleDeletePayment(row.id);
@@ -2153,44 +2260,19 @@ export default function AccountingPage() {
                                             ${formatMoney(chk.amount)}
                                           </span>
                                         </div>
-                                        <div className="grid grid-cols-2 gap-1 text-slate-600 font-bold pt-1">
+                                        <div className="grid grid-cols-2 gap-1.5 text-slate-600 font-bold pt-1 items-center">
                                           <div>
                                             銀行: {chk.issuer_bank || "-"}
                                           </div>
-                                          <div>到期日: {chk.due_date}</div>
-                                          <div className="col-span-2">
+                                          <div>
                                             收票日: {chk.received_date || "-"}
                                           </div>
-                                        </div>
-                                        <div className="flex justify-between items-center pt-2 border-t border-amber-200/50">
-                                          <span
-                                            className={`px-2.5 py-1 rounded-md text-[11px] font-black ${
-                                              chk.is_cleared
-                                                ? "bg-emerald-100 text-emerald-700"
-                                                : "bg-rose-100 text-rose-700"
-                                            }`}
-                                          >
+                                          <div>到期日: {chk.due_date}</div>
+                                          <div>
                                             {chk.is_cleared
-                                              ? `已兌現 (${chk.cleared_date || ""})`
-                                              : "待兌現"}
-                                          </span>
-                                          {!chk.is_cleared && (
-                                            <button
-                                              onClick={() =>
-                                                setClearCheckModal({
-                                                  isOpen: true,
-                                                  recordId: row.id,
-                                                  checkId: chk.id,
-                                                  clearedDate: new Date()
-                                                    .toISOString()
-                                                    .split("T")[0],
-                                                })
-                                              }
-                                              className="text-xs font-bold text-emerald-600 hover:text-emerald-700 underline"
-                                            >
-                                              確認兌現
-                                            </button>
-                                          )}
+                                              ? `兌現日：${chk.cleared_date || "-"}`
+                                              : "待兌現：-"}
+                                          </div>
                                         </div>
                                       </div>
                                     ))
@@ -2299,24 +2381,14 @@ export default function AccountingPage() {
       {/* 🌟 貨品異動 (退貨/折讓) Modal */}
       {goodsMovementModal.isOpen && (
         <div className="fixed inset-0 z-[80] bg-slate-900/50 backdrop-blur-sm flex justify-center items-center p-4">
-          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200">
             <div className="p-6 pb-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
               <h3 className="text-lg font-black text-slate-800 flex items-center gap-2">
                 <RefreshCw className="text-blue-600" size={18} /> 銷貨單貨品異動
               </h3>
               <button
-                onClick={() =>
-                  setGoodsMovementModal({
-                    isOpen: false,
-                    deliveryNoteId: null,
-                    noteNumber: "",
-                    productionOrderNumber: "",
-                    spec: "",
-                    returnType: "RETURN",
-                    returnAmount: "",
-                    returnQty: "",
-                  })
-                }
+                type="button"
+                onClick={() => setGoodsMovementModal(initialGoodsMovementModal)}
                 className="text-slate-400 hover:text-slate-600 text-2xl"
               >
                 ×
@@ -2324,7 +2396,15 @@ export default function AccountingPage() {
             </div>
 
             <form onSubmit={handleSaveGoodsMovement} className="p-6 space-y-5">
-              <div className="grid grid-cols-2 gap-4 bg-slate-50 p-3.5 rounded-2xl border border-slate-100">
+              <div className="grid grid-cols-3 gap-3 bg-slate-50 p-3.5 rounded-2xl border border-slate-100">
+                <div>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase">
+                    銷貨單號
+                  </span>
+                  <div className="text-sm font-mono font-black text-slate-800">
+                    {goodsMovementModal.noteNumber || "-"}
+                  </div>
+                </div>
                 <div>
                   <span className="text-[10px] font-bold text-slate-400 uppercase">
                     生產單號
@@ -2343,107 +2423,144 @@ export default function AccountingPage() {
                 </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-500 mb-2 uppercase">
-                  異動類型 *
-                </label>
-                <div className="flex gap-4">
-                  <label className="flex items-center gap-2 cursor-pointer font-bold text-sm">
-                    <input
-                      type="radio"
-                      name="returnType"
-                      value="RETURN"
-                      checked={goodsMovementModal.returnType === "RETURN"}
-                      onChange={(e) =>
-                        setGoodsMovementModal({
-                          ...goodsMovementModal,
-                          returnType: e.target.value,
-                        })
-                      }
-                      className="w-4 h-4 text-blue-600 focus:ring-blue-500"
-                    />
-                    退貨
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer font-bold text-sm">
-                    <input
-                      type="radio"
-                      name="returnType"
-                      value="ALLOWANCE"
-                      checked={goodsMovementModal.returnType === "ALLOWANCE"}
-                      onChange={(e) =>
-                        setGoodsMovementModal({
-                          ...goodsMovementModal,
-                          returnType: e.target.value,
-                        })
-                      }
-                      className="w-4 h-4 text-blue-600 focus:ring-blue-500"
-                    />
-                    折讓
-                  </label>
-                </div>
-              </div>
-
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase">
-                    應退金額 *
+                  <label className="block text-xs font-bold text-slate-500 mb-2 uppercase">
+                    異動類型 *
                   </label>
-                  <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold">
-                      $
-                    </span>
-                    <input
-                      type="number"
-                      step="any"
-                      required
-                      min="0"
-                      value={goodsMovementModal.returnAmount}
-                      onChange={(e) =>
-                        setGoodsMovementModal({
-                          ...goodsMovementModal,
-                          returnAmount: e.target.value,
-                        })
-                      }
-                      placeholder="0"
-                      className="w-full pl-7 pr-3 py-2.5 border border-slate-300 rounded-xl text-base font-mono font-black text-slate-800 outline-none focus:border-blue-500"
-                    />
+                  <div className="flex gap-4 pt-1">
+                    <label className="flex items-center gap-2 cursor-pointer font-bold text-sm">
+                      <input
+                        type="radio"
+                        name="returnType"
+                        value="RETURN"
+                        checked={goodsMovementModal.returnType === "RETURN"}
+                        onChange={(e) =>
+                          setGoodsMovementModal({
+                            ...goodsMovementModal,
+                            returnType: e.target.value,
+                          })
+                        }
+                        className="w-4 h-4 text-blue-600 focus:ring-blue-500"
+                      />
+                      退貨
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer font-bold text-sm">
+                      <input
+                        type="radio"
+                        name="returnType"
+                        value="ALLOWANCE"
+                        checked={goodsMovementModal.returnType === "ALLOWANCE"}
+                        onChange={(e) =>
+                          setGoodsMovementModal({
+                            ...goodsMovementModal,
+                            returnType: e.target.value,
+                          })
+                        }
+                        className="w-4 h-4 text-blue-600 focus:ring-blue-500"
+                      />
+                      折讓
+                    </label>
                   </div>
                 </div>
+
                 <div>
                   <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase">
-                    退回庫存量 *
+                    異動日期 *
                   </label>
                   <input
-                    type="number"
-                    step="any"
+                    type="date"
                     required
-                    min="0"
-                    value={goodsMovementModal.returnQty}
+                    value={goodsMovementModal.returnDate}
                     onChange={(e) =>
                       setGoodsMovementModal({
                         ...goodsMovementModal,
-                        returnQty: e.target.value,
+                        returnDate: e.target.value,
                       })
                     }
-                    placeholder="0"
-                    className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-base font-mono font-black text-slate-800 outline-none focus:border-blue-500"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm font-bold text-slate-800 outline-none focus:border-blue-500"
                   />
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-2 uppercase">
+                  品項選擇（勾選被退貨品項） *
+                </label>
+                <div className="space-y-2 max-h-40 overflow-y-auto custom-scrollbar">
+                  {goodsMovementModal.availableItems.map((item) => {
+                    const isChecked =
+                      goodsMovementModal.selectedItemIds.includes(item.id);
+                    return (
+                      <label
+                        key={item.id}
+                        className={`flex items-center justify-between gap-3 px-3.5 py-2.5 rounded-xl border cursor-pointer transition-all select-none ${
+                          isChecked
+                            ? "bg-blue-50/70 border-blue-300 text-slate-900"
+                            : "bg-slate-50 border-slate-200 text-slate-500"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={(e) => {
+                              const checked = e.target.checked;
+                              setGoodsMovementModal((prev) => ({
+                                ...prev,
+                                selectedItemIds: checked
+                                  ? [...prev.selectedItemIds, item.id]
+                                  : prev.selectedItemIds.filter(
+                                      (id) => id !== item.id,
+                                    ),
+                              }));
+                            }}
+                            className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 shrink-0"
+                          />
+                          <div className="truncate">
+                            <span className="text-sm font-bold">
+                              {item.product_name}
+                            </span>
+                            {item.spec && (
+                              <span className="ml-1.5 text-xs text-slate-400">
+                                ({item.spec})
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <span className="text-xs font-mono font-bold text-slate-600 shrink-0">
+                          原出貨: {formatMoney(item.quantity)} {item.unit}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase">
+                  退貨細節（破損／污染包數與狀況紀錄） *
+                </label>
+                <textarea
+                  rows={3}
+                  required
+                  value={goodsMovementModal.returnDetail}
+                  onChange={(e) =>
+                    setGoodsMovementModal({
+                      ...goodsMovementModal,
+                      returnDetail: e.target.value,
+                    })
+                  }
+                  placeholder="例如：3包污染、2袋破損..."
+                  className="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl text-sm font-bold text-slate-800 outline-none focus:border-blue-500 resize-none"
+                />
               </div>
 
               <div className="pt-2 flex justify-end gap-3 border-t border-slate-100">
                 <button
                   type="button"
                   onClick={() =>
-                    setGoodsMovementModal({
-                      isOpen: false,
-                      deliveryNoteId: null,
-                      noteNumber: "",
-                      spec: "",
-                      returnType: "RETURN",
-                      returnAmount: "",
-                      returnQty: "",
-                    })
+                    setGoodsMovementModal(initialGoodsMovementModal)
                   }
                   className="px-5 py-2.5 text-slate-600 bg-slate-100 hover:bg-slate-200 text-sm font-bold rounded-xl transition-colors"
                 >
@@ -2478,61 +2595,6 @@ export default function AccountingPage() {
         />
       )}
 
-      {clearCheckModal.isOpen && (
-        <div className="fixed inset-0 z-[70] bg-slate-900/50 backdrop-blur-sm flex justify-center items-center p-4">
-          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden animate-in zoom-in-95 duration-200">
-            <div className="p-6 pb-4">
-              <h3 className="text-lg font-black text-emerald-700 flex items-center gap-2 mb-2">
-                <CheckCircle2 size={20} /> 確認支票兌現
-              </h3>
-              <p className="text-xs text-slate-500 font-bold mb-4">
-                請輸入或確認該支票實際在銀行的兌現日期：
-              </p>
-              <div>
-                <label className="block text-[11px] font-bold text-slate-500 mb-1.5 uppercase">
-                  實際兌現日 *
-                </label>
-                <input
-                  type="date"
-                  required
-                  value={clearCheckModal.clearedDate}
-                  onChange={(e) =>
-                    setClearCheckModal({
-                      ...clearCheckModal,
-                      clearedDate: e.target.value,
-                    })
-                  }
-                  className="w-full px-4 py-2.5 border border-slate-300 rounded-xl text-sm font-bold text-slate-800 outline-none focus:border-emerald-500"
-                />
-              </div>
-            </div>
-            <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex justify-end gap-3">
-              <button
-                type="button"
-                onClick={() =>
-                  setClearCheckModal({
-                    isOpen: false,
-                    recordId: null,
-                    checkId: null,
-                    clearedDate: "",
-                  })
-                }
-                className="px-4 py-2 text-slate-600 hover:bg-slate-200 bg-slate-100 text-sm font-bold rounded-xl transition-colors"
-              >
-                取消
-              </button>
-              <button
-                type="button"
-                onClick={handleExecuteClearCheck}
-                className="px-5 py-2 text-white bg-emerald-600 hover:bg-emerald-700 text-sm font-bold rounded-xl shadow-sm transition-colors"
-              >
-                確認入帳
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {isMiscModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm overflow-y-auto flex justify-center items-start p-4 pt-12 pb-20">
           <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden">
@@ -2542,6 +2604,7 @@ export default function AccountingPage() {
                 {editingMisc ? "編輯雜支紀錄" : "紀錄新收支"}
               </h3>
               <button
+                type="button"
                 onClick={() => setIsMiscModalOpen(false)}
                 className="text-slate-400 hover:text-rose-500 text-2xl transition-colors"
               >
@@ -2680,6 +2743,7 @@ export default function AccountingPage() {
                 <Wallet className="text-blue-600" /> 建立金流沖銷紀錄
               </h3>
               <button
+                type="button"
                 onClick={() => setIsPaymentModalOpen(false)}
                 className="text-slate-400 hover:text-rose-500 text-2xl transition-colors"
               >
@@ -2688,8 +2752,8 @@ export default function AccountingPage() {
             </div>
 
             <form onSubmit={handleSavePayment} className="p-6 space-y-6">
-              <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200 grid grid-cols-1 md:grid-cols-4 gap-4">
-                <div>
+              <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200 grid grid-cols-1 md:grid-cols-12 gap-4">
+                <div className="md:col-span-2">
                   <label className="block text-[11px] font-bold text-slate-500 mb-1.5 uppercase">
                     交易日期 *
                   </label>
@@ -2706,7 +2770,7 @@ export default function AccountingPage() {
                     className="w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-bold text-slate-700 outline-none focus:border-blue-500"
                   />
                 </div>
-                <div>
+                <div className="md:col-span-3">
                   <label className="block text-[11px] font-bold text-slate-500 mb-1.5 uppercase">
                     收付方向 *
                   </label>
@@ -2726,15 +2790,19 @@ export default function AccountingPage() {
                     }
                   />
                 </div>
-                <div>
+                <div className="md:col-span-5">
                   <label className="block text-[11px] font-bold text-slate-500 mb-1.5 uppercase">
                     指定對象 *
                   </label>
                   {paymentGlobal.partner_type === "CUSTOMER" ? (
                     <CustomSelect
+                      searchable
+                      searchPlaceholder="搜尋客戶名稱或代號..."
                       options={customers.map((c) => ({
                         label: `[${c.code}] ${c.name}`,
                         value: c.id,
+                        name: c.name,
+                        code: c.code,
                       }))}
                       value={paymentGlobal.customer_id}
                       onChange={(v) =>
@@ -2744,9 +2812,13 @@ export default function AccountingPage() {
                     />
                   ) : (
                     <CustomSelect
+                      searchable
+                      searchPlaceholder="搜尋廠商名稱或代號..."
                       options={providers.map((p) => ({
                         label: `[${p.code}] ${p.name}`,
                         value: p.id,
+                        name: p.name,
+                        code: p.code,
                       }))}
                       value={paymentGlobal.provider_id}
                       onChange={(v) =>
@@ -2756,9 +2828,9 @@ export default function AccountingPage() {
                     />
                   )}
                 </div>
-                <div>
+                <div className="md:col-span-2">
                   <label className="block text-[11px] font-bold text-slate-500 mb-1.5 uppercase">
-                    金流備註 (選填)
+                    金流備註
                   </label>
                   <input
                     type="text"
@@ -2769,7 +2841,7 @@ export default function AccountingPage() {
                         reference_notes: e.target.value,
                       })
                     }
-                    placeholder="自訂備註說明..."
+                    placeholder="自訂備註..."
                     className="w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-bold text-slate-700 outline-none focus:border-blue-500"
                   />
                 </div>
@@ -2899,6 +2971,22 @@ export default function AccountingPage() {
                         </div>
                         <div>
                           <label className="block text-[10px] font-bold text-slate-500 mb-1">
+                            兌現日
+                          </label>
+                          <input
+                            type="date"
+                            value={checkData.cleared_date}
+                            onChange={(e) =>
+                              setCheckData({
+                                ...checkData,
+                                cleared_date: e.target.value,
+                              })
+                            }
+                            className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs font-bold outline-none focus:border-amber-500"
+                          />
+                        </div>
+                        <div className="col-span-2">
+                          <label className="block text-[10px] font-bold text-slate-500 mb-1">
                             開票銀行 *
                           </label>
                           <input
@@ -2967,7 +3055,7 @@ export default function AccountingPage() {
                   </div>
                 ) : unpaidNotesList.length === 0 ? (
                   <div className="p-8 text-center text-slate-400 font-bold text-sm">
-                    該對象目前無任何未結清單據
+                    無單據資料
                   </div>
                 ) : (
                   <div className="max-h-64 overflow-y-auto custom-scrollbar space-y-2 pr-1">
